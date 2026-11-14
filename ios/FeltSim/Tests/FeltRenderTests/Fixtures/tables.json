@@ -1,0 +1,164 @@
+[
+ {
+  "file": "table-8-up.png",
+  "game": "8",
+  "table": "7",
+  "shape": null,
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 327.45591939546597,
+   "portrait": true,
+   "ox": 32.7455919395466,
+   "oy": 55.65491183879094,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "green",
+   "cue": "house",
+   "chalk": "blue",
+   "rail": "walnut",
+   "balls": "classic",
+   "ring": null
+  },
+  "room": "hall"
+ },
+ {
+  "file": "table-8-side.png",
+  "game": "8",
+  "table": "7",
+  "shape": null,
+  "w": 1520,
+  "h": 780,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 327.45591939546597,
+   "portrait": false,
+   "ox": 55.65491183879094,
+   "oy": 32.7455919395466,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "green",
+   "cue": "house",
+   "chalk": "blue",
+   "rail": "walnut",
+   "balls": "classic",
+   "ring": null
+  },
+  "room": "hall"
+ },
+ {
+  "file": "table-9-up.png",
+  "game": "9",
+  "table": "9",
+  "shape": null,
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 265.3061224489796,
+   "portrait": true,
+   "ox": 26.53061224489796,
+   "oy": 43.06122448979591,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "tourney",
+   "cue": "ebony",
+   "chalk": "blue",
+   "rail": "lacquer",
+   "balls": "tv",
+   "ring": null
+  },
+  "room": "arena"
+ },
+ {
+  "file": "table-heyball-up.png",
+  "game": "heyball",
+  "table": "heyball",
+  "shape": null,
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 267.1232876712329,
+   "portrait": true,
+   "ox": 26.712328767123292,
+   "oy": 40.75342465753417,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "joy",
+   "cue": "rosewood",
+   "chalk": "blue",
+   "rail": "arena",
+   "balls": "pinkblue",
+   "ring": null
+  },
+  "room": "joy"
+ },
+ {
+  "file": "table-snooker-up.png",
+  "game": "snooker",
+  "table": "snooker",
+  "shape": "compact",
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 231.9127849355798,
+   "portrait": true,
+   "ox": 23.19127849355798,
+   "oy": 35.126362735381555,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "baize",
+   "cue": "ash",
+   "chalk": "green",
+   "rail": "baulk",
+   "balls": "classic",
+   "ring": null
+  },
+  "room": "crucible"
+ },
+ {
+  "file": "table-carom-up.png",
+  "game": "carom",
+  "table": "carom",
+  "shape": null,
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 240.74074074074076,
+   "portrait": true,
+   "ox": 24.074074074074076,
+   "oy": 38.148148148148096,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "blue",
+   "cue": "hall",
+   "chalk": "blue",
+   "rail": "carom",
+   "balls": "classic",
+   "ring": null
+  },
+  "room": "carom"
+ }
+]

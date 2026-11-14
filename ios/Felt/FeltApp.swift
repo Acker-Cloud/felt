@@ -46,6 +46,7 @@ struct TableScreen: View {
   @Environment(\.dismiss) private var dismiss
   @State private var aimDrag: Double?
   @State private var placing = false
+  @Environment(\.displayScale) private var scale
 
   var body: some View {
     GeometryReader { geo in
@@ -57,6 +58,8 @@ struct TableScreen: View {
             TableCanvas(model: model, look: Look.of(model.game))
               .onChange(of: tl.date) { _, d in model.tick(d.timeIntervalSinceReferenceDate) }
           }
+          .onAppear { model.bake(tg.size, scale: scale) }
+          .onChange(of: tg.size) { _, s in model.bake(s, scale: scale) }
           .contentShape(Rectangle())
           .gesture(DragGesture(minimumDistance: 0).onChanged { v in touch(v, tg.size, began: v.translation == .zero) }
             .onEnded { _ in placing = false })

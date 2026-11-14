@@ -25,6 +25,9 @@ targets:
         buildPhase: resources
     dependencies:
       - package: FeltSim
+        product: FeltSim
+      - package: FeltSim
+        product: FeltRender
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: cloud.acker.felt

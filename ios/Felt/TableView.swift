@@ -2,6 +2,7 @@
    4): wood, cloth with the lamp's pool, the pocket holes, the cushion rubbers from the sim's own
    CUSHION_POLYS, the sights, the balls with their shadows, and the guide. Upright on a phone held
    upright (the head string at the foot of the screen), lengthwise on its side. */
+import FeltRender
 import FeltSim
 import SwiftUI
 
@@ -33,25 +34,27 @@ func ballColor(_ n: Int) -> (Int, Int, Int) {
   return pool[n > 8 ? n - 8 : n]
 }
 
-/* table metres to screen points, upright or lengthwise */
+/* table metres to screen points: the page's view (toScreen/toTable, 3), fitted as layout() fits the
+   bed and its rails (RAIL from railFor), centred. Upright on a phone held upright, the head string at
+   the foot of the screen. */
 struct Mapper {
-  let k: Double, ox: Double, oy: Double, upright: Bool, TL: Double, TW: Double
-  static let margin = 0.13   /* the wood round the bed, metres from the nose line */
+  let k: Double, ox: Double, oy: Double, upright: Bool, TL: Double, TW: Double, rail: Double
   init(size: CGSize, TL: Double, TW: Double) {
     self.TL = TL; self.TW = TW
-    let L = TL + 2 * Mapper.margin, W = TW + 2 * Mapper.margin
-    upright = size.height > size.width
-    let (sw, sh) = upright ? (W, L) : (L, W)
-    k = min(Double(size.width) / sw, Double(size.height) / sh)
-    ox = (Double(size.width) - sw * k) / 2; oy = (Double(size.height) - sh * k) / 2
+    let w = Double(size.width), h = Double(size.height)
+    let e = max(0, min(1, (min(w, h) - 430) / (700 - 430)))
+    rail = RAIL_MIN + (RAIL_MAX - RAIL_MIN) * e * e * (3 - 2 * e)
+    upright = h > w
+    let L = TL + 2 * rail, W = TW + 2 * rail, (sw, sh) = upright ? (W, L) : (L, W)
+    k = min(w / sw, h / sh)
+    ox = (w - sw * k) / 2 + rail * k; oy = (h - sh * k) / 2 + rail * k
   }
+  var view: TableView2D { TableView2D(k: k, ox: ox, oy: oy, portrait: upright) }
   func pt(_ x: Double, _ y: Double) -> CGPoint {
-    upright ? CGPoint(x: ox + (y + Mapper.margin) * k, y: oy + (TL - x + Mapper.margin) * k)
-      : CGPoint(x: ox + (x + Mapper.margin) * k, y: oy + (y + Mapper.margin) * k)
+    upright ? CGPoint(x: ox + y * k, y: oy + (TL - x) * k) : CGPoint(x: ox + x * k, y: oy + y * k)
   }
   func table(_ p: CGPoint) -> (Double, Double) {
-    upright ? (TL + Mapper.margin - (Double(p.y) - oy) / k, (Double(p.x) - ox) / k - Mapper.margin)
-      : ((Double(p.x) - ox) / k - Mapper.margin, (Double(p.y) - oy) / k - Mapper.margin)
+    upright ? (TL - (Double(p.y) - oy) / k, (Double(p.x) - ox) / k) : ((Double(p.x) - ox) / k, (Double(p.y) - oy) / k)
   }
   /* a table angle as a screen angle */
   func screenAngle(_ a: Double) -> Double { upright ? atan2(-cos(a), sin(a)) : a }
@@ -60,6 +63,7 @@ struct Mapper {
 struct TableCanvas: View {
   let model: TableModel
   let look: Look
+  @Environment(\.displayScale) private var scale
 
   var body: some View {
     Canvas { ctx, size in
@@ -71,40 +75,8 @@ struct TableCanvas: View {
       let circle = { (x: Double, y: Double, r: Double) -> Path in
         let c = m.pt(x, y); return Path(ellipseIn: CGRect(x: c.x - r * m.k, y: c.y - r * m.k, width: 2 * r * m.k, height: 2 * r * m.k))
       }
-      let g = Mapper.margin
-      /* the wood, darker at its outer edge */
-      ctx.fill(rect(-g, -g, s.TL + g, s.TW + g), with: .color(look.railDark))
-      ctx.fill(rect(-g + 0.012, -g + 0.012, s.TL + g - 0.012, s.TW + g - 0.012), with: .color(look.rail))
-      /* the bed out to the rubbers' backs, and the lamp's pool */
-      let bed = rect(-CUSH_W, -CUSH_W, s.TL + CUSH_W, s.TW + CUSH_W)
-      ctx.fill(bed, with: .color(look.cloth))
-      let mid = m.pt(s.TL / 2, s.TW / 2)
-      ctx.fill(bed, with: .radialGradient(Gradient(colors: [.white.opacity(0.10), .clear, .black.opacity(0.18)]),
-        center: mid, startRadius: 0, endRadius: CGFloat(max(s.TL, s.TW) * 0.62 * m.k)))
-      /* the holes */
-      for (k, p) in s.POCKETS.enumerated() {
-        ctx.fill(circle(p[0], p[1], s.POCKET_R[k] + 0.006), with: .color(.black.opacity(0.55)))
-        ctx.fill(circle(p[0], p[1], s.POCKET_R[k]), with: .color(Color(rgb: 8, 8, 9)))
-      }
-      /* the rubbers */
-      for poly in s.CUSHION_POLYS {
-        var p = Path()
-        for (i, q) in poly.enumerated() { i == 0 ? p.move(to: m.pt(q[0], q[1])) : p.addLine(to: m.pt(q[0], q[1])) }
-        p.closeSubpath()
-        ctx.fill(p, with: .color(look.cushion))
-        ctx.stroke(p, with: .color(.black.opacity(0.25)), lineWidth: 0.5)
-      }
-      /* sights: three a side on the ends, seven (less the side pocket's) on the long rails */
-      let rw = -CUSH_W - (g - CUSH_W) / 2
-      for i in 1..<8 where i != 4 || s.POCKETS.isEmpty {
-        let x = s.TL * Double(i) / 8
-        for y in [rw, s.TW - rw] { ctx.fill(circle(x, y, 0.0055), with: .color(Color(white: 0.92))) }
-      }
-      for i in 1..<4 { let y = s.TW * Double(i) / 4; for x in [rw, s.TL - rw] { ctx.fill(circle(x, y, 0.0055), with: .color(Color(white: 0.92))) } }
-      /* the head string, faint */
-      if model.inHand {
-        var l = Path(); l.move(to: m.pt(s.HEAD_X, 0)); l.addLine(to: m.pt(s.HEAD_X, s.TW))
-        ctx.stroke(l, with: .color(.white.opacity(0.25)), style: StrokeStyle(lineWidth: 1, dash: [4, 5]))
+      if let img = model.tableImage, img.size == size {
+        ctx.draw(Image(decorative: img.image, scale: img.scale), in: CGRect(origin: .zero, size: size))
       }
       /* the guide */
       if let gd = model.guide(), let c = model.cue {
@@ -118,37 +90,21 @@ struct TableCanvas: View {
           }
         }
       }
-      /* shadows, then balls */
-      for b in model.shown where b.on {
-        let air = b.z ?? 0, sc = 1 + air * 4
-        ctx.fill(circle(b.x + R * 0.18 + air * 0.6, b.y + R * 0.22 + air * 0.6, R * 1.02), with: .color(.black.opacity(0.35 / sc)))
+      /* drawCast's shadows, then the balls (4b), each composited from its own image at device px */
+      let sc = Double(scale), bp = model.ballPainter(upright: m.upright, scale: scale), rb = s.BALL_R * m.k * sc
+      let list = model.shown.filter { $0.on }
+      ctx.scaleBy(x: 1 / sc, y: 1 / sc)
+      for b in list {
+        let p = m.pt(b.x, b.y)
+        for (img, rect, a) in bp.castParts(b.x, b.y, Double(p.x) * sc, Double(p.y) * sc, rb, tl: s.TL, tw: s.TW, ballR: s.BALL_R, z: b.z ?? 0) {
+          var c = ctx; c.opacity = a; c.draw(Image(decorative: img, scale: 1), in: rect)
+        }
       }
-      for b in model.shown where b.on { drawBall(&ctx, m, b, R * (1 + (b.z ?? 0) * 4)) }
-    }
-  }
-
-  private func drawBall(_ ctx: inout GraphicsContext, _ m: Mapper, _ b: Ball, _ R: Double) {
-    let c = m.pt(b.x, b.y), r = R * m.k
-    let disc = Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
-    let (cr, cg, cb) = ballColor(b.n)
-    let base = Color(rgb: cr, cg, cb), stripe = b.n >= 9 && b.n <= 15
-    ctx.fill(disc, with: .color(stripe ? Color(rgb: 247, 244, 234) : base))
-    if stripe {
-      var band = ctx
-      band.clip(to: disc)
-      let a = m.screenAngle(0)
-      var p = Path(); p.addRect(CGRect(x: -r * 1.2, y: -r * 0.55, width: r * 2.4, height: r * 1.1))
-      band.fill(p.applying(CGAffineTransform(rotationAngle: a + .pi / 2).concatenating(CGAffineTransform(translationX: c.x, y: c.y))), with: .color(base))
-    }
-    if b.n >= 1 && b.n <= 15 {
-      let d = r * 0.98
-      ctx.fill(Path(ellipseIn: CGRect(x: c.x - d / 2, y: c.y - d / 2, width: d, height: d)), with: .color(Color(rgb: 247, 244, 234)))
-      if r > 5 {
-        ctx.draw(Text("\(b.n)").font(.system(size: r * 0.62, weight: .bold, design: .rounded)).foregroundStyle(.black), at: c)
+      for b in list {
+        let p = m.pt(b.x, b.y), z = b.z ?? 0, air = z > 0 ? 0.6 / (0.6 - min(z, 0.3)) : 1
+        let (img, x, y) = model.ballImage(bp, b.n, Double(p.x) * sc, Double(p.y) * sc, rb * air)
+        ctx.draw(Image(decorative: img, scale: 1), in: CGRect(x: x, y: y, width: Double(img.width), height: Double(img.height)))
       }
     }
-    /* the lamp's highlight and the shade side */
-    ctx.fill(disc, with: .radialGradient(Gradient(colors: [.white.opacity(0.55), .white.opacity(0), .black.opacity(0.32)]),
-      center: CGPoint(x: c.x - r * 0.35, y: c.y - r * 0.4), startRadius: 0, endRadius: r * 1.6))
   }
 }

@@ -3,12 +3,25 @@
    free practice table (Practice > the rack) on every table the port has. The roll steps exactly as
    the page's frame() does: dtMs / 1000 / SIM_DT steps a frame, the fraction carried to the next. */
 import Foundation
+import CoreGraphics
+import FeltRender
 import FeltSim
 import Observation
 
 enum Game: String, CaseIterable, Identifiable {
   case eight = "8-Ball", nine = "9-Ball", ten = "10-Ball", heyball = "Chinese 8-Ball", snooker = "Snooker", carom = "Three-Cushion"
   var id: String { rawValue }
+  /* the sim's table, its shape, and the game whose look it wears (GAME_LOOK) */
+  var table: (String, String?, String) {
+    switch self {
+    case .eight: ("7", nil, "8")
+    case .nine: ("9", nil, "9")
+    case .ten: ("9", nil, "10")
+    case .heyball: ("heyball", nil, "heyball")
+    case .snooker: ("snooker", "compact", "snooker")
+    case .carom: ("carom", nil, "carom")
+    }
+  }
   var line: String {
     switch self {
     case .eight: "Solids and stripes on a 7 ft table"
@@ -38,19 +51,59 @@ final class TableModel {
   @ObservationIgnored private var heard = 0
   @ObservationIgnored let sound = Sound()
 
+  /* the baked table (FeltRender: index.html's paintTable and vignette) for one screen size */
+  struct Baked { let image: CGImage; let size: CGSize; let scale: CGFloat }
+  private(set) var tableImage: Baked?
+  @ObservationIgnored private var baking: CGSize?
+  func bake(_ size: CGSize, scale: CGFloat) {
+    guard size.width > 0, size.height > 0, tableImage?.size != size, baking != size else { return }
+    baking = size
+    let (t, shape, look) = game.table
+    Task.detached(priority: .userInitiated) {
+      let sim = Sim(); sim.setTable(t, shape)
+      let m = Mapper(size: size, TL: sim.TL, TW: sim.TW)
+      let p = TablePainter(sim: sim, view: m.view, dpr: Double(scale), rail: m.rail, look: TableLook.of(game: look), pageColor: "rgb(9, 9, 10)")
+      let img = p.paint(width: Int((size.width * scale).rounded()), height: Int((size.height * scale).rounded())).image()
+      await MainActor.run { if self.baking == size { self.tableImage = Baked(image: img, size: size, scale: scale); self.baking = nil } }
+    }
+  }
+
+  /* each ball's orientation (4b's orient), random at each rack (randomOrient) */
+  @ObservationIgnored var orient: [Int: Mat3] = [:]
+  func randomOrient() {
+    for b in balls {
+      var m = IDENT
+      for _ in 0..<3 { m = rotate(m, [Double.random(in: -0.5..<0.5), Double.random(in: -0.5..<0.5), Double.random(in: -0.5..<0.5)], Double.random(in: 0..<6.3)) }
+      orient[b.n] = m
+    }
+  }
+  /* the balls' painter for this screen (4b), and each ball's image while it has not moved or turned */
+  @ObservationIgnored private var painter: (BallPainter, Bool, CGFloat)?
+  @ObservationIgnored private var ballCache: [Int: (key: [Double], img: (CGImage, Double, Double))] = [:]
+  func ballPainter(upright: Bool, scale: CGFloat) -> BallPainter {
+    if let p = painter, p.1 == upright, p.2 == scale { return p.0 }
+    let look = TableLook.of(game: game.table.2), cloth = RGBA(css: look.cloth.base)
+    let bounce = ["8": "120,200,160", "9": "120,165,235", "10": "110,170,240", "heyball": "120,200,150", "snooker": "120,205,150", "carom": "120,160,230"][game.table.2] ?? "120,200,160"
+    let p = BallPainter(set: BallSet.of(game: game.table.2), bounce: bounce, dpr: Double(scale), portrait: upright,
+                        lowRim: game != .eight && game != .carom, clothBase: [cloth.r * 255, cloth.g * 255, cloth.b * 255])
+    painter = (p, upright, scale); ballCache = [:]
+    return p
+  }
+  func ballImage(_ p: BallPainter, _ n: Int, _ X: Double, _ Y: Double, _ r: Double) -> (CGImage, Double, Double) {
+    let m = orient[n] ?? IDENT, key = m + [X, Y, r]
+    if let c = ballCache[n], c.key == key { return c.img }
+    let img = p.ballImage(n, X, Y, r, p.axesOf(m))
+    ballCache[n] = (key, img)
+    return img
+  }
+
   var cueN: Int { game == .carom ? 70 : 0 }
   var shown: [Ball] { rolling?.balls ?? balls }
   var cue: Ball? { shown.first { $0.n == cueN && $0.on } }
 
   init(game: Game) {
     self.game = game
-    switch game {
-    case .eight: sim.setTable("7")
-    case .nine, .ten: sim.setTable("9")
-    case .heyball: sim.setTable("heyball")
-    case .snooker: sim.setTable("snooker", "compact")
-    case .carom: sim.setTable("carom")
-    }
+    sim.setTable(game.table.0, game.table.1)
     rerack()
   }
 
@@ -65,6 +118,7 @@ final class TableModel {
     case .carom:
       balls = [Ball(70, sim.HEAD_X, sim.TW / 2 + 0.1524), Ball(71, sim.HEAD_X, sim.TW / 2), Ball(72, sim.FOOT[0], sim.FOOT[1])]
     }
+    randomOrient()
     aimAtNearest()
   }
 
@@ -88,13 +142,20 @@ final class TableModel {
   func tick(_ now: TimeInterval) {
     defer { frame &+= 1 }
     guard let tab = rolling else { lastT = nil; return }
-    let dt = min(0.1, lastT.map { now - $0 } ?? 1.0 / 60)
+    /* as frameBody: never backwards, at most 50 ms a frame */
+    let dt = min(0.05, max(0, lastT.map { now - $0 } ?? 1.0 / 60))
     lastT = now
     let want = dt / SIM_DT + carry
     var n = Int(want)
     carry = want - Double(n)
+    let before = tab.balls.map { ($0.x, $0.y, $0.on) }
     var going = true
     while n > 0 && going { going = sim.stepTable(tab); n -= 1 }
+    /* rollBall: each ball's orientation turned by its displacement, the top toward the motion */
+    for (i, b) in tab.balls.enumerated() where before[i].2 {
+      let dx = b.x - before[i].0, dy = b.y - before[i].1, d = JSMath.hypot(dx, dy)
+      if d > 0 && d < 0.5 { orient[b.n] = rotate(orient[b.n] ?? IDENT, [-dy, dx, 0], d / sim.BALL_R) }
+    }
     play(tab)
     if !going { settle(sim.resultOf(tab)) }
   }

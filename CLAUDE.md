@@ -531,8 +531,15 @@ Run these, do not guess them. Healthy output is shown so a wrong result is obvio
   fails when the sim changed and the goldens were not re-run. Watch JS compound assignment: `a += b - c` is
   `a + (b - c)`. CI runs the goldens on x86-64 Linux too. `ios/Felt` is the SwiftUI app (XcodeGen `project.yml`):
   practice on each table, aim by touch, fine wheel, english pad, the power bar alone shoots; the web's sounds
-  bundled from `sounds/`. `-felt-game "8-Ball"` opens a table (the UI test's hook). Not ported yet: rules,
-  CPU, bumper pool, career, modes, 3D, intro, settings.
+  bundled from `sounds/`. `-felt-game "8-Ball"` opens a table (the UI test's hook). `FeltRender` (same package,
+  CoreGraphics only) is section 4 line for line on `Canvas2D`, a canvas-2D shim keeping the canvas's rules (paths
+  built in device space, gradients and patterns laid out at paint time, shadows a Gaussian of sigma blur/2 offset in
+  device px, Blink's em-square 'middle'). Ported: 4a (the baked table and vignette) and 4b (balls, sprites, drawCast);
+  the app bakes the table per size off the main thread and composites each ball's own image. `tools/ios-pixels.cjs`
+  saves the page's own paints (fixed views, napCache cleared) and `FeltRenderTests` measures them: tables mean about
+  1 level, p99 4 to 5; balls p99 13 to 14, the rest glyph edges (Skia vs CoreText, same SF face). Re-run it after
+  any change to 4a or 4b. Not ported yet: guide (4d), cue (4e), pots and effects (4c), HUD, rules, CPU, bumper
+  pool, career, modes, 3D, intro, settings.
 
 ## Conventions
 
