@@ -135,6 +135,7 @@ final class TableModel {
     guard rolling == nil, power > 0.01 else { power = 0; return }
     let tab = sim.newTable(balls, cue: cueN)
     sim.strike(tab, aim, power, spin)
+    markPower = power
     rolling = tab; heard = 0; carry = 0; lastT = nil; inHand = false; power = 0
     play(tab)
   }
@@ -203,28 +204,23 @@ final class TableModel {
     frame &+= 1
   }
 
-  /* the guide: where the cue ball first meets a ball or the cushion line along the aim */
-  struct Guide { var end: (Double, Double); var ghost: Bool; var objectDir: (Double, Double)?; var target: Int? }
-  func guide() -> Guide? {
+  /* the guide (4d): aimTrace's first contact and the shot preview, run whole on a copy of the balls at
+     the power the shot will have (the live pull, else the last shot's: markPower), cached on aim,
+     power, spin and layout as shotPreview keys it */
+  var markPower = 0.5
+  @ObservationIgnored private var pvKey: [Double] = []
+  @ObservationIgnored private var pvVal: (AimHit, Preview)?
+  func guide() -> (AimHit, Preview)? {
     guard rolling == nil, let c = cue else { return nil }
-    let R = sim.BALL_R, dx = cos(aim), dy = sin(aim)
-    var best = Double.infinity, target: Ball?
-    for b in shown where b.on && b !== c {
-      let fx = b.x - c.x, fy = b.y - c.y, along = fx * dx + fy * dy
-      if along <= 0 { continue }
-      let perp2 = fx * fx + fy * fy - along * along, r2 = 4 * R * R
-      if perp2 >= r2 { continue }
-      let t = along - (r2 - perp2).squareRoot()
-      if t < best { best = t; target = b }
-    }
-    let lo = R
-    var wall = Double.infinity
-    if dx > 0 { wall = min(wall, (sim.TL - lo - c.x) / dx) } else if dx < 0 { wall = min(wall, (lo - c.x) / dx) }
-    if dy > 0 { wall = min(wall, (sim.TW - lo - c.y) / dy) } else if dy < 0 { wall = min(wall, (lo - c.y) / dy) }
-    if let b = target, best < wall {
-      let gx = c.x + dx * best, gy = c.y + dy * best, ox = b.x - gx, oy = b.y - gy, l = (ox * ox + oy * oy).squareRoot()
-      return Guide(end: (gx, gy), ghost: true, objectDir: (ox / l, oy / l), target: b.n)
-    }
-    return Guide(end: (c.x + dx * wall, c.y + dy * wall), ghost: false, objectDir: nil, target: nil)
+    let pw = power > 0 ? power : markPower, q = { (v: Double, s: Double) in (v / s).rounded() }
+    var key = [q(aim, 2e-5), q(pw, 0.001), q(spin.x, 0.005), q(spin.y, 0.005), q(spin.e, 0.002), c.x, c.y]
+    for b in balls where b.n != cueN { key += b.on ? [b.x, b.y] : [-1] }
+    if key == pvKey, let v = pvVal { return v }
+    let dx = JSMath.cos(aim), dy = JSMath.sin(aim)
+    let h = sim.aimTrace(balls, c.x, c.y, dx, dy, skip: [cueN], far: 6)
+    let P = sim.previewStart(balls, cueN: cueN, aim, pw, spin, h, game == .carom ? PV_CAROM : PV_FULL, caromNeed: game == .carom ? 3 : 0)
+    sim.previewRun(P)
+    pvKey = key; pvVal = (h, P)
+    return (h, P)
   }
 }

@@ -18,15 +18,23 @@ const F = require('./fdlibm.cjs');
 const OUT = path.join(__dirname, '..', 'ios', 'FeltSim', 'Tests', 'FeltSimTests', 'Fixtures');
 const HASH_EVERY = 240;
 
+/* 4d's geometry and preview, the page's own source, cut from index.html (they read game, cueBall and
+   performance, which the shim gives them) */
+function guideSource() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const cut = (a, b) => { const i = html.indexOf(a), j = html.indexOf(b, i); if (i < 0 || j < 0) throw new Error('ios-golden: 4d moved: ' + a); return html.slice(i, j); };
+  return cut('function aimSweep(', '/* polylines and rings') + cut('const PV_CAP = ', '/* the preview for this aim');
+}
 function loadFd() {
-  let src = regionSource();
+  let src = regionSource() + '\n;let game = null; const cueBall = () => game.balls.find(b => b.n === game.cue); const performance = { now: () => 0 };\n' + guideSource();
   const pw = [['clamp(power, 0, 1) ** POWER_EXP', 'Math.pow(clamp(power, 0, 1), POWER_EXP)'],
     ['clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1) ** (1 / POWER_EXP)', 'Math.pow(clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1), 1 / POWER_EXP)']];
   for (const [a, b] of pw) { if (!src.includes(a)) throw new Error('ios-golden: sim changed, update the pow rewrite: ' + a); src = src.replace(a, b); }
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R'];
+    'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R'];
+  src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
   return ctx.__sim;
@@ -165,7 +173,32 @@ function build() {
       power: 0.3 + rnd() * 0.5, spin: randSpin(k + 1) });
   }
 
-  return { math, golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases }), tables, cases };
+  /* the guide: aimTrace and the shot preview, for racks and scatters on every table, both lengths */
+  const guides = [];
+  const pts = a => a ? a.map(q => q.map(hx)) : null;
+  for (const T of TABLES) {
+    for (let k = 0; k < 10; k++) {
+      setT(T);
+      const carom = T[0] === 'carom', snk = T[0] === 'snooker';
+      let balls = k < 2 && !carom ? (snk ? S.snookerRack() : S.rack(T[0] === 'heyball' ? 'heyball' : '8')) : scatter(carom ? 3 : 2 + Math.floor(rnd() * 7), carom ? [70, 71, 72] : snk ? [0, 41, 42, 43, 57, 60, 62, 59] : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+      const cue = carom ? 70 : 0, c = balls.find(b => b.n === cue);
+      /* aim at a ball, near it (a cut), or anywhere (a kick) */
+      const tgt = balls.filter(b => b.n !== cue)[Math.floor(rnd() * (balls.length - 1))];
+      const ang = k % 3 === 2 ? rnd() * 2 * Math.PI : Math.atan2(tgt.y - c.y, tgt.x - c.x) + (k % 3 ? (rnd() - 0.5) * 0.06 : 0);
+      const pw = 0.15 + rnd() * 0.75, sp = S.spinOf(k % 4 === 0 ? 0 : k % 4 === 1 ? { x: rnd() - 0.5, y: rnd() - 0.5 } : k % 4 === 2 ? rnd() * 2 - 1 : { x: rnd() * 0.6 - 0.3, y: rnd() * 0.6, e: rnd() * 1.0 });
+      const lens = carom ? S.PV_CAROM : k % 2 ? S.PV_SHORT : S.PV_FULL;
+      S.setGame({ balls, cue, kind: carom ? 'carom' : '8', need: 3 });
+      const h = S.aimTrace(c.x, c.y, Math.cos(ang), Math.sin(ang), [cue], 6);
+      const P = S.previewStart(ang, pw, sp, h, lens);
+      S.previewRun(P, Infinity);
+      guides.push({ name: `${T[0]}/${T[2]} guide ${k}`, table: T[0], shape: T[1], pockets: T[2], balls: balls.map(ballOut), cue, carom: carom ? 3 : 0,
+        ang: hx(ang), pw: hx(pw), spin: { x: hx(sp.x), y: hx(sp.y), e: hx(sp.e || 0) }, lens: lens === S.PV_CAROM ? 'carom' : lens === S.PV_SHORT ? 'short' : 'full',
+        hit: { t: hx(h.t), kind: h.kind, ball: h.ball ? h.ball.n : null, nx: hx(h.nx), ny: hx(h.ny), k: h.k },
+        P: { s: P.s, cue: pts(P.cue), obj: pts(P.obj), first: P.first, crossed: P.crossed, cuePot: P.cuePot === undefined ? -1 : P.cuePot, objPot: P.objPot === undefined ? -1 : P.objPot,
+          objHit: P.objHit, cueStop: P.cueStop, air: pts(P.air), bounces: pts(P.bounces || null) } });
+    }
+  }
+  return { math, golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), tables, cases, guides };
 }
 /* tests/ios-check.cjs rebuilds both in memory and requires the committed files to match */
 module.exports = { build, OUT, loadFd };
@@ -175,5 +208,5 @@ if (require.main === module) {
   fs.writeFileSync(path.join(OUT, 'math.txt'), b.math);
   fs.writeFileSync(path.join(OUT, 'golden.json'), b.golden);
   const steps = b.cases.reduce((a, c) => a + c.result.steps, 0);
-  console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);
+  console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);
 }
