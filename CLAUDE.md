@@ -20,10 +20,13 @@ Run these, do not guess them. Healthy output is shown so a wrong result is obvio
 | Job | Command | Healthy output |
 |---|---|---|
 | install | `npm ci && npx playwright-core install chromium` | `found 0 vulnerabilities` |
-| test | `npm test` | `37/37 suites, N/N checks  ok` (about 15 min on 4 cores, 15 to 25 on CI: the suites run side by side, `FELT_JOBS` lanes, default the cores; the frame-timing suites first, each alone; `FELT_JOBS=1` is the old serial run, about 30 min) |
+| test | `npm test` | `38/38 suites, N/N checks  ok` (about 15 min on 4 cores, 15 to 25 on CI: the suites run side by side, `FELT_JOBS` lanes, default the cores; the frame-timing suites first, each alone; `FELT_JOBS=1` is the old serial run, about 30 min) |
 | one suite | `node tests/run-all.cjs --only rules-check` | `1/1 suites ... ok` |
 | lint | `npm run lint` | `0 finding(s)` |
 | run | `npm run serve`, then http://localhost:4173 | the menu |
+| iOS physics | `cd ios/FeltSim && swift test -c release` | `Test run with 3 tests ... passed` (128 shots bit for bit) |
+| iOS goldens | `node tools/ios-golden.cjs` (after any change to sim 1a-1d) | `ios-golden: 8 tables, 128 shots, ...` |
+| iOS app | `cd ios && xcodegen generate`, then `xcodebuild test -project Felt.xcodeproj -scheme Felt -destination 'id=<sim>'` | `** TEST SUCCEEDED **` |
 
 ## Architecture
 
@@ -518,6 +521,18 @@ Run these, do not guess them. Healthy output is shown so a wrong result is obvio
   the sim's state at its sim time, the clock's rate (1.0 within 0.01 at every 10 ms from the strike to the end), skip and swallow, no rAF after,
   budget and memory, the wordmark's contrast on every cloth, the hand-over's pixels, Reduce Motion, setting off,
   visibility, layout at six sizes with insets) and `settings-check`.
+
+- iOS port (`ios/`, phased: T7). `ios/FeltSim` is a Swift package: sim 1a-1d (physics, every table but bumper pool)
+  line for line, same names, same operation order, so a shot is the page's shot bit for bit. JS engines differ in the
+  last bit of sin/cos/tan/atan/acos/exp/pow (V8 fuses multiply-adds on arm64; JavaScriptCore uses the system libm), so
+  the port and its reference both use fdlibm (`JSMath.swift`, `tools/fdlibm.cjs`, both from the JDK's FdLibm.java)
+  and V8's own hypot. `tools/ios-golden.cjs` runs the page's sim region on fdlibm and writes the fixtures;
+  `GoldenTests` compares every double by its bits (final state, a hash every 240 steps, every hit); `ios-check`
+  fails when the sim changed and the goldens were not re-run. Watch JS compound assignment: `a += b - c` is
+  `a + (b - c)`. CI runs the goldens on x86-64 Linux too. `ios/Felt` is the SwiftUI app (XcodeGen `project.yml`):
+  practice on each table, aim by touch, fine wheel, english pad, the power bar alone shoots; the web's sounds
+  bundled from `sounds/`. `-felt-game "8-Ball"` opens a table (the UI test's hook). Not ported yet: rules,
+  CPU, bumper pool, career, modes, 3D, intro, settings.
 
 ## Conventions
 

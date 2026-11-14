@@ -1,0 +1,56 @@
+# XcodeGen spec for felt's native iOS app. `cd ios && xcodegen generate` writes Felt.xcodeproj
+# (not committed). The physics is the FeltSim package beside it.
+name: Felt
+options:
+  bundleIdPrefix: cloud.acker
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+packages:
+  FeltSim:
+    path: FeltSim
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Felt:
+    type: application
+    platform: iOS
+    sources:
+      - path: Felt
+      - path: ../sounds
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: FeltSim
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cloud.acker.felt
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: felt
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIStatusBarHidden: YES
+        INFOPLIST_KEY_UIRequiresFullScreen: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+  FeltUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [FeltUITests]
+    dependencies:
+      - target: Felt
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Felt
+schemes:
+  Felt:
+    build:
+      targets:
+        Felt: all
+    test:
+      targets: [FeltUITests]

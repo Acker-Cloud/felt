@@ -33,3 +33,13 @@ jobs:
           fc-match system-ui | tee /dev/stderr | grep -q Inter
       - run: npm run lint
       - run: npm test
+
+  # the iOS port's physics (ios/FeltSim): index.html's sim bit for bit, on x86-64 Linux here and arm64 on a Mac
+  feltsim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: swift:6.1-jammy
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test -c release
+        working-directory: ios/FeltSim

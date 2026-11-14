@@ -11,3 +11,8 @@ tests/shots/
 
 # tools/sound-render.cjs output (listening files)
 renders/
+
+# iOS: generated project and build output
+ios/Felt.xcodeproj/
+ios/FeltSim/.build/
+ios/build/
