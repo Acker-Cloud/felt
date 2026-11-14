@@ -130,18 +130,33 @@ final class TableModel {
     }
   }
 
-  /* only the power bar shoots (the page's rule) */
+  /* only the power bar shoots (the page's rule). Its release starts the stroke: the cue is driven
+     into the ball over STROKE_MS, and the physics starts when it arrives (frameBody's shoot()) */
+  static let STROKE_MS = 0.110
+  private(set) var stroke: (power: Double, t0: TimeInterval?)?
+  /* the cue after the strike: carried a few centimetres on and faded over 180 ms */
+  private(set) var lastCue: (x: Double, y: Double, ang: Double)?
+  private(set) var shotAt: TimeInterval = 0
+  private(set) var now: TimeInterval = 0
   func shoot() {
-    guard rolling == nil, power > 0.01 else { power = 0; return }
-    let tab = sim.newTable(balls, cue: cueN)
-    sim.strike(tab, aim, power, spin)
+    guard rolling == nil, stroke == nil, power > 0.01 else { power = 0; return }
     markPower = power
-    rolling = tab; heard = 0; carry = 0; lastT = nil; inHand = false; power = 0
+    stroke = (power, nil)
+  }
+  private func strikeNow(_ pw: Double, _ t: TimeInterval) {
+    let tab = sim.newTable(balls, cue: cueN)
+    if let c = cue { lastCue = (c.x, c.y, aim) }
+    sim.strike(tab, aim, pw, spin)
+    rolling = tab; heard = 0; carry = 0; lastT = t; inHand = false; power = 0; stroke = nil; shotAt = t
     play(tab)
   }
 
   func tick(_ now: TimeInterval) {
     defer { frame &+= 1 }
+    self.now = now
+    if let st = stroke {
+      if st.t0 == nil { stroke = (st.power, now) } else if now - st.t0! >= TableModel.STROKE_MS { strikeNow(st.power, now) }
+    }
     guard let tab = rolling else { lastT = nil; return }
     /* as frameBody: never backwards, at most 50 ms a frame */
     let dt = min(0.05, max(0, lastT.map { now - $0 } ?? 1.0 / 60))

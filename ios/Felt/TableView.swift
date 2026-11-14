@@ -98,6 +98,21 @@ struct TableCanvas: View {
         let (img, x, y) = model.ballImage(bp, b.n, Double(p.x) * sc, Double(p.y) * sc, rb * air)
         ctx.draw(Image(decorative: img, scale: 1), in: CGRect(x: x, y: y, width: Double(img.width), height: Double(img.height)))
       }
+      /* the cue (4f): pulled back by power while aiming, driven through during the stroke, carried a
+         few centimetres on and faded as the shot starts */
+      ctx.scaleBy(x: sc, y: sc)
+      let rest = s.BALL_R + 0.012, back = 0.27, R = s.BALL_R, g = model.game.table.2
+      if model.rolling == nil, let c = model.cue {
+        var gap = rest + back * min(1, max(0, model.power))
+        if let st = model.stroke {
+          let u = min(1, max(0, (st.t0.map { model.now - $0 } ?? 0) / TableModel.STROKE_MS)), g0 = rest + back * min(1, max(0, st.power))
+          gap = g0 + (R - g0) * u * u
+        }
+        drawCue(&ctx, m, game: g, cx: c.x, cy: c.y, ang: model.aim, gap: gap)
+      } else if model.rolling != nil, let lc = model.lastCue, model.now - model.shotAt < 0.18 {
+        let u = (model.now - model.shotAt) / 0.18, e = min(1, max(0, u * 2)), ease = e * e * (3 - 2 * e)
+        drawCue(&ctx, m, game: g, cx: lc.x, cy: lc.y, ang: lc.ang, gap: R - 0.035 * ease, alpha: 1 - u)
+      }
     }
   }
 
