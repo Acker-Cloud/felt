@@ -191,10 +191,10 @@ public final class BallPainter {
   /* one ball alone, for a renderer that composites (the app): its image and where its top-left goes
      relative to the ball's centre, in device px. The centre keeps its fraction of a pixel, so the
      edges anti-alias as they would on the page's canvas. */
-  public func ballImage(_ n: Int, _ X: Double, _ Y: Double, _ r: Double, _ ax: [[Double]]) -> (CGImage, Double, Double) {
+  public func ballImage(_ n: Int, _ X: Double, _ Y: Double, _ r: Double, _ ax: [[Double]], dark: Double = 0, rim: Bool = false) -> (CGImage, Double, Double) {
     let size = Int(ceil(2 * r)) + 4, fx = X - floor(X), fy = Y - floor(Y), o = Double(size / 2)
     let g = Canvas2D(width: size, height: size)
-    drawBall(g, n, o + fx, o + fy, r, ax)
+    drawBall(g, n, o + fx, o + fy, r, ax, dark: dark, rim: rim)
     return (g.image(), floor(X) - o, floor(Y) - o)
   }
   /* drawCast's two sprites as [image, rect, alpha], for a compositing renderer */

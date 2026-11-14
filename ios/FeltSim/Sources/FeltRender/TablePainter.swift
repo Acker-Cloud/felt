@@ -132,6 +132,12 @@ public final class TablePainter {
 
   // MARK: pockets
 
+  /* what the pot animation clips to (4c drawPots): pocket k's cap centre and back radius, and the cushion depth */
+  public func potClip(_ k: Int) -> (cx: Double, cy: Double, rb: Double, co: Double) {
+    let co = cushionDepth(), sp = pocketShape(k, co)
+    return (sp.C[0], sp.C[1], sp.rb, co)
+  }
+
   struct PocketShape { var P: [Double], C: [Double], r: Double, rc: Double, rb: Double, quad: [[Double]], side: Bool }
   private var shapes: [PocketShape] = []
   func pocketShape(_ k: Int, _ co: Double) -> PocketShape {

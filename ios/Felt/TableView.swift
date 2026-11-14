@@ -93,11 +93,15 @@ struct TableCanvas: View {
       ctx.scaleBy(x: sc, y: sc)
       drawGuide(&ctx, m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
+      drawPots(&ctx, m, bp, rb, sc)
       for b in list {
         let p = m.pt(b.x, b.y), z = b.z ?? 0, air = z > 0 ? 0.6 / (0.6 - min(z, 0.3)) : 1
         let (img, x, y) = model.ballImage(bp, b.n, Double(p.x) * sc, Double(p.y) * sc, rb * air)
         ctx.draw(Image(decorative: img, scale: 1), in: CGRect(x: x, y: y, width: Double(img.width), height: Double(img.height)))
       }
+      ctx.scaleBy(x: sc, y: sc)
+      drawFx(&ctx, m)
+      ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       /* the cue (4f): pulled back by power while aiming, driven through during the stroke, carried a
          few centimetres on and faded as the shot starts */
       ctx.scaleBy(x: sc, y: sc)
@@ -186,6 +190,47 @@ struct TableCanvas: View {
       ctx.stroke(p, with: .color(.black.opacity(0.22)), style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round, dash: [2, 4]))
       ctx.stroke(p, with: .color(wa(0.7)), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round, dash: [2, 4]))
       for q in lands { ctx.fill(Path(ellipseIn: CGRect(x: q.x - 3, y: q.y - 3, width: 6, height: 6)), with: .color(wa(0.85))) }
+    }
+  }
+
+  /* 4c drawPots, in device px: the ball runs on to the drop's centre, shrinking and darkening, clipped to
+     the cap's back or the bed (it goes under the rail where the rail overhangs the drop) and to a circle
+     about the hole that closes in as it sinks */
+  private func drawPots(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter, _ rb: Double, _ sc: Double) {
+    let s = model.sim, now = model.now, T = model.potGeometry(m)
+    func ease(_ a: Double, _ b: Double, _ u: Double) -> Double { let t = min(1, max(0, (u - a) / (b - a))); return t * t * (3 - 2 * t) }
+    func dev(_ x: Double, _ y: Double) -> CGPoint { let p = m.pt(x, y); return CGPoint(x: p.x * sc, y: p.y * sc) }
+    func circle(_ x: Double, _ y: Double, _ r: Double) -> Path { let c = dev(x, y), d = r * m.k * sc; return Path(ellipseIn: CGRect(x: c.x - d, y: c.y - d, width: 2 * d, height: 2 * d)) }
+    for p in model.pots where p.k >= 0 && p.k < s.POCKETS.count {
+      let u = (now - p.t) / TableModel.POT_MS, P = s.POCKETS[p.k], m1 = 1 - pow(1 - min(1, u / 0.5), 2), sink = ease(0.15, 1, u)
+      let x = p.from.0 + (P[0] - p.from.0) * m1, y = p.from.1 + (P[1] - p.from.1) * m1, at = dev(x, y), cl = T.potClip(p.k)
+      var g = ctx
+      var back = circle(cl.cx, cl.cy, cl.rb)
+      let a = dev(-cl.co, -cl.co), b = dev(s.TL + cl.co, s.TW + cl.co)
+      back.addRect(CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y)))
+      g.clip(to: back)
+      g.clip(to: circle(P[0], P[1], s.POCKET_R[p.k] + (1 - ease(0.1, 0.55, u)) * 3 * s.BALL_R))
+      let (img, ix, iy) = bp.ballImage(p.n, Double(at.x), Double(at.y), rb * (1 - 0.32 * sink), bp.axesOf(model.orient[p.n] ?? IDENT), dark: 0.88 * sink, rim: true)
+      g.draw(Image(decorative: img, scale: 1), in: CGRect(x: ix, y: iy, width: Double(img.width), height: Double(img.height)))
+    }
+  }
+  /* 4c drawFx, in CSS points, added as the page's 'lighter': a cushion's glow, a ball contact's ring, the cue's flash */
+  private func drawFx(_ ctx: inout GraphicsContext, _ m: Mapper) {
+    let rp = model.sim.BALL_R * m.k
+    var g = ctx
+    g.blendMode = .plusLighter
+    for e in model.effects {
+      let u = min(1, max(0, (model.now - e.t) / e.d)), s = m.pt(e.x, e.y), a = min(1, e.v / 3) * (1 - u) * (1 - u)
+      if e.kind == "rail" {
+        let r = rp * 2.2
+        g.fill(Path(CGRect(x: s.x - r, y: s.y - r, width: 2 * r, height: 2 * r)),
+               with: .radialGradient(Gradient(colors: [Color(.sRGB, red: 190 / 255, green: 1, blue: 220 / 255, opacity: 0.2 * a), Color(.sRGB, red: 190 / 255, green: 1, blue: 220 / 255, opacity: 0)]),
+                                     center: s, startRadius: 0, endRadius: r))
+      } else {
+        let col = e.kind == "cue" ? Color(.sRGB, red: 170 / 255, green: 205 / 255, blue: 1, opacity: 0.6 * a) : Color.white.opacity(0.5 * a)
+        let r = rp * (e.kind == "cue" ? 0.25 + 0.5 * u : 0.3 + 1.1 * u)
+        g.stroke(Path(ellipseIn: CGRect(x: s.x - r, y: s.y - r, width: 2 * r, height: 2 * r)), with: .color(col), lineWidth: 1.5)
+      }
     }
   }
 }

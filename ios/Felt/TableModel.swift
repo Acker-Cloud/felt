@@ -148,12 +148,13 @@ final class TableModel {
     if let c = cue { lastCue = (c.x, c.y, aim) }
     sim.strike(tab, aim, pw, spin)
     rolling = tab; heard = 0; carry = 0; lastT = t; inHand = false; power = 0; stroke = nil; shotAt = t
-    play(tab)
   }
 
   func tick(_ now: TimeInterval) {
     defer { frame &+= 1 }
     self.now = now
+    pots.removeAll { now - $0.t >= TableModel.POT_MS }
+    effects.removeAll { now - $0.t >= $0.d }
     if let st = stroke {
       if st.t0 == nil { stroke = (st.power, now) } else if now - st.t0! >= TableModel.STROKE_MS { strikeNow(st.power, now) }
     }
@@ -167,6 +168,8 @@ final class TableModel {
     let before = tab.balls.map { ($0.x, $0.y, $0.on) }
     var going = true
     while n > 0 && going { going = sim.stepTable(tab); n -= 1 }
+    onHits(Array(tab.hits[heard...]), before, tab, now)
+    for (i, b) in tab.balls.enumerated() where before[i].2 && !b.on { onPot(b.n, tab.pocketOf[b.n] ?? -1, (before[i].0, before[i].1), now) }
     /* rollBall: each ball's orientation turned by its displacement, the top toward the motion */
     for (i, b) in tab.balls.enumerated() where before[i].2 {
       let dx = b.x - before[i].0, dy = b.y - before[i].1, d = JSMath.hypot(dx, dy)
@@ -217,6 +220,77 @@ final class TableModel {
     if balls.contains(where: { $0 !== c && $0.on && JSMath.hypot($0.x - px, $0.y - py) < 2 * R }) { return }
     c.x = px; c.y = py
     frame &+= 1
+  }
+
+  /* 4c: a pot runs on into its drop over POT_MS, shrinking and darkening under the rim */
+  static let POT_MS = 0.420
+  struct Pot { let n: Int, k: Int, from: (Double, Double), t: TimeInterval }
+  @ObservationIgnored private(set) var pots: [Pot] = []
+  func onPot(_ n: Int, _ k: Int, _ from: (Double, Double), _ t: TimeInterval) {
+    pots.removeAll { $0.n == n }
+    pots.append(Pot(n: n, k: k, from: from, t: t))
+  }
+
+  /* onHits: hits carry no position, so the contacts are found from where the balls were last frame and
+     where they are now. Ball-ball a ring at the contact, a cushion a soft glow on the nose, the cue a tip flash */
+  struct Fx { let kind: String, key: String, x: Double, y: Double, v: Double, t: TimeInterval, d: Double }
+  @ObservationIgnored private(set) var effects: [Fx] = []
+  private func onHits(_ hits: [Hit], _ before: [(Double, Double, Bool)], _ T: Tab, _ now: TimeInterval) {
+    if hits.isEmpty { return }
+    var ball = 0.0, rail = 0.0, cueV = 0.0
+    for h in hits {
+      if h.kind == "ball" { ball = max(ball, h.v) } else if h.kind == "rail" || h.kind == "jaw" { rail = max(rail, h.v) } else if h.kind == "cue" { cueV = h.v }
+    }
+    var prev: [Int: (Double, Double)] = [:]
+    for (i, b) in T.balls.enumerated() { prev[b.n] = (before[i].0, before[i].1) }
+    let B = T.balls.filter { $0.on }, R = sim.BALL_R
+    func recent(_ key: String) -> Bool { effects.contains { $0.key == key && now - $0.t < 0.140 } }
+    if ball > 0.05 {
+      var found = 0
+      outer: for i in 0..<B.count {
+        for j in (i + 1)..<max(i + 1, B.count) {
+          if found >= 4 { break outer }
+          let a = B[i], b = B[j], pa = prev[a.n] ?? (a.x, a.y), pb = prev[b.n] ?? (b.x, b.y)
+          if JSMath.hypot(a.x - pa.0 - b.x + pb.0, a.y - pa.1 - b.y + pb.1) < 1e-5 { continue }
+          var best = Double.infinity, bu = 0.0
+          for s in 0...4 {
+            let u = Double(s) / 4, d = JSMath.hypot(pa.0 + (a.x - pa.0) * u - pb.0 - (b.x - pb.0) * u, pa.1 + (a.y - pa.1) * u - pb.1 - (b.y - pb.1) * u)
+            if d < best { best = d; bu = u }
+          }
+          let key = "\(a.n)-\(b.n)"
+          if best < 2 * R + 0.004 && !recent(key) {
+            found += 1
+            effects.append(Fx(kind: "ball", key: key, x: (pa.0 + pb.0 + (a.x - pa.0 + b.x - pb.0) * bu) / 2, y: (pa.1 + pb.1 + (a.y - pa.1 + b.y - pb.1) * bu) / 2, v: ball, t: now, d: 0.280))
+          }
+        }
+      }
+    }
+    if rail > 0.05 {
+      var found = 0
+      for b in B {
+        for s in sim.CUSH {
+          if found >= 3 { break }
+          let ex = s[2] - s[0], ey = s[3] - s[1], L2 = ex * ex + ey * ey
+          let t = L2 != 0 ? min(1, max(0, ((b.x - s[0]) * ex + (b.y - s[1]) * ey) / L2)) : 0
+          let px = s[0] + ex * t, py = s[1] + ey * t, key = "r\(b.n)"
+          if JSMath.hypot(b.x - px, b.y - py) < R + 0.004 && !recent(key) { found += 1; effects.append(Fx(kind: "rail", key: key, x: px, y: py, v: rail, t: now, d: 0.340)) }
+        }
+      }
+    }
+    if cueV > 0, let c = B.first(where: { $0.n == T.cue }) {
+      let p = prev[T.cue] ?? (c.x, c.y), h = JSMath.hypot(c.vx, c.vy), v = h == 0 ? 1 : h
+      effects.append(Fx(kind: "cue", key: "cue", x: p.0 - c.vx / v * R, y: p.1 - c.vy / v * R, v: cueV, t: now, d: 0.200))
+    }
+  }
+
+
+  /* the table's pocket shapes for this layout (the pot animation's clip), built with the bake's view */
+  @ObservationIgnored private var potGeo: (TablePainter, Double)?
+  func potGeometry(_ m: Mapper) -> TablePainter {
+    if let g = potGeo, g.1 == m.k { return g.0 }
+    let p = TablePainter(sim: sim, view: m.view, dpr: 1, rail: m.rail, look: TableLook.of(game: game.table.2))
+    potGeo = (p, m.k)
+    return p
   }
 
   /* the guide (4d): aimTrace's first contact and the shot preview, run whole on a copy of the balls at
