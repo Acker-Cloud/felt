@@ -38,8 +38,8 @@ import SwiftUI
       /* `-felt-career-retire`: retired at once (after any steps on: see below) */
       defer { if ProcessInfo.processInfo.arguments.contains("-felt-career-retire") { E.retire() } }
       /* `-felt-career-rivals`: 40 steps on (a due match simulated, else an eligible event entered and a week) */
-      if ProcessInfo.processInfo.arguments.contains("-felt-career-rivals") {
-        /* `-felt-career-steps N` sets the count (a test hook) */
+      if ProcessInfo.processInfo.arguments.contains("-felt-career-rivals") || UserDefaults.standard.integer(forKey: "felt-career-steps") > 0 {
+        /* `-felt-career-steps N` sets the count, and plays on without the Rivals hook (a test hook) */
         let n = UserDefaults.standard.integer(forKey: "felt-career-steps")
         for _ in 0..<(n > 0 ? n : 40) {
           if E.nextMatch() != .null { E.simMatch(); continue }
@@ -1152,6 +1152,7 @@ struct CareerHub: View {
   var onPractice: () -> Void = {}
   /* Retire pushes the recap (cv.stack = hub, recap) */
   @State private var recap = false
+  @State private var review = false
   var body: some View {
     let _ = store.rev
     let E = store.E, S = E.S, me = S["me"]!, tier = me["tier"]!.i, day = S["day"]!.i
@@ -1189,12 +1190,15 @@ struct CareerHub: View {
         CareerRetired(store: store)
       } else {
       if !store.msg.isEmpty { Section { Text(store.msg).font(.subheadline) } }
-      if E.reviewDue { CareerReview(store: store) }
       if nm == .null { CareerThisWeek(store: store) }
       CareerHubGroups(store: store, onPractice: onPractice, onRetire: { recap = true })
       }
     }
     .navigationDestination(isPresented: $recap) { CareerRecap(store: store) }
+    /* a season ended: its review, once (cvAdvance pushes it) */
+    .navigationDestination(isPresented: Binding(get: { review }, set: { review = $0 })) { CareerReview(store: store, done: { review = false }) }
+    .onAppear { if E.reviewDue { review = true } }
+    .onChange(of: store.rev) { _, _ in if E.reviewDue && !review { review = true } }
     }
   }
   func row(_ k: String, _ v: String) -> some View { HStack { Text(k); Spacer(); Text(v).foregroundStyle(.secondary) } }
@@ -1203,14 +1207,53 @@ struct CareerHub: View {
 /* the season just ended (review): its line, the verdict, next season's targets; Done marks it seen */
 struct CareerReview: View {
   @Bindable var store: CareerStore
+  let done: () -> Void
+  @State private var a: JV = .null
   var body: some View {
-    let r = store.E.review()
-    Section("Season \(r["season"]!.i) Review") {
-      Text(r["moved"]!.s == "up" ? "Promoted to \(r["tier"]!.s)." : r["moved"]!.s == "down" ? "Relegated to \(r["tier"]!.s)." : "Staying at \(r["tier"]!.s).").font(.headline)
-      Text("\(r["w"]!.i)-\(r["l"]!.i) in matches, \(r["ti"]!.i) title\(r["ti"]!.i == 1 ? "" : "s"), \(JV.numberString(r["prize"]!.d)) credits in prize money.").font(.subheadline)
-      ForEach(r["targets"]!.a.indices, id: \.self) { i in Text(r["targets"]!.a[i].s).font(.footnote).foregroundStyle(.secondary) }
-      Button("Done") { store.E.reviewSeen(); store.E.save(); store.touch() }.bold().foregroundStyle(.white)
+    List {
+      if a != .null {
+        let t1 = a["t1"]!.i, mv = a["moved"]!.s, rk = a["rk"]!.a, CI = CareerStore.T("CIRCUITS").a.map { $0.s }
+        CareerTitle(kick: "Season \(a["season"]!.i)", title: "Season Review")
+        Section {} footer: {
+          Text(mv == "up" ? "Promoted to tier \(t1): \(a["tier"]!.s)." : mv == "down" ? "Down to tier \(t1): \(a["tier"]!.s)." : "Stays at tier \(t1): \(a["tier"]!.s).").font(.system(size: 13))
+        }
+        Section {
+          VStack(spacing: 12) {
+            HStack(alignment: .top) { fact("Won", "\(a["w"]!.i) of \(a["m"]!.i)"); fact("Titles", "\(a["ti"]!.i)"); fact("Prize", CareerWords.crWords(a["prize"]!.d)) }
+            VStack(spacing: 6) {
+              line("Finals", "\(a["fi"]!.i)"); line("Events", "\(a["ev"]!.i)")
+              /* a circuit without a place is null in rk: left out, as the page's filter */
+              ForEach(Array(CI.enumerated()), id: \.offset) { i, c in if i < rk.count, let n = rk[i].num, n > 0 { line(titleCaseWords(c), "Number \(Int(n))") } }
+              if (a["moneyRank"]?.num ?? 0) > 0 { line("Money List", "Number \(a["moneyRank"]!.i), two years") }
+              line("Performance Rating", "\(a["fr"]?.i ?? 0)")
+            }
+          }
+          .padding(.vertical, 6).accessibilityIdentifier("cvReview")
+        }
+        Section {
+          ForEach(Array(a["targets"]!.a.enumerated()), id: \.offset) { _, t in Text(titleCaseWords(t.s)).font(.system(size: 17)).fixedSize(horizontal: false, vertical: true) }
+        } header: { CareerPageHead(t: "Next Season") }
+        Section {
+          Button(action: done) { Text("On to the Season").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(.white)).foregroundStyle(.black).buttonStyle(.plain).accessibilityIdentifier("cvReviewGo")
+        }
+        .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+      }
     }
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+    /* the page marks it seen as it opens (Career.reviewSeen, cvSave) */
+    .onAppear { if a == .null { a = store.E.review(); store.E.reviewSeen(); store.E.save() } }
+  }
+  private func fact(_ k: String, _ v: String) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(k).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+      Text(v).font(.system(size: 17, weight: .bold)).monospacedDigit()
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+  private func line(_ k: String, _ v: String) -> some View {
+    HStack { Text(k).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)); Spacer(); Text(v) }.font(.system(size: 15))
   }
 }
 
