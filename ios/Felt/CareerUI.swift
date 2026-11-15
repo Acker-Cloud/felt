@@ -310,6 +310,129 @@ struct CareerHubTop: View {
   }
 }
 
+/* the offers (sponsorships, challenges, exhibitions), each to accept or decline: the page's Sponsors and Offers */
+struct CareerOffersSection: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, S = E.S
+      let off = S["off"]!.a
+    if !off.isEmpty {
+      Section("Offers") {
+        ForEach(off.indices, id: \.self) { i in
+          let o = off[i], id = o["id"]!.s
+          HStack {
+            Text(o["type"]!.s == "sponsor" ? "\(o["brand"]!.s): \(o["weeks"]!.i) weeks, \(JV.numberString(o["ret"]!.d)) a week" : "\(o["type"]!.s.capitalized) vs \(E.nameOf(o["opp"]!.i))").font(.subheadline)
+            Spacer()
+            Button("Decline") { E.decline(id); store.touch() }.buttonStyle(.borderless).foregroundStyle(.secondary)
+            Button("Accept") { store.msg = E.accept(id) ?? ""; store.touch() }.buttonStyle(.borderless).bold().foregroundStyle(.white)
+          }
+        }
+      }
+    }
+  }
+}
+
+/* PAGES.hub's groups: Season (Calendar, Rankings, Tour Card), You (Stats and Records, Sponsors and Offers, Shop, Practice
+   Drills, News), Career (Switch Career, Retire), each row its name and the page's line. The page's Bracket and
+   Standings, Rivals and Options rows are not here: those pages are not ported yet. */
+struct CareerHubGroups: View {
+  @Bindable var store: CareerStore
+  var onPractice: () -> Void
+  @State private var retiring = false
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, S = E.S, me = S["me"]!, tier = me["tier"]!.i, day = S["day"]!.i
+    let es = S["es"]!
+    let entered = S["cal"]!.a.filter { ev in es[ev["id"]!.s].map { truthy($0["en"]) && !truthy($0["done"]) } ?? false }.count
+    let open = S["cal"]!.a.filter { ev in day <= (ev["dl"]?.i ?? 0) && !(es[ev["id"]!.s].map { truthy($0["en"]) } ?? false) && ev["opp"] == nil && E.eligibility(ev).isEmpty }.count
+    let circ = CareerStore.T("TIERS")[tier]!["circ"]!.i, circs = CareerStore.T("CIRCUITS").a.map { $0.s }, circNames = CareerStore.T("CIRC_NAMES").a.map { $0.s }
+    let rk = E.rankings(circs[circ], top: 400).a.first { $0["human"] == true }
+    let st = E.stats()["all"] ?? .null, offers = S["off"]!.a.count, sponsors = S["spons"]!.a.filter { !truthy($0["end"]) }.count
+    let news = S["news"]!.a.last.map { $0[1]?.str ?? "Nothing yet" } ?? "Nothing yet"
+    Section {
+      NavigationLink { CareerCalendar(store: store) } label: { row("Calendar", "\(open) event\(open == 1 ? "" : "s") open to you, \(entered) entered") }
+      NavigationLink { CareerRankings(store: store) } label: { row("Rankings", rk.map { "\(circNames[circ]): number \($0["rank"]!.i), \($0["pts"]!.i) points" } ?? "Unranked so far") }
+      row("Tour Card", tier >= 8 && tier < 12 ? (E.moneyRank() > 0 ? "Money list: number \(E.moneyRank())" : "Earn on the money list") : "Not needed yet")
+    } header: { head("Season") }
+    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+    Section {
+      NavigationLink { CareerStats(store: store) } label: { row("Stats and Records", "\(st["won"]?.i ?? 0) won of \(st["matches"]?.i ?? 0)") }
+      NavigationLink { CareerSponsors(store: store) } label: { row("Sponsors and Offers", "\(sponsors) contract(s)", val: offers > 0 ? "\(offers) new" : nil) }
+      NavigationLink { CareerShop(store: store) } label: { row("Shop", "Cosmetics only", val: CareerWords.crWords(me["money"]!.d)) }
+      Button(action: onPractice) { row("Practice Drills", "\(store.practiceToday) of 3 sessions today", chevron: true) }.tint(.primary).accessibilityIdentifier("cvPractice")
+      NavigationLink { CareerNews(store: store) } label: { row("News", news) }
+    } header: { head("You") }
+    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+    Section {
+      Button { store.E.save(); store.E.S = .null; store.touch() } label: { row("Switch Career", "Your careers, a new one", chevron: true) }.tint(.primary)
+      Button {
+        if retiring { retiring = false; store.E.retire(); store.touch() } else { retiring = true; Task { try? await Task.sleep(for: .seconds(4)); retiring = false } }
+      } label: { row(retiring ? "Tap again to retire" : "Retire", "End this career, see the recap", warn: true, chevron: true) }
+    } header: { head("Career") }
+    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+  }
+  private func head(_ t: String) -> some View { Text(t).font(.system(size: 13)).foregroundStyle(.secondary).textCase(nil) }
+  private func row(_ t: String, _ sub: String, val: String? = nil, warn: Bool = false, chevron: Bool = false) -> some View {
+    HStack {
+      VStack(alignment: .leading, spacing: 1) {
+        Text(t).font(.system(size: 17)).foregroundStyle(warn ? Color(rgb: 0xff, 0x8a, 0x7a) : Color.primary)
+        Text(sub).font(.system(size: 15)).foregroundStyle(Color.secondary).lineLimit(1)
+      }
+      Spacer()
+      if let val { Text(val).font(.system(size: 15)).foregroundStyle(.secondary).monospacedDigit() }
+      /* a button row that opens a page wears the link's chevron, as the page's cvRow */
+      if chevron { Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(uiColor: .tertiaryLabel)) }
+    }
+    .frame(minHeight: 44)
+  }
+}
+
+/* PAGES.calendar, in brief: the events still taking entries, with the week, fee, and Enter where you may */
+struct CareerCalendar: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, S = E.S, day = S["day"]!.i, Y = CareerEngine.const("YEAR").i
+    let list = S["cal"]!.a.filter { day <= ($0["dl"]?.i ?? 0) && $0["opp"] == nil }
+    List {
+      Section {
+        ForEach(list.indices, id: \.self) { i in
+          let ev = list[i], id = ev["id"]!.s, entered = truthy(S["es"]![id]?["en"]), why = E.eligibility(ev)
+          HStack {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(ev["name"]!.s)
+              Text("\(CareerStore.gameName(ev["disc"]!.s)), week \(ev["start"]!.i % Y / 7 + 1), tier \(ev["tier"]?.i ?? 0)" + (entered ? ", entered" : why.isEmpty ? "" : ". \(why[0].prefix(1).uppercased() + why[0].dropFirst())"))
+                .font(.footnote).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if !entered && why.isEmpty { Button(CareerWords.crWords(ev["fee"]!.d + ev["trav"]!.d)) { E.enter(id); store.touch() }.buttonStyle(.borderless).bold().foregroundStyle(.white) }
+          }
+        }
+      }
+    }
+    .navigationTitle("Calendar")
+  }
+}
+
+/* PAGES.news: the career's news, newest first, each with its week */
+struct CareerNews: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let _ = store.rev
+    let Y = CareerEngine.const("YEAR").i
+    List {
+      ForEach(Array(store.E.S["news"]!.a.reversed().enumerated()), id: \.offset) { _, n in
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Season \((n[0]?.i ?? 0) / Y + 1), week \((n[0]?.i ?? 0) % Y / 7 + 1)").font(.footnote).foregroundStyle(.secondary)
+          Text(n[1]?.str ?? "")
+        }
+      }
+    }
+    .navigationTitle("News")
+  }
+}
+
 struct CareerHub: View {
   @Bindable var store: CareerStore
   let play: () -> Void
@@ -320,7 +443,10 @@ struct CareerHub: View {
     let nm = E.nextMatch()
     List {
       Section {
-        CareerHubTop(store: store, play: play).padding(.top, 6).listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+        /* `-felt-career-groups`: the hub without its top, to see the groups (a test hook) */
+        if !ProcessInfo.processInfo.arguments.contains("-felt-career-groups") {
+          CareerHubTop(store: store, play: play).padding(.top, 6).listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+        }
       }
       if !store.msg.isEmpty { Section { Text(store.msg).font(.subheadline) } }
       if E.reviewDue { CareerReview(store: store) }
@@ -329,50 +455,8 @@ struct CareerHub: View {
           Button("Next Week") { let r = E.advance(week: true); store.msg = r == "match" ? "A match is due." : ""; store.touch() }.bold().foregroundStyle(.white).accessibilityIdentifier("career-week")
         }
       }
-      let open = S["cal"]!.a.filter { $0["start"]!.i > day && $0["start"]!.i <= day + 28 }
-      if !open.isEmpty {
-        Section("Coming Up") {
-          ForEach(open.indices, id: \.self) { i in
-            let ev = open[i], id = ev["id"]!.s, entered = truthy(S["es"]![id]?["en"]), why = E.eligibility(ev)
-            HStack {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(ev["name"]!.s)
-                Text("\(CareerStore.gameName(ev["disc"]!.s)), week \(ev["start"]!.i % CareerEngine.const("YEAR").i / 7 + 1), fee \(JV.numberString(ev["fee"]!.d + ev["trav"]!.d))\(entered ? ", entered" : why.isEmpty ? "" : ", \(why[0])")")
-                  .font(.footnote).foregroundStyle(.secondary)
-              }
-              Spacer()
-              if !entered && why.isEmpty { Button("Enter") { E.enter(id); store.touch() }.buttonStyle(.borderless).bold().foregroundStyle(.white) }
-            }
-          }
-        }
-      }
-      let off = S["off"]!.a
-      if !off.isEmpty {
-        Section("Offers") {
-          ForEach(off.indices, id: \.self) { i in
-            let o = off[i], id = o["id"]!.s
-            HStack {
-              Text(o["type"]!.s == "sponsor" ? "\(o["brand"]!.s): \(o["weeks"]!.i) weeks, \(JV.numberString(o["ret"]!.d)) a week" : "\(o["type"]!.s.capitalized) vs \(E.nameOf(o["opp"]!.i))").font(.subheadline)
-              Spacer()
-              Button("Decline") { E.decline(id); store.touch() }.buttonStyle(.borderless).foregroundStyle(.secondary)
-              Button("Accept") { store.msg = E.accept(id) ?? ""; store.touch() }.buttonStyle(.borderless).bold().foregroundStyle(.white)
-            }
-          }
-        }
-      }
-      Section {
-        NavigationLink("Rankings") { CareerRankings(store: store) }
-        NavigationLink("Stats") { CareerStats(store: store) }
-        NavigationLink("Shop") { CareerShop(store: store) }
-        NavigationLink("Sponsors") { CareerSponsors(store: store) }
-        /* cvPractice: Practice Drills, the sessions played today */
-        Button { onPractice() } label: {
-          VStack(alignment: .leading, spacing: 2) { Text("Practice Drills").foregroundStyle(.primary); Text("\(store.practiceToday) of 3 sessions today").font(.footnote).foregroundStyle(.secondary) }
-        }
-        .accessibilityIdentifier("cvPractice")
-      }
-      Section("News") { ForEach(Array(S["news"]!.a.suffix(8).reversed().enumerated()), id: \.offset) { _, n in Text(n[1]!.s).font(.footnote) } }
-      Section { Button("Switch Career") { E.save(); E.S = .null; store.touch() }.foregroundStyle(.secondary) }
+      CareerHubGroups(store: store, onPractice: onPractice)
+
     }
   }
   func row(_ k: String, _ v: String) -> some View { HStack { Text(k); Spacer(); Text(v).foregroundStyle(.secondary) } }
@@ -480,6 +564,7 @@ struct CareerSponsors: View {
     let _ = store.rev
     let S = store.E.S, day = S["day"]!.d
     List {
+      CareerOffersSection(store: store)
       let sp = S["spons"]!.a
       if sp.isEmpty { Text("No sponsor yet. Offers come with results and reputation.").foregroundStyle(.secondary) }
       ForEach(sp.indices, id: \.self) { i in
