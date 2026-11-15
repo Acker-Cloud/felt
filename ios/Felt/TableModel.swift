@@ -146,7 +146,98 @@ final class TableModel {
 
   /* the ball struck: carom's shooter strikes their own cue ball (game.striker) */
   var cueN: Int { g?.striker ?? (game == .carom ? 70 : 0) }
-  var shown: [Ball] { rolling?.balls ?? balls }
+  var shown: [Ball] { rp?.tab.balls ?? rolling?.balls ?? balls }
+
+  /* 5r, the shot replay: every shot recorded as it is struck (shotRecord); at rest a Replay pill offered for
+     REPLAY_OFFER_MS (REPLAY_NOTABLE_MS, gold, when notableOf finds the shot's moment); a tap plays it again in its own table
+     (rp.tab, drawn instead of the live one): the cue's run-up (REPLAY_LEAD), real speed slowed to REPLAY_SLOW round the
+     first contact and the first object ball's drop. The live game holds still (the CPU waits) until it ends; any touch
+     ends it */
+  struct ShotRec { let balls: [Ball], angle: Double, power: Double, spin: Spin, ball: Int, g: Game?, orient: [Int: Mat3] }
+  struct Replay { let rec: ShotRec, tab: Tab; var lead: Double, struck = false, acc = 0.0, hold = 0.0, end = false, shotAt = 0.0; let moments: [Double], keepOrient: [Int: Mat3] }
+  static let REPLAY_OFFER_MS = 3.5, REPLAY_NOTABLE_MS = 6.5, REPLAY_LEAD = 0.5, REPLAY_SLOW = 0.35, SLOW_IN = 0.09, SLOW_OUT = 0.12, SLOW_RAMP = 0.06
+  @ObservationIgnored var lastShot: ShotRec? = nil
+  private(set) var offer: (notable: String?, until: TimeInterval)? = nil
+  private(set) var rp: Replay? = nil
+  func hideOffer() { if offer != nil { offer = nil } }
+  /* notableOf: the shot's best notable moment, by shotMoments on the game as it stood */
+  private func notableOf(_ res: ShotResult, _ rec: ShotRec) -> String? {
+    guard let g0 = rec.g else { return nil }
+    return engine.shotMoments(g0, res, engine.judge(g0, RuleShot(res))).keys.first { NOTABLE_MOMENTS.contains($0) }
+  }
+  /* offerReplay: the balls at rest after a shot, on a turn to aim (never in the lesson or a tutorial, or over a result) */
+  private func offerReplay(_ res: ShotResult) {
+    guard let rec = lastShot, lesson == nil, tut == nil, trickRes == nil, drillRes == nil, g?.winner == nil, Prefs.bool("replays", true) else { return }
+    let nb = notableOf(res, rec)
+    offer = (nb, now + (nb != nil ? TableModel.REPLAY_NOTABLE_MS : TableModel.REPLAY_OFFER_MS))
+  }
+  private static func ease(_ a: Double, _ b: Double, _ u: Double) -> Double { let t = min(1, max(0, (u - a) / (b - a))); return t * t * (3 - 2 * t) }
+  /* startReplay: the record's moments found by playing it through first (the first contact, the first object ball's drop) */
+  func startReplay() {
+    guard rp == nil, let rec = lastShot, rolling == nil, stroke == nil else { return }
+    hideOffer()
+    let pre = sim.newTable(rec.balls.map { $0.copy() }, cue: rec.ball)
+    sim.strike(pre, rec.angle, rec.power, rec.spin)
+    var first: Double? = nil, drop: Double? = nil, heardN = 0
+    while sim.stepTable(pre) {
+      if first == nil, pre.hits[heardN...].contains(where: { $0.kind == "ball" }) { first = pre.t }
+      heardN = pre.hits.count
+      if drop == nil, pre.pocketOf.keys.contains(where: { $0 != rec.ball }) { drop = pre.t }
+    }
+    rp = Replay(rec: rec, tab: sim.newTable(rec.balls.map { $0.copy() }, cue: rec.ball), lead: -TableModel.REPLAY_LEAD, moments: [first, drop].compactMap { $0 }, keepOrient: orient)
+    orient = rec.orient; pots = []; effects = []
+  }
+  /* endReplay: the live table back exactly as it was */
+  func endReplay() {
+    guard let R = rp else { return }
+    rp = nil; orient = R.keepOrient; pots = []
+  }
+  private func replayRate(_ t: Double) -> Double {
+    var w = 0.0
+    for m in rp?.moments ?? [] { let d = t - m; w = max(w, d < -TableModel.SLOW_IN ? TableModel.ease(-TableModel.SLOW_IN - TableModel.SLOW_RAMP, -TableModel.SLOW_IN, d) : 1 - TableModel.ease(TableModel.SLOW_OUT, TableModel.SLOW_OUT + TableModel.SLOW_RAMP, d)) }
+    return 1 - (1 - TableModel.REPLAY_SLOW) * w
+  }
+  var replaySlow: Bool { guard let R = rp, R.struck, !R.end else { return false }; return replayRate(R.tab.t) < 0.9 }
+  /* replayStep: one frame of replay, instead of the live roll */
+  private func replayStep(_ now: TimeInterval) {
+    guard var R = rp else { return }
+    let dt = min(0.05, max(0, lastT.map { now - $0 } ?? 1.0 / 60)) * speed
+    lastT = now
+    var s = 0.0
+    if !R.struck {
+      R.lead += dt
+      if R.lead >= 0 { s = R.lead; R.lead = 0; R.struck = true; R.shotAt = now; sim.strike(R.tab, R.rec.angle, R.rec.power, R.rec.spin) }
+    } else { s = dt }
+    if R.struck && !R.end {
+      R.acc += s * replayRate(R.tab.t) / SIM_DT
+      let n = Int(R.acc), before = R.tab.balls.map { ($0.x, $0.y, $0.on) }
+      R.acc -= Double(n)
+      var live = true, k = 0
+      let h0 = R.tab.hits.count
+      while k < n && live { live = sim.stepTable(R.tab); k += 1 }
+      for h in R.tab.hits[h0...] { sound.hit(h) }
+      for (i, b) in R.tab.balls.enumerated() where before[i].2 {
+        let dx = b.x - before[i].0, dy = b.y - before[i].1, d = JSMath.hypot(dx, dy)
+        if d > 0 && d < 0.5 { orient[b.n] = rotate(orient[b.n] ?? IDENT, [-dy, dx, 0], d / sim.BALL_R) }
+        if !b.on { onPot(b.n, R.tab.pocketOf[b.n] ?? -1, (before[i].0, before[i].1), now) }
+      }
+      if !live { R.end = true }
+    } else if R.end { R.hold += dt }
+    rp = R
+    if R.end && R.hold >= 0.4 { endReplay() }
+  }
+  /* the cue in a replay: at address, drawn back by the power, through the ball, then the follow-through fade */
+  var replayCue: (x: Double, y: Double, ang: Double, gap: Double, alpha: Double)? {
+    guard let R = rp, let c = R.rec.balls.first(where: { $0.n == R.rec.ball }), c.on else { return nil }
+    let rest = sim.BALL_R + 0.012, sS = TableModel.STROKE_MS, BR = sim.BALL_R
+    if !R.struck {
+      let g0 = rest + 0.27 * min(1, max(0, R.rec.power)), u = R.lead + TableModel.REPLAY_LEAD
+      let gap = R.lead < -sS ? rest + (g0 - rest) * TableModel.ease(0.05, TableModel.REPLAY_LEAD - sS - 0.04, u) : g0 + (BR - g0) * pow((R.lead + sS) / sS, 2)
+      return (c.x, c.y, R.rec.angle, gap, TableModel.ease(0, 0.12, u))
+    }
+    let u = (now - R.shotAt) / (0.18 / speed)
+    return u < 1 ? (c.x, c.y, R.rec.angle, BR - 0.035 * TableModel.ease(0, 1, u * 2), 1 - u) : nil
+  }
   var cue: Ball? { shown.first { $0.n == cueN && $0.on } }
 
   /* the opponent: nil for two players on one device, else the CPU's level, playing player 2 */
@@ -628,6 +719,15 @@ final class TableModel {
     /* the look: a career match wears the career's equipped items (lookCareer), else the settings' (look()) */
     dress = tm?.dress ?? Prefs.dress(game.table.2)
     rerack()
+    /* a test hook: `-felt-replayrun` shoots the auto aim's line at half power, then plays the replay once the offer is up */
+    if ProcessInfo.processInfo.arguments.contains("-felt-replayrun") {
+      Task { @MainActor [weak self] in
+        try? await Task.sleep(for: .seconds(2)); guard let s = self else { return }
+        s.power = 0.6; s.shoot()
+        for _ in 0..<200 { try? await Task.sleep(for: .milliseconds(100)); if s.offer != nil { break } }
+        try? await Task.sleep(for: .seconds(0.5)); s.startReplay()
+      }
+    }
     /* a test hook: `-felt-callout "Bank shot"` calls that moment out a moment after the table opens */
     if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-felt-callout"), i + 1 < ProcessInfo.processInfo.arguments.count {
       let w = ProcessInfo.processInfo.arguments[i + 1]
@@ -783,7 +883,7 @@ final class TableModel {
   private(set) var shotAt: TimeInterval = 0
   private(set) var now: TimeInterval = 0
   func shoot() {
-    guard rolling == nil, stroke == nil, power > 0.01, g?.option == nil, g?.winner == nil, !cpuTurn, trickRes == nil, !drillBlocked else { power = 0; return }
+    guard rolling == nil, stroke == nil, power > 0.01, g?.option == nil, g?.winner == nil, !cpuTurn, trickRes == nil, !drillBlocked, rp == nil else { power = 0; return }
     /* a pull the call refuses (no needed call yet) opens the call's menu on the let-go, the pockets first */
     if !callReady { power = 0; callMenu = true; return }
     markPower = power
@@ -793,6 +893,8 @@ final class TableModel {
     if g?.mode == "trick" { scoreDaily() }
     /* shoot(): the declaration the player built (humanCall) goes on the game; judge takes it from there */
     if var gm = g, !cpuTurn { gm.call = humanCall(); g = gm }
+    /* shotRecord: what the shot needs to be played again, and the game as it stood (notableOf) */
+    lastShot = ShotRec(balls: balls.map { $0.copy() }, angle: aim, power: pw, spin: spin, ball: cueN, g: g, orient: orient); offer = nil
     let tab = sim.newTable(balls, cue: cueN)
     if let c = cue { lastCue = (c.x, c.y, aim) }
     sim.strike(tab, aim, pw, spin)
@@ -811,6 +913,8 @@ final class TableModel {
     if paused { lastT = nil; return }
     self.now = now
     if lesson != nil { lessonCheck() }
+    if let o = offer, now > o.until || rolling != nil || stroke != nil { offer = nil }
+    if rp != nil { if let f = flashDue { banner = (f.0, f.1, now + f.2); flashDue = nil }; pots.removeAll { now - $0.t >= potMs }; replayStep(now); return }
     if let f = flashDue { banner = (f.0, f.1, now + f.2); flashDue = nil }
     pots.removeAll { now - $0.t >= potMs }
     if let b = banner, now >= b.until { banner = nil }
@@ -845,7 +949,7 @@ final class TableModel {
       if d > 0 && d < 0.5 { orient[b.n] = rotate(orient[b.n] ?? IDENT, [-dy, dx, 0], d / sim.BALL_R) }
     }
     play(tab)
-    if !going { settle(sim.resultOf(tab)) }
+    if !going { let res = sim.resultOf(tab); settle(res); offerReplay(res) }
   }
 
   private func play(_ tab: Tab) {

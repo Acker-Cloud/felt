@@ -278,6 +278,7 @@ struct TableScreen: View {
   @State private var picking = false
   @State private var gest: AimGesture? = nil
   @State private var pinch0: Double? = nil
+  @State private var eating = false
   @Environment(\.displayScale) private var scale
   /* the window's interface orientation, read as the size changes (a turn) */
   private var interface: UIInterfaceOrientation { (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.effectiveGeometry.interfaceOrientation ?? .portrait }
@@ -322,6 +323,7 @@ struct TableScreen: View {
     .onChange(of: model.spinOk) { _, ok in if !ok { model.elevOpen = false } }
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
     .overlay(alignment: .top) { CalloutView(model: model).padding(.top, 0) }
+    .overlay(alignment: .bottom) { ReplayPill(model: model).padding(.bottom, 92) }
     .overlay { if let r = model.trickRes, !model.paused { TrickResult(model: model, res: r, back: { dismiss() }) } }
     .overlay { if let r = model.drillRes, !model.paused { DrillResultView(model: model, res: r, back: { dismiss() }) } }
     .overlay(alignment: model.coachAtTop ? .top : .bottom) { if model.tut != nil, !model.tutDone, !model.paused { CoachCard(model: model).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
@@ -376,7 +378,7 @@ struct TableScreen: View {
           model.v3Dist = min(V3.DIST[1], max(V3.DIST[0], pinch0! / Double(v.magnification)))
         }.onEnded { _ in pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist") })
         .gesture(DragGesture(minimumDistance: 0).onChanged { v in model.touching = true; if pinch0 == nil { touch(v, tg.size, began: v.translation == .zero) } }
-          .onEnded { v in touchEnd(v, tg.size); placing = false; picking = false; gest = nil; model.touching = false })
+          .onEnded { v in if eating { eating = false } else { touchEnd(v, tg.size) }; placing = false; picking = false; gest = nil; model.touching = false })
         .accessibilityElement()
         .accessibilityLabel("Table")
         .accessibilityIdentifier("table")
@@ -391,6 +393,10 @@ struct TableScreen: View {
   }
 
   private func touch(_ v: DragGesture.Value, _ size: CGSize, began: Bool) {
+    /* during a replay nothing reaches the game: the first touch ends it and the rest of it is eaten; an offer goes on a touch */
+    if began, model.rp != nil { model.endReplay(); eating = true; return }
+    if eating { return }
+    if began { model.hideOffer() }
     let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW)
     model.uprightView = m.upright
     let (x, y) = m.table(v.location)
@@ -741,8 +747,8 @@ struct PowerBar: View {
             if model.callMenuOffered { Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)) }
           }
           .padding(.horizontal, 12).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        } else if model.rolling != nil {
-          Text("Rolling").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if model.rolling != nil || model.rp != nil {
+          Text(model.rp != nil ? "Replay" : "Rolling").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
           TimelineView(.animation(minimumInterval: 1 / 30, paused: still || model.paused)) { tl in
             /* pullShimmer: 2.6 s, a band 35% long from -60% to 160% over the first 70%, ease-in-out */
@@ -764,6 +770,9 @@ struct PowerBar: View {
       .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(rgb: live ? 0x74 : 0x6b, live ? 0x74 : 0x6b, live ? 0x7e : 0x74), lineWidth: 1))
       .contentShape(Rectangle())
       .gesture(DragGesture(minimumDistance: 0).onChanged { v in
+        /* a press on the bar ends a replay and is the bar's own: the pull goes on to arm and shoot */
+        if model.rp != nil { model.endReplay() }
+        model.hideOffer()
         guard model.rolling == nil else { return }
         if t0 == nil { t0 = Date() }
         let d = upright ? v.translation.width : v.translation.height
@@ -1836,5 +1845,41 @@ struct CalloutView: View {
       }
     }
     .allowsHitTesting(false)
+  }
+}
+
+/* #replayBtn and #replayBadge: the offer (an arrow and Replay, brass for a notable shot), then while one plays its badge
+   (Replay, Slow motion round a moment) and Skip */
+struct ReplayPill: View {
+  let model: TableModel
+  var body: some View {
+    let brass = Color(rgb: 0xd9, 0xb2, 0x5e)
+    Group {
+      if model.rp != nil {
+        HStack(spacing: 10) {
+          HStack(spacing: 6) {
+            Image(systemName: "arrow.counterclockwise").font(.system(size: 13, weight: .bold))
+            Text("Replay").font(.system(size: 14, weight: .semibold))
+            if model.replaySlow { Text("Slow motion").font(.system(size: 12)).foregroundStyle(.secondary) }
+          }
+          .padding(.horizontal, 12).frame(height: 32).background(Capsule().fill(Color(rgb: 18, 18, 20).opacity(0.9)))
+          Button { model.endReplay() } label: { Text("Skip").font(.system(size: 14, weight: .semibold)).padding(.horizontal, 14).frame(minHeight: 44) }
+            .background(Capsule().fill(Color(rgb: 18, 18, 20).opacity(0.9)).frame(height: 32)).accessibilityLabel("Skip the replay").accessibilityIdentifier("replaySkip")
+        }
+        .foregroundStyle(.white)
+      } else if let o = model.offer {
+        Button { model.startReplay() } label: {
+          HStack(spacing: 6) {
+            Image(systemName: "arrow.counterclockwise").font(.system(size: 13, weight: .bold))
+            Text("Replay").font(.system(size: 14, weight: .semibold))
+          }
+          .padding(.horizontal, 14).frame(minHeight: 44)
+          .foregroundStyle(o.notable != nil ? Color.black : Color.white)
+          .background(Capsule().fill(o.notable != nil ? brass : Color(rgb: 18, 18, 20).opacity(0.9)).frame(height: 32))
+        }
+        .accessibilityLabel(o.notable.map { "Replay the \(momentWord($0, model.g?.kind ?? "8").lowercased())" } ?? "Replay the last shot")
+        .accessibilityIdentifier("replayBtn")
+      }
+    }
   }
 }

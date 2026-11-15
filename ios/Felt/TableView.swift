@@ -129,7 +129,10 @@ struct TableCanvas: View {
          few centimetres on and faded as the shot starts */
       ctx.scaleBy(x: sc, y: sc)
       let rest = s.BALL_R + 0.012, back = 0.27, R = s.BALL_R, g = model.game.table.2
-      if model.rolling == nil, let c = model.cue {
+      if let rc = model.replayCue {
+        drawCue(&ctx, m, game: g, dress: model.dress, cx: rc.x, cy: rc.y, ang: rc.ang, gap: rc.gap, alpha: rc.alpha)
+      } else if model.rp != nil {
+      } else if model.rolling == nil, let c = model.cue {
         var gap = rest + back * min(1, max(0, model.power))
         if let st = model.stroke {
           let u = min(1, max(0, (st.t0.map { model.now - $0 } ?? 0) / TableModel.STROKE_MS)), g0 = rest + back * min(1, max(0, st.power))
@@ -204,7 +207,7 @@ struct TableCanvas: View {
   }
   private func drawGuide(_ ctx: inout GraphicsContext, _ m: Mapper) { drawGuide(Sink2D(ctx: ctx, m: m), m) }
   func drawGuide(_ sink: GuideSink, _ m: Mapper) {
-    if Prefs.guide == "off" { return }
+    if Prefs.guide == "off" || model.rp != nil { return }
     guard let c = model.cue, let (h, P) = model.guide() else { return }
     let s = model.sim, R = s.BALL_R, rp = R * m.k, dx = JSMath.cos(model.aim), dy = JSMath.sin(model.aim)
     let gx = c.x + dx * h.t, gy = c.y + dy * h.t, ov = look.ovMin
