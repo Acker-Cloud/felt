@@ -150,6 +150,24 @@ struct TableCanvas: View {
   /* drawSolo: a trick shot's marks, the cue ball's target ring (filled faintly, a dashed edge) and the pocket the goal names
      (a gold ring) */
   private func drawSolo(_ ctx: inout GraphicsContext, _ m: Mapper) {
+    /* #coachRing: what the coach rings (tutMarks): a ball, a pocket, a colour's spot, the rail's mark, the D */
+    if let r = model.tutRing, r.kind != "none", let gm = model.g {
+      let s = model.sim, k = m.k
+      var c: CGPoint? = nil, rad = 0.0
+      switch r.kind {
+      case "ball": if let b = gm.balls.first(where: { $0.n == r.n && $0.on }) { c = m.pt(b.x, b.y); rad = s.BALL_R * k + 10 }
+      case "pocket": if r.n < s.POCKETS.count { c = m.pt(s.POCKETS[r.n][0], s.POCKETS[r.n][1]); rad = s.POCKET_R[r.n] * k + 9 }
+      case "spot": if let p = s.SPOTS[r.n] { c = m.pt(p[0], p[1]); rad = s.BALL_R * k + 12 }
+      case "rail": if let q = model.tutRail() { c = m.pt(q[0], q[1]); rad = 16 }
+      case "d":
+        var p = Path()
+        for i in 0...24 { let a = Double.pi / 2 + Double(i) / 24 * Double.pi, q = m.pt(s.HEAD_X + (s.D_R + s.BALL_R) * cos(a), s.TW / 2 + (s.D_R + s.BALL_R) * sin(a)); i == 0 ? p.move(to: q) : p.addLine(to: q) }
+        p.closeSubpath()
+        ctx.stroke(p, with: .color(.white.opacity(0.9)), lineWidth: 2.5)
+      default: break
+      }
+      if let c { let box = CGRect(x: c.x - rad, y: c.y - rad, width: 2 * rad, height: 2 * rad); ctx.stroke(Path(ellipseIn: box), with: .color(.white.opacity(0.9)), lineWidth: 2.5) }
+    }
     /* drawDrill: the ring (its full-marks edge, and faint where it scores nothing), the line, the break's box, the pocket */
     if let gm = model.g, gm.mode == "drill", let S = model.drill?.S {
       let dash = StrokeStyle(lineWidth: 2, dash: [6, 5]), W = Color.white.opacity(0.85), R = model.sim.BALL_R
@@ -480,7 +498,7 @@ struct TableCanvas: View {
        shot of how many ("Shot 2/4") */
     let soloNum: String? = g.mode == "trick" ? model.trick.map { String($0.attempts + (model.trickRes == nil ? 1 : 0)) }
       : g.mode == "drill" ? model.drill.flatMap { D in drillById(D.id).map { "\(min(D.js.count + (D.beat || model.drillRes != nil ? 0 : 1), $0.shots))/\($0.shots)" } } : nil
-    let seats: [(Int, [Double]?)] = g.mode == "practice" ? [] : soloNum != nil ? [(0, left.first)] : [(0, left.first), (1, right.first)]
+    let seats: [(Int, [Double]?)] = g.mode == "practice" || model.tut != nil ? [] : soloNum != nil ? [(0, left.first)] : [(0, left.first), (1, right.first)]
     let next = model.railNext()
     for (p, span) in seats {
       guard let span else { continue }
@@ -572,7 +590,7 @@ struct TableCanvas: View {
      of light on a ball under 3:1 on the recess. */
   private func drawPotRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter) {
     /* potGame: a game with no mode, or practice; never a trick shot or a drill */
-    guard let g = model.g, !model.potOrder.isEmpty, g.mode == nil || g.mode == "practice" else { return }
+    guard let g = model.g, !model.potOrder.isEmpty, g.mode == nil || g.mode == "practice", model.tut == nil else { return }
     let s = model.sim, T = model.potGeometry(m), band = T.railBand, k = m.k
     let wk = (band.rail - band.co) * k, mid = (band.co + band.rail) / 2
     let a = m.pt(0, 0), b = m.pt(s.TL, s.TW)

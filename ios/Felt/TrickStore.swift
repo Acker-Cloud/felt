@@ -60,3 +60,26 @@ enum TrickStore {
     set { put(SCORE_KEY, ["v": 2, "pts": newValue.pts, "run": newValue.run]) }
   }
 }
+
+/* felt.tutorials.v1: { v: 1, done: { id: true }, skipped: { id: true }, never } (loadTut: anything unreadable starts fresh) */
+enum TutStore {
+  static let KEY = "felt.tutorials.v1", IDS = ["8", "9", "bumper", "carom", "snooker", "heyball"]
+  static var rec: (done: Set<String>, skipped: Set<String>, never: Bool) {
+    get {
+      guard let o = TrickStore.json(KEY) as? [String: Any], TrickStore.int(o["v"]) == 1 else { return ([], [], false) }
+      let d = o["done"] as? [String: Any] ?? [:], k = o["skipped"] as? [String: Any] ?? [:]
+      return (Set(IDS.filter { (d[$0] as? Bool) == true }), Set(IDS.filter { (k[$0] as? Bool) == true }), (o["never"] as? Bool) == true)
+    }
+    set { TrickStore.put(KEY, ["v": 1, "done": Dictionary(uniqueKeysWithValues: newValue.done.map { ($0, true) }), "skipped": Dictionary(uniqueKeysWithValues: newValue.skipped.map { ($0, true) }), "never": newValue.never]) }
+  }
+  static let WORD = ["8": "8-ball", "9": "9-ball", "bumper": "bumper pool", "carom": "three-cushion", "snooker": "snooker", "heyball": "Chinese 8-ball"]
+  static let RECAP = [
+    "8": "Open table, your group first, ball in hand after a foul, and the 8 last. The full rules are in How to play.",
+    "9": "The lowest ball first, any pot counts, and a legal 9 wins whenever it drops. The full rules are in How to play.",
+    "bumper": "Your marked ball first, round the posts to the far cup, and never your own cup. The full rules are in How to play.",
+    "carom": "Both balls, with three cushions before the second, and the cushions can come first. The full rules are in How to play.",
+    "snooker": "A red, then a colour, and again; ball in hand in the D after an in-off; then the colours in order. The full rules are in How to play.",
+    "heyball": "A legal break, an open table until the first pot after it, ball in hand anywhere after a foul, and the 8 last, in any pocket. The full rules are in How to play."]
+  /* maybeOfferTut: a game whose tutorial is neither done nor turned down */
+  static func offer(_ kind: String) -> Bool { let r = rec; return tutById(kind) != nil && !r.done.contains(kind) && !r.skipped.contains(kind) && !r.never }
+}

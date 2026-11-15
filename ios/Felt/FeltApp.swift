@@ -28,6 +28,7 @@ struct Home: View {
   @State private var practicing: PracticeGo? = nil
   @State private var tricking: PracticeGo? = nil
   @State private var drilling: PracticeGo? = nil
+  @State private var tutoring: PracticeGo? = nil
   struct PracticeGo: Identifiable { let layout: String; var id: String { layout } }
   /* Solo: Practice (#pracSheet, 5s) */
   private var soloSection: some View {
@@ -94,7 +95,7 @@ struct Home: View {
         }
         Section {
           ForEach(TableGame.allCases) { g in
-            NavigationLink { GameSetup(game: g) { playing = g } } label: {
+            NavigationLink { GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) }) } label: {
               VStack(alignment: .leading, spacing: 2) {
                 Text(g.rawValue).font(.body.weight(.semibold)).foregroundStyle(.primary)
                 Text(g.line).font(.footnote).foregroundStyle(.secondary)
@@ -142,7 +143,7 @@ struct Home: View {
       .navigationTitle("").navigationBarTitleDisplayMode(.inline)
       .navigationDestination(isPresented: $showCareer) { CareerView(store: career) }
       .navigationDestination(item: $statsPath) { k in if k == "all" { StatsView() } else { StatsKindPage(kind: k, rec: Rec.load()) } }
-      .navigationDestination(item: $setupGame) { g in GameSetup(game: g) { playing = g } }
+      .navigationDestination(item: $setupGame) { g in GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) }) }
       .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { store.markLive(); playingTourney = true } }
       .toolbar {
         /* #statsBtn: Stats and records (6s) */
@@ -166,6 +167,8 @@ struct Home: View {
       if let i = a.firstIndex(of: "-felt-stats") { statsPath = i + 1 < a.count && !a[i + 1].hasPrefix("-") ? a[i + 1] : "all" }
       /* `-felt-practice 8|9|heyball|scatter|empty`: a practice session */
       if let i = a.firstIndex(of: "-felt-practice"), i + 1 < a.count { practicing = PracticeGo(layout: a[i + 1]) }
+      /* `-felt-tutorial id`: that tutorial (`-felt-tutshow` plays each step's Show me) */
+      if let i = a.firstIndex(of: "-felt-tutorial"), i + 1 < a.count { tutoring = PracticeGo(layout: a[i + 1]) }
       /* `-felt-drill id`: that drill (`-felt-drillshots` plays its solutions) */
       if let i = a.firstIndex(of: "-felt-drill"), i + 1 < a.count { drilling = PracticeGo(layout: a[i + 1]) }
       /* `-felt-trick id`: that trick shot (`-felt-elev` opens the elevation sheet) */
@@ -210,6 +213,7 @@ struct Home: View {
         TableScreen(model: { let m = TableModel(game: g, tourney: t); m.onReport = { store.report($0, $1, $2, $3) }; return m }())
       }
     }
+    .fullScreenCover(item: $tutoring) { t in TableScreen(model: TableModel(game: ["9": .nine, "bumper": .bumper, "carom": .carom, "snooker": .snooker, "heyball": .heyball][t.layout] ?? .eight, tutorial: t.layout)) }
     .fullScreenCover(item: $drilling) { d in TableScreen(model: TableModel(game: .nine, drill: d.layout)) }
     .fullScreenCover(item: $tricking) { t in TableScreen(model: TableModel(game: .eight, trick: t.layout)) }
     .fullScreenCover(item: $practicing) { p in TableScreen(model: TableModel(game: p.layout == "9" ? .nine : p.layout == "heyball" ? .heyball : .eight, practice: p.layout)) }
@@ -270,6 +274,8 @@ struct TableScreen: View {
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
     .overlay { if let r = model.trickRes, !model.paused { TrickResult(model: model, res: r, back: { dismiss() }) } }
     .overlay { if let r = model.drillRes, !model.paused { DrillResultView(model: model, res: r, back: { dismiss() }) } }
+    .overlay(alignment: .top) { if model.tut != nil, !model.tutDone, !model.paused { CoachCard(model: model).padding(.horizontal, 12).padding(.top, 8) } }
+    .overlay { if model.tutDone, let t = tutById(model.tut!.id), !model.paused { TutDoneView(t: t, home: { dismiss() }) } }
     .onDisappear { model.abandonCpuGame() }
     .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
     .overlay { if let h = model.handoff, !model.paused { Handoff(model: model, p: h.p, first: h.first) } }
@@ -1155,7 +1161,7 @@ struct Overlays: View {
         Button { model.paused = false; model.tourneyAbandon(); back() } label: { Text(model.tmatch != nil ? "Forfeit Match" : "Quit to Home").frame(maxWidth: .infinity, minHeight: 44) }
           .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
       }
-    } else if let g = model.g, g.winner != nil, model.rolling == nil {
+    } else if let g = model.g, g.winner != nil, model.rolling == nil, model.tut == nil {
       card {
         Text(Words.overLine(g)).font(.headline).multilineTextAlignment(.center)
         if let t = model.tmatch {
@@ -1205,6 +1211,10 @@ struct Overlays: View {
 struct GameSetup: View {
   let game: TableGame
   let go: () -> Void
+  /* a tutorial for the game: the setup's link, and the offer on the first Break (maybeOfferTut) */
+  var learn: ((String) -> Void)? = nil
+  @State private var offer = false
+  var tutKind: String? { tutById(game.table.2) != nil ? game.table.2 : nil }
   @AppStorage("felt.opponent") private var opponent = "medium"
   @AppStorage("felt.settings.table") private var table = "7"
   @AppStorage("felt.settings.pockets") private var pockets = "regulation"
@@ -1262,13 +1272,29 @@ struct GameSetup: View {
           }
           .id(setupKey)
         form
-        Button(action: go) { Text("Break").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+        Button { if let k = tutKind, learn != nil, TutStore.offer(k) { offer = true } else { go() } } label: { Text("Break").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black).padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 12)
           .accessibilityIdentifier("break")
       }
     }
     .background(Color.black)
     .ignoresSafeArea(edges: .top)
+    /* #tutOffer: the first Break of a game whose tutorial is neither done nor turned down */
+    .sheet(isPresented: $offer) {
+      let k = tutKind ?? "8"
+      VStack(spacing: 14) {
+        Text("First time playing \(TutStore.WORD[k] ?? k)?").font(.title2.bold()).multilineTextAlignment(.center)
+        Text("A one minute tutorial: the rules, played. Or skip it and break.").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        HStack(spacing: 10) {
+          Button { offer = false; learn?(k) } label: { Text("Show Me").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("tutOfferGo")
+          Button { var r = TutStore.rec; r.skipped.insert(k); TutStore.rec = r; offer = false; go() } label: { Text("Skip").frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(Color(white: 0.2))).foregroundStyle(.white)
+        }
+        Button("Don't Ask Again") { var r = TutStore.rec; r.never = true; TutStore.rec = r; offer = false; go() }.foregroundStyle(.secondary).frame(minHeight: 44)
+      }
+      .padding(24).presentationDetents([.height(300)])
+    }
     /* `-felt-rules`: the (i) popover open (with -felt-setup) */
     .task { if ProcessInfo.processInfo.arguments.contains("-felt-rules") { try? await Task.sleep(for: .seconds(1)); showRules = true } }
   }
@@ -1284,6 +1310,19 @@ struct GameSetup: View {
   var setupKey: String { [table, pockets, bumperTable, snookerTable].joined(separator: "|") }
   var form: some View {
     List {
+      /* #tutLink: Learn 8-Ball, until that tutorial is done */
+      if let k = tutKind, let learn, !TutStore.rec.done.contains(k) {
+        Section {
+          Button { learn(k) } label: {
+            HStack(spacing: 12) {
+              Image(systemName: "graduationcap").foregroundStyle(.primary).accessibilityHidden(true)
+              Text(titleCaseWords("Learn \(game.rawValue)")).foregroundStyle(.primary)
+              Spacer(); Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+          }
+          .accessibilityIdentifier("tutLink")
+        }
+      }
       Section {
         Picker("Opponent", selection: Binding(get: { opponent == "two" ? "two" : "cpu" }, set: { opponent = $0 == "two" ? "two" : (opponent == "two" ? "medium" : opponent) })) {
           Text("Two Players").tag("two"); Text("CPU").tag("cpu")
@@ -1611,6 +1650,57 @@ struct DrillResultView: View {
       .padding(20)
       .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
       .padding(.horizontal, 12).padding(.bottom, 12)
+    }
+  }
+}
+
+/* #coach: the step ("8-ball, step 2 of 4: Your group first", or "Close. Try again."), its words (a miss's why first), and
+   its one button, Show Me (Next after a result shown) */
+struct CoachCard: View {
+  let model: TableModel
+  var body: some View {
+    let T = model.tut!, t = tutById(T.id)!, st = t.steps[T.step]
+    VStack(alignment: .leading, spacing: 6) {
+      Text(T.again ? "Close. Try again." : "\(t.name), step \(T.step + 1) of \(t.steps.count): \(st.head)").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+      Text(T.then ? (st.then?.text() ?? "") : (T.again && !T.why.isEmpty ? T.why + " " : "") + st.text(T.ctx ?? "solids")).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+      HStack {
+        Spacer()
+        Button { model.tutShowMe() } label: { Text(T.then ? "Next" : "Show Me").font(.subheadline.weight(.semibold)).padding(.horizontal, 16).frame(minHeight: 44) }
+          .background(Capsule().fill(.white)).foregroundStyle(.black).disabled(model.rolling != nil || model.stroke != nil).accessibilityIdentifier("coachBtn")
+      }
+    }
+    .foregroundStyle(.white)
+    .padding(14)
+    .background(RoundedRectangle(cornerRadius: 18).fill(Color(rgb: 0x1c, 0x1c, 0x1e).opacity(0.94)))
+    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
+    .accessibilityElement(children: .contain)
+  }
+}
+/* #tutDone: Tutorial complete, "That's 8-ball.", the recap, Play 8-Ball, Home */
+struct TutDoneView: View {
+  let t: Tutorial
+  let home: () -> Void
+  @State private var play = false
+  var body: some View {
+    VStack(spacing: 0) {
+      Spacer()
+      VStack(alignment: .leading, spacing: 10) {
+        Text("Tutorial complete").font(.footnote).foregroundStyle(.secondary)
+        Text("That's \(t.name).").font(.title2.bold())
+        Text(TutStore.RECAP[t.id] ?? "").font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: 10) {
+          Button { play = true } label: { Text(titleCaseWords("Play \(t.name)")).font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("tutPlay")
+          Button("Home", action: home).frame(maxWidth: .infinity, minHeight: 50).background(Capsule().fill(Color(white: 0.2))).foregroundStyle(.white)
+        }
+      }
+      .foregroundStyle(.white)
+      .padding(20)
+      .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
+      .padding(.horizontal, 12).padding(.bottom, 12)
+    }
+    .fullScreenCover(isPresented: $play) {
+      TableScreen(model: TableModel(game: ["9": .nine, "bumper": .bumper, "carom": .carom, "snooker": .snooker, "heyball": .heyball][t.id] ?? .eight, cpu: UserDefaults.standard.string(forKey: "felt.opponent").flatMap { $0 == "two" ? nil : $0 } ?? "medium"))
     }
   }
 }
