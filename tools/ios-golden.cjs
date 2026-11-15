@@ -38,6 +38,9 @@ function loadFd() {
   for (const [a, b] of pw) { if (!src.includes(a)) throw new Error('ios-golden: sim changed, update the pow rewrite: ' + a); src = src.replace(a, b); }
   /* the career engine's constants, which its IIFE keeps to itself: read out through lib, in this copy only */
   const libAt = '    lib: { hashStr, seedOf,';
+  const apiAt = '    enter, withdraw, nextMatch, reportMatch, simMatch, advance,';
+  if (!src.includes(apiAt)) throw new Error('ios-golden: the Career API moved');
+  src = src.replace(apiAt, apiAt + ' __elig: id => eligibility(evById(id)).ok, __state: () => JSON.stringify(S),');
   if (!src.includes(libAt)) throw new Error('ios-golden: Career.lib moved');
   /* checkpoints inside create (this copy only): the state after each step the Swift port has reached */
   const at1 = '    assignTiers(Object.keys(S.pop.m).map(Number), i => ratingOf(i, prefOf(i)));';
@@ -503,7 +506,19 @@ function build() {
     [{ name: 'Siobhan', nat: 'IE', disc: 'snooker', style: 'positional', difficulty: 'easy', start: 'novice', age: 16, avatar: { ini: 'sk', col: '#123abc' } }, 2026]]) {
     S.__trace.length = 0;
     const r = S.Career.create(profile, { seed, save: false });
-    careers.push({ profile, seed, ok: r.ok, id: r.id, trace: S.__trace.slice(), digest: S.Career.digest() });
+    const careersDigest0 = S.Career.digest();
+    const play = [];
+    /* then 40 steps of a season: enter the first event open to the player (its start ahead), advance a week, a match due
+       settled by the model; the digest and the day after each, the whole state every tenth */
+    for (let k = 0; k < 40; k++) {
+      const st = JSON.parse(S.Career.__state()), ev = st.cal.find(e => e.start > st.day && S.Career.__elig(e.id));
+      if (ev) S.Career.enter(ev.id);
+      const a = S.Career.advance('week');
+      let sims = 0;
+      if (a.stopped === 'match') { S.Career.simMatch(); sims++; }
+      play.push({ enter: ev ? ev.id : null, stop: a.stopped, sims, day: JSON.parse(S.Career.__state()).day, digest: S.Career.digest(), state: k % 10 === 9 ? S.Career.__state() : null });
+    }
+    careers.push({ profile, seed, ok: r.ok, id: r.id, trace: S.__trace.slice(), digest: careersDigest0, play });
   }
   const career = JSON.stringify({ seed: 4242, players, models, brackets, tourneys, careers, consts: L.__consts(), hashes: ['', 'a', 'felt', 'Zhao|9|p'].map(x => [x, L.hashStr(x)]) });
   const q = v => JSON.stringify(v);

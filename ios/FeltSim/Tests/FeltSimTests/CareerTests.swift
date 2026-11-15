@@ -46,7 +46,7 @@ import Testing
       let fmt = B["fmt"] as! String, n = Int(Self.num(B["n"])), T = CareerLib.makeBracket(fmt, n)
       let want = B["M"] as! [[String: Any]]
       #expect(T.M.count == want.count, "\(fmt) \(n): \(T.M.count) matches vs \(want.count)")
-      func ref(_ r: CareerLib.Ref) -> [String] { switch r { case .s(let i): return ["s", "\(i)"]; case .w(let m): return ["w", "\(m)"]; case .l(let m): return ["l", "\(m)"]; case .n: return ["n"] } }
+      func ref(_ r: CareerLib.Ref) -> [String] { switch r { case .s(let i): return ["s", "\(i)"]; case .w(let m): return ["w", "\(m)"]; case .l(let m): return ["l", "\(m)"]; case .g(let g, let k): return ["g", "\(g)", "\(k)"]; case .n: return ["n"] } }
       for (i, w) in want.enumerated() where i < T.M.count {
         let x = T.M[i], wa = (w["a"] as! [Any]).map { "\($0)" }, wb = (w["b"] as! [Any]).map { "\($0)" }
         #expect(ref(x.a) == wa && ref(x.b) == wb && x.br == w["br"] as! String && x.rd == Int(Self.num(w["rd"])) && x.dep == Int(Self.num(w["dep"])), "\(fmt) \(n) match \(i)")
@@ -58,7 +58,7 @@ import Testing
       for (k, step) in (B["steps"] as! [[[Any]]]).enumerated() {
         let c = CareerLib.Ctx(T, f, cur)
         for (m, w) in step.enumerated() {
-          let o = CareerLib.outcome(c, m), enc = { (v: Int?) -> Int in v ?? -2 }
+          let o = CareerLib.outcome(c, m), enc = { (v: Int?) -> Int in v == nil ? -2 : v == CareerLib.NONE ? -1 : v! }
           #expect(o.st == w[0] as! String && enc(o.a) == (w[1] as! NSNumber).intValue && enc(o.b) == (w[2] as! NSNumber).intValue && enc(o.w) == (w[3] as! NSNumber).intValue,
                   "\(fmt) \(n) step \(k) match \(m): \(o) vs \(w)")
         }
@@ -108,6 +108,22 @@ import Testing
       }
       #expect(E.digest() == c["digest"]!.s, "\(c["profile"]!["name"]!.s): Career.digest() \(E.digest()) vs \(c["digest"]!.s)")
       E.trace = []
+      /* a season played: enter the first event open, a week ahead, a match due settled by the model */
+      let name = c["profile"]!["name"]!.s
+      for (k, step) in (c["play"]?.a ?? []).enumerated() {
+        let day = E.S["day"]!.i
+        let ev = E.S["cal"]!.a.first { $0["start"]!.i > day && E.eligibility($0).isEmpty }
+        #expect(ev?["id"]?.str == step["enter"]?.str, "\(name) step \(k): entered \(String(describing: ev?["id"])) vs \(String(describing: step["enter"]))")
+        if let ev { E.enter(ev["id"]!.s) }
+        let stop = E.advance(week: true)
+        if stop == "match" { E.simMatch() }
+        #expect(stop == step["stop"]?.str && E.S["day"]!.i == step["day"]!.i, "\(name) step \(k): stopped \(String(describing: stop)) on day \(E.S["day"]!.i)")
+        if let want = step["state"]?.str { let got = E.S.stringify(); if got != want {
+          let w = Array(want.utf8), g = Array(got.utf8), i = (0..<Swift.min(w.count, g.count)).first { w[$0] != g[$0] } ?? Swift.min(w.count, g.count)
+          Issue.record("\(name) step \(k): first difference at \(i): ...\(String(decoding: g[Swift.max(0, i - 80)..<Swift.min(g.count, i + 80)], as: UTF8.self))... vs ...\(String(decoding: w[Swift.max(0, i - 80)..<Swift.min(w.count, i + 80)], as: UTF8.self))...")
+        } }
+        if E.digest() != step["digest"]!.s { Issue.record("\(name) step \(k): digest \(E.digest()) vs \(step["digest"]!.s)"); break }
+      }
     }
   }
 }

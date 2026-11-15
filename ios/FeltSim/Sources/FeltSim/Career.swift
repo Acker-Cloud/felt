@@ -11,6 +11,8 @@ public final class CareerEngine {
   public var S: JV = .null
   /* memStore: getItem / setItem / removeItem (the page's localStorage) */
   public var store: [String: String] = [:]
+  /* the boundaries crossed during the current call ("match", "event", "season") */
+  public var bounds: [String] = []
   public init() {}
   static let C = CareerData.C
   static func c(_ k: String) -> JV { C[k]! }
@@ -566,6 +568,9 @@ public final class CareerEngine {
     if S["me"]!["fr"] == nil { let d = S["profile"]!["disc"]!.s, fr = CareerLib.round(CareerLib.rate(humanAttrs(), d, d) * Self.c("FR_K").d); S["me"]?["fr"] = .n(fr) }
     if S["me"]!["cardAt"] == nil { let sea = season; S["me"]?["cardAt"] = .n(sea) }
   }
+
+  /* the season's end (rollSeason): not ported yet, the golden stays in season 1 */
+  func rollSeason() { fatalError("Career: rollSeason is not ported yet") }
 
   public func digest() -> String { String(CareerLib.hashStr(S.stringify()), radix: 36) }
 }
