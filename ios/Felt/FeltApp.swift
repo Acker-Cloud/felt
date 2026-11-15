@@ -228,6 +228,13 @@ struct Home: View {
       /* `-felt-career`: the career's screen open */
       if a.contains("-felt-career") { showCareer = true }
       if a.contains("-felt-tourney") { store.start(Tourney.make(kind: "9", ruleset: nil, size: 8, fmt: "single", race: 3, field: "mixed", seed: 11)); showTourney = true }
+      /* `-felt-tourney-done won|lost`: a 4-player tournament played out (each of my matches won 3-0, or the first lost 0-3) */
+      if let i = a.firstIndex(of: "-felt-tourney-done"), i + 1 < a.count {
+        store.start(Tourney.make(kind: "9", ruleset: nil, size: 4, fmt: "single", race: 3, field: "mixed", seed: 11))
+        var guardN = 0
+        while let t = store.tour, !t.done, let m = t.mine(), guardN < 8 { store.report(m, a[i + 1] == "won" ? 3 : 0, a[i + 1] == "won" ? 0 : 3, false); guardN += 1 }
+        showTourney = true
+      }
       if let i = a.firstIndex(of: "-felt-party"), i + 1 < a.count, let n = Int(a[i + 1]) { party = PartyGo(game: .nine, names: (1...n).map { "Player \($0)" }, ruleset: "9-ring") }
       if let i = a.firstIndex(of: "-felt-exhibit"), i + 1 < a.count, let g = TableGame(rawValue: a[i + 1]) { exhibit = Exhibit(game: g, levels: ["medium", "hard"]) }
       /* `-felt-landscape left|right`: the interface turned on its side (the simulator cannot be turned from a script) */
@@ -1061,9 +1068,79 @@ struct TourneyRun: View {
   }
 }
 
+/* MD_PAGES.tour, over: the winner's screen. Tournament Over: a card with the champion's avatar (You when it is you)
+   and "You are the champion" or "<name> wins it" over its line; Final Places, the top eight by rank (and You after
+   them when further down); New Tournament and Home */
+struct TourneyDone: View {
+  @Bindable var store: TourneyStore
+  let t: Tourney
+  let home: () -> Void
+  @State private var fresh = false
+  /* placeWords: champion, runner-up, else the ordinal */
+  static func placeWords(_ p: Int) -> String {
+    if p == 1 { return "champion" }; if p == 2 { return "runner-up" }
+    let s = p % 100 >= 11 && p % 100 <= 13 ? "th" : [1: "st", 2: "nd", 3: "rd"][p % 10] ?? "th"
+    return "\(p)\(s)"
+  }
+  var body: some View {
+    let pl = t.place ?? t.size, places = t.places ?? [], champ = places.first { $0[1] == 1 }.map { t.field[$0[0]] }
+    let kind = TourneyRun.KIND_LINE[t.kind] ?? t.kind
+    ScrollView {
+      VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("\(kind), \(t.size) players, race to \(TourneyRun.unitWords(t.kind, t.race))").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+          Text("Quick Tournament").font(.system(size: 28, weight: .bold)).accessibilityAddTraits(.isHeader)
+        }
+        if !t.msg.isEmpty { Text(t.msg).font(.system(size: 15)) }
+        ModeField("Tournament Over") {
+          HStack(spacing: 12) {
+            let name = pl == 1 ? "You" : champ?.name ?? ""
+            let ini = name.split(separator: " ").compactMap { $0.first }.prefix(2).map(String.init).joined()
+            Text(ini).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).frame(width: 46, height: 46)
+              .background(Circle().fill(css(TourneyRun.AV_COLS[Int(TourneyRun.hashStr(name) % UInt32(TourneyRun.AV_COLS.count))])))
+              .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+              Text(pl == 1 ? "You are the champion" : "\(champ?.name ?? "") wins it").font(.system(size: 17, weight: .semibold))
+              Text(pl == 1 ? "\(kind), \(t.size) players: the title is yours." : "You finished \(Self.placeWords(pl)) of \(t.size).")
+                .font(.system(size: 15)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+            }
+          }
+          .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+          .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(rgb: 0x1c, 0x1c, 0x1f)))
+        }
+        ModeField("Final Places") {
+          VStack(spacing: 0) {
+            let rows = Array(places.prefix(8)) + (pl > 8 ? [[0, pl]] : [])
+            ForEach(Array(rows.enumerated()), id: \.offset) { i, p in
+              HStack(spacing: 12) {
+                Text("\(p[1])").font(.system(size: 15, weight: .bold)).monospacedDigit().frame(width: 28)
+                Text(p[0] == 0 ? "You" : t.field[p[0]].name).font(.system(size: 17, weight: p[0] == 0 ? .bold : .regular))
+                Spacer()
+              }
+              .padding(.horizontal, 16).frame(minHeight: 44)
+              if i < rows.count - 1 { Divider().padding(.leading, 56) }
+            }
+          }
+          .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(rgb: 0x1c, 0x1c, 0x1f)))
+        }
+        HStack(spacing: 8) {
+          Button { fresh = true } label: { Text("New Tournament").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("tourney-new")
+          Button(action: home) { Text("Home").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(Color(rgb: 0x2c, 0x2c, 0x30))).foregroundStyle(.white)
+        }
+      }
+      .padding(.horizontal, 16).padding(.bottom, 24)
+    }
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+    .navigationDestination(isPresented: $fresh) { TourneySetup(store: store) }
+  }
+}
+
 struct TourneyView: View {
   @Bindable var store: TourneyStore
   let play: () -> Void
+  @Environment(\.dismiss) private var dismiss
   @State private var kind = "9"
   @State private var size = 8
   @State private var fmt = "single"
@@ -1075,6 +1152,7 @@ struct TourneyView: View {
   var body: some View {
     if store.tour == nil { TourneySetup(store: store) }
     else if let t = store.tour, !t.done { TourneyRun(store: store, t: t, play: play) }
+    else if let t = store.tour { TourneyDone(store: store, t: t, home: { dismiss() }) }
     else { list }
   }
   private var list: some View {
