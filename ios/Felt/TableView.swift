@@ -257,7 +257,8 @@ struct TableCanvas: View {
     let mid = -(band.co + band.rail) / 2   /* the band's middle, metres out from the nose */
     /* the rail's run on screen: along y (upright, the head rail at x = 0) or along x (on its side, the rail at y = TW) */
     func at(_ u: Double) -> CGPoint { m.upright ? m.pt(mid, u) : m.pt(u, s.TW - mid) }
-    let ph = (band.rail - band.co) * m.k * 0.62, dot = ph * 0.8
+    /* the pill's height: the wood's, but never under Caption 2's 11 pt (--rf), as the page widens slim wood to WOOD_MIN */
+    let ph = Swift.max(14, (band.rail - band.co) * m.k * 0.62), dot = ph * 0.8
     /* the gaps: the rail's span less every pocket (hole, jaws) and sight, with their pads */
     let len = m.upright ? s.TW : s.TL
     var spans: [[Double]] = [[0, len]]
@@ -277,6 +278,8 @@ struct TableCanvas: View {
       holes.append([c - h, c + h])
     }
     for h in holes { spans = spans.flatMap { [[$0[0], Swift.min($0[1], h[0])], [Swift.max($0[0], h[1]), $0[1]]] }.filter { $0[1] - $0[0] > 0.01 } }
+    /* a gap across the middle (snooker's head rail has no sights) holds both seats: split it there */
+    spans = spans.flatMap { $0[0] < len / 2 && $0[1] > len / 2 ? [[$0[0], len / 2], [len / 2, $0[1]]] : [$0] }
     let left = spans.filter { ($0[0] + $0[1]) / 2 < len / 2 }.sorted { $0[1] > $1[1] }, right = spans.filter { ($0[0] + $0[1]) / 2 >= len / 2 }.sorted { $0[0] < $1[0] }
     /* upright the screen's left is the table's y = 0 side; on its side, x = 0 */
     let seats: [(Int, [Double]?)] = [(0, left.first), (1, right.first)]
@@ -304,7 +307,7 @@ struct TableCanvas: View {
       }
       if items.isEmpty { items.append(("pip", 0, "")) }
       /* each item's width, then laid out centred in the gap */
-      let font = Font.system(size: ph * 0.78, weight: .bold, design: .rounded).monospacedDigit()
+      let font = Font.system(size: Swift.max(11, ph * 0.78), weight: .bold, design: .rounded).monospacedDigit()
       let widths = items.map { it -> Double in it.kind == "num" || it.kind == "of" ? Double(ctx.resolve(Text(it.text).font(font)).measure(in: CGSize(width: 200, height: 100)).width) : dot }
       let gap = ph * 0.22, total = widths.reduce(0, +) + gap * Double(items.count - 1)
       let c0 = at((span[0] + span[1]) / 2)
@@ -330,7 +333,7 @@ struct TableCanvas: View {
           g2.stroke(Path(ellipseIn: CGRect(x: cx - dot * 0.3, y: cy - dot * 0.3, width: dot * 0.6, height: dot * 0.6)), with: .color(ink), lineWidth: 1.5)
         default:
           let col: Color = it.kind == "num" && it.n >= 70 ? { let c = ballColor(it.n); return Color(rgb: c.0, c.1, c.2) }() : ink
-          let t = Text(it.text).font(it.kind == "of" ? Font.system(size: ph * 0.6, weight: .semibold, design: .rounded) : font).foregroundColor(col)
+          let t = Text(it.text).font(it.kind == "of" ? Font.system(size: Swift.max(11, ph * 0.6), weight: .semibold, design: .rounded) : font).foregroundColor(col)
           var e = g2; e.addFilter(.shadow(color: edge, radius: 0.7))
           e.draw(t, at: CGPoint(x: cx, y: cy))
         }
