@@ -58,6 +58,8 @@ final class TableModel {
   /* the status line (the page's say()) and the banner over the table (flash()) */
   private(set) var msg = ""
   private(set) var banner: (title: String, sub: String, until: TimeInterval)?
+  /* a flash asked for before the clock runs (a new rack): shown for its ms from the next tick */
+  @ObservationIgnored private var flashDue: (String, String, TimeInterval)?
   var rulesKind: String? { ["8": "8", "9": "9", "10": "10", "heyball": "heyball", "snooker": "snooker", "carom": "carom"][game.table.2] }
 
   /* the baked table (FeltRender: index.html's paintTable and vignette) for one screen size */
@@ -147,6 +149,10 @@ final class TableModel {
       }
       syncBalls()
       msg = k == "snooker" ? "\(Words.dWords(0)). On a red." : k == "carom" ? "\(Words.nameOf(0)) to break: the red first." : "\(Words.nameOf(0)) to break."
+      /* start()'s flash: who breaks, and where the ball goes (1.4 s; carom 1.6 s, the race) */
+      let brk = cpuLevel != nil ? "You break" : "Player 1 breaks"
+      if k == "carom" { flashDue = (brk, "Hit the red first. \(g!.need == 1 ? "One cushion" : "Three cushions"), \(g!.race!) points", 1.6) }
+      else { flashDue = (brk, k == "snooker" ? "Ball in hand in the D" : "Ball in hand behind the line", 1.4) }
       randomOrient(); aimAtNearest()
       return
     }
@@ -204,6 +210,7 @@ final class TableModel {
     defer { frame &+= 1 }
     if paused { lastT = nil; return }
     self.now = now
+    if let f = flashDue { banner = (f.0, f.1, now + f.2); flashDue = nil }
     pots.removeAll { now - $0.t >= TableModel.POT_MS }
     if let b = banner, now >= b.until { banner = nil }
     potTrack()

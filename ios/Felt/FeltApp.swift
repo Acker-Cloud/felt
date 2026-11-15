@@ -69,6 +69,7 @@ struct TableScreen: View {
             TableCanvas(model: model, look: Look.of(model.game))
               .onChange(of: tl.date) { _, d in model.tick(d.timeIntervalSinceReferenceDate) }
           }
+          .overlay { FlashBanner(model: model, size: tg.size) }
           .onAppear { model.bake(tg.size, scale: scale) }
           .onChange(of: tg.size) { _, s in model.bake(s, scale: scale) }
           .contentShape(Rectangle())
@@ -280,6 +281,41 @@ struct PowerBar: View {
   }
 }
 
+/* #banner (flash): a word over the table, on the half away from what the player needs to see (placeBanner): the
+   kitchen or the D while the ball is in hand there, else the cue ball; upright 27% or 73% down the table. The page's
+   box: rgba(22, 22, 24, .94), a hairline of --line, 12 pt corners, the head 16 bold, the line under it 12 muted; a
+   foul in the signal red */
+struct FlashBanner: View {
+  let model: TableModel
+  let size: CGSize
+  var body: some View {
+    if let b = model.banner, !model.paused {
+      let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW)
+      let a = m.pt(0, 0), z = m.pt(s.TL, s.TW), top = min(a.y, z.y), H = abs(z.y - a.y), left = min(a.x, z.x), W = abs(z.x - a.x)
+      let at: CGPoint = model.inHand && s.TABLE != "carom" ? m.pt(s.HEAD_X / 2, s.TW / 2) : model.cue.map { m.pt($0.x, $0.y) } ?? m.pt(s.TL / 2, s.TW / 2)
+      let foul = b.title.hasPrefix("Foul")
+      let pos: CGPoint = m.upright ? CGPoint(x: left + W / 2, y: top + H * (at.y > top + H / 2 ? 0.27 : 0.73))
+        : CGPoint(x: left + W * (at.x > left + W / 2 ? 0.32 : 0.68), y: top + H * (at.y >= top + H / 2 ? 0.3 : 0.7))
+      VStack(spacing: 1) {
+        Text(b.title).font(.system(size: 16, weight: .bold)).kerning(-0.16)
+        if !b.sub.isEmpty { Text(b.sub).font(.system(size: 12)).foregroundStyle(foul ? .white : Color(rgb: 0xa3, 0xa3, 0xaa)) }
+      }
+      .multilineTextAlignment(.center)
+      /* width: max-content, up to min(84%, 300) with the padding */
+      .frame(maxWidth: min(size.width * 0.84, 300) - 28)
+      .fixedSize()
+      .padding(.horizontal, 14).padding(.top, 7).padding(.bottom, 8)
+      .background(RoundedRectangle(cornerRadius: 12).fill(foul ? Color(rgb: 0xc0, 0x39, 0x2b) : Color(.sRGB, red: 22 / 255, green: 22 / 255, blue: 24 / 255, opacity: 0.94)))
+      .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(foul ? Color(rgb: 0xd9, 0x58, 0x4a) : Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
+      .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
+      .position(pos)
+      .allowsHitTesting(false)
+      .transition(.opacity)
+      .accessibilityElement(children: .combine)
+    }
+  }
+}
+
 /* over the table: the banner after a shot (flash), a choice the rules give (5c's option box), and the
    game over (showOver), each in the HIG's materials */
 struct Overlays: View {
@@ -318,15 +354,6 @@ struct Overlays: View {
             .accessibilityIdentifier("choice-\(c)")
         } }
       }
-    } else if let b = model.banner {
-      VStack(spacing: 4) {
-        Text(b.title).font(.title3.weight(.semibold))
-        if !b.sub.isEmpty { Text(b.sub).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center) }
-      }
-      .padding(.horizontal, 20).padding(.vertical, 12)
-      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-      .allowsHitTesting(false)
-      .transition(.opacity)
     }
   }
   private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
