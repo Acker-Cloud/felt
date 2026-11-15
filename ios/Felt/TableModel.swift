@@ -154,6 +154,16 @@ final class TableModel {
     /* a career match (careerTerms): its event's calls and table, the event's own words */
     var call: CallConfig? = nil, spec: (table: String, shape: String?, pockets: String)? = nil, career = false, dress: Dress? = nil }
   private(set) var tmatch: TMatch?
+  /* audit F5: a CPU quick game the player has shot in (cpuGameLive) */
+  @ObservationIgnored private var begun = false
+  var cpuGameLive: Bool { begun && cpuLevel != nil && exhib == nil && tmatch == nil && g?.mode == nil && g?.winner == nil }
+  /* abandonCpuGame: left before its end, it counts as a loss */
+  func abandonCpuGame() {
+    guard cpuGameLive, let k = g?.kind, let lv = cpuLevel else { begun = false; return }
+    begun = false
+    Rec.dropAbandon()
+    Rec.countLoss(k, lv)
+  }
   /* the visit so far (stats.visit): its shooter and legal pots */
   @ObservationIgnored private var visit: (p: Int, pots: Int)? = nil
   /* what the table, the cue and the balls wear (4l) */
@@ -221,6 +231,7 @@ final class TableModel {
   }
 
   func rerack() {
+    abandonCpuGame()
     rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], [], [], []]; potCount = 0; banner = nil
     if let k = rulesKind {
       /* newGame with the settings' rules, snooker's frames and carom's race and cushions */
@@ -394,6 +405,8 @@ final class TableModel {
     /* the record (recordShot, recordFrame): the visit's legal pots (any shooter), then a human shot's numbers */
     if visit?.p != shooter { visit = (shooter, 0) }
     visit!.pots += Rec.legal(before, shot, next)
+    /* markBegun: the player's first shot of a CPU game */
+    if !begun, cpuLevel != nil, exhib == nil, tmatch == nil, before.mode == nil, shooter == 0 { begun = true; Rec.markBegun(before.kind, cpuLevel!) }
     if exhib == nil && !(cpuLevel != nil && shooter != 0) { Rec.shot(before, shot, next, p: shooter, vis: visit!.pots, pockets: sim.POCKETS) }
     if exhib == nil && next.kind == "snooker" { Rec.frame(next, cpu: cpuLevel != nil) }
     g = next; rolling = nil; spin = Spin(); v3Top2d = false

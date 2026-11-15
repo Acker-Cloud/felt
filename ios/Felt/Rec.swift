@@ -80,9 +80,31 @@ struct Rec: Codable {
     if form.count > Rec.FORM_MAX { form.removeFirst(form.count - Rec.FORM_MAX) }
   }
 
+  /* audit F5: a game against the CPU left before it ends (Quit, Restart, or the app closed) counts as a loss once the
+     player has taken a shot in it. The first shot leaves a marker (ABANDON_KEY) that the game's end removes; one still
+     there at launch is a game left by closing the app, and counts the same */
+  static let ABANDON = "felt.abandon.v1"
+  static func markBegun(_ kind: String, _ level: String) { UserDefaults.standard.set([kind, level], forKey: ABANDON) }
+  static func dropAbandon() { UserDefaults.standard.removeObject(forKey: ABANDON) }
+  @discardableResult static func countLoss(_ kind: String, _ level: String) -> Bool {
+    guard KINDS.contains(kind), LEVELS.contains(level) else { return false }
+    var r = load()
+    r.kinds[kind]!.played += 1; r.kinds[kind]!.cpu[level]!.l += 1; r.streak = 0
+    r.formAdd(kind, false, level)
+    r.save()
+    return true
+  }
+  /* boot: a game left by closing the app */
+  static func abandonedAtBoot() -> Bool {
+    let o = UserDefaults.standard.stringArray(forKey: ABANDON)
+    dropAbandon()
+    guard let o, o.count == 2 else { return false }
+    return countLoss(o[0], o[1])
+  }
   /* recordGame: a game's end (an exhibition or a solo mode is nobody's game) */
   static func game(_ g: Game, level: String?) {
     guard g.mode == nil, let w = g.winner else { return }
+    dropAbandon()
     var r = load()
     guard r.kinds[g.kind] != nil else { return }
     r.kinds[g.kind]!.played += 1

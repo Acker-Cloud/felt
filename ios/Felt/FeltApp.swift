@@ -24,6 +24,9 @@ struct Home: View {
   @State private var intro = IntroModel()
   @State private var titleRect = CGRect.zero
   @State private var statsPath: String? = nil
+  /* #leftNote: a game left by closing the app counted as a loss, once, until OK or LEFT_MS */
+  @State private var leftNote = false
+  @State private var booted = false
   struct PartyGo: Identifiable { let game: TableGame, names: [String], ruleset: String; var id: String { ruleset + names.joined() } }
   struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var archs: [String] = ["allround", "allround"]; var id: String { game.rawValue + levels.joined() + archs.joined() } }
   var body: some View {
@@ -125,6 +128,26 @@ struct Home: View {
     }
     .overlay { if intro.state != .done { IntroOverlay(model: intro, title: titleRect) } }
     .onChange(of: playing) { _, g in if let g { Prefs.last = g.table.2 } }
+    .overlay(alignment: .bottom) {
+      if leftNote {
+        HStack(alignment: .center, spacing: 12) {
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Counted as a Loss").font(.headline)
+            Text("Your last game against the CPU was left unfinished and counted as a loss.").font(.subheadline).foregroundStyle(.secondary)
+          }
+          Spacer(minLength: 8)
+          Button("OK") { leftNote = false }.font(.headline).foregroundStyle(.primary).frame(minWidth: 44, minHeight: 44).accessibilityIdentifier("leftOk")
+        }
+        .padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal, 16).padding(.bottom, 12)
+        .accessibilityElement(children: .combine).accessibilityAddTraits(.updatesFrequently)
+        .task { try? await Task.sleep(for: .seconds(12)); leftNote = false }
+      }
+    }
+    .task {
+      guard !booted else { return }
+      booted = true
+      if Rec.abandonedAtBoot() { leftNote = true }
+    }
     .fullScreenCover(item: $playing) { g in TableScreen(model: TableModel(game: g, cpu: opponent == "two" ? nil : opponent)) }
     .fullScreenCover(item: $exhibit) { e in TableScreen(model: TableModel(game: e.game, exhib: e.levels, exhibArch: e.archs)) }
     .fullScreenCover(isPresented: $playingTourney) {
@@ -175,7 +198,8 @@ struct TableScreen: View {
       }
     }
     .background(Color(rgb: 9, 9, 10).ignoresSafeArea())
-    .overlay { Overlays(model: model, back: { dismiss() }) }
+    .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
+    .onDisappear { model.abandonCpuGame() }
     .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
     .overlay { if let h = model.handoff, !model.paused { Handoff(model: model, p: h.p, first: h.first) } }
     /* the exhibition's bar: the speed (felt.speed), over the table's top */
