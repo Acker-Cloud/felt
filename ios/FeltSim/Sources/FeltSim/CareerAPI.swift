@@ -325,3 +325,29 @@ extension CareerEngine {
     return c
   }
 }
+
+/* evView: an event as the page's Career.event and calendar().events show it (the event's own fields plus kindName,
+   fmtName, tierName, circuit, game, live, week, status, entered, conflict, defending, champion) */
+extension CareerEngine {
+  public func evView(_ ev: JV) -> JV {
+    let id = ev["id"]!.s, e = S["es"]![id] ?? [:]
+    let conflict = S["cal"]!.a.first { o in o["id"]!.s != id && truthy(S["es"]![o["id"]!.s]?["en"]) && !truthy(S["es"]![o["id"]!.s]?["done"]) && overlaps(o, ev) }
+    let status = truthy(e["x"]) ? "cancelled" : truthy(e["done"]) ? "done" : e["f"] != nil ? "live" : truthy(e["en"]) ? "entered" : S["day"]!.i <= ev["dl"]!.i ? "open" : "closed"
+    let ch = ev["ser"].flatMap { $0.truthy ? S["ch"]![String($0.i)]?.arr?.last : nil }
+    let C = { (k: String) in Self.c(k) }
+    var v = ev
+    v["kindName"] = C("EVENT_KINDS")[ev["kind"]!.s] ?? .null
+    v["fmtName"] = C("FORMATS")[ev["fmt"]!.s] ?? .null
+    v["tierName"] = C("TIERS")[ev["tier"]!.i]?["name"] ?? .null
+    v["circuit"] = C("CIRCUITS")[ev["circ"]?.i ?? 0] ?? .null
+    v["game"] = C("GAMES")[ev["disc"]!.s]?["name"] ?? .null
+    v["live"] = C("GAMES")[ev["disc"]!.s]?["live"] ?? false
+    v["week"] = .n(weekOf(ev["start"]!.i))
+    v["status"] = .str(status)
+    v["entered"] = .bool(truthy(e["en"]))
+    v["conflict"] = conflict?["id"] ?? .null
+    v["defending"] = .bool(ch.map { $0[1]!.i == Self.HUMAN && $0[0]!.i == season - 1 } ?? false)
+    v["champion"] = ch.map { ["season": $0[0]!, "id": $0[1]!, "name": cardOf($0[1]!.i)["name"]!] } ?? .null
+    return v
+  }
+}

@@ -712,30 +712,153 @@ struct CareerHubGroups: View {
   }
 }
 
-/* PAGES.calendar, in brief: the events still taking entries, with the week, fee, and Enter where you may */
+/* PAGES.calendar: the season and week over Calendar; Open to You (the events you can enter now), Entered, All (the
+   season, each still taking entries with its eligibility); each row its week, name, game, kind and tier (and why
+   not, when not eligible), and its state or cost; the page's note */
 struct CareerCalendar: View {
   @Bindable var store: CareerStore
+  @State private var tab = "open"
   var body: some View {
     let _ = store.rev
-    let E = store.E, S = E.S, day = S["day"]!.i, Y = CareerEngine.const("YEAR").i
-    let list = S["cal"]!.a.filter { day <= ($0["dl"]?.i ?? 0) && $0["opp"] == nil }
+    let E = store.E, S = E.S, day = S["day"]!.i, es = S["es"]!
+    let views = S["cal"]!.a.map { E.evView($0) }
+    let avail = S["cal"]!.a.filter { day <= $0["dl"]!.i && !truthy(es[$0["id"]!.s]?["en"]) && $0["opp"] == nil }.map { $0["id"]!.s }
+    let list: [JV] = tab == "open" ? views.filter { avail.contains($0["id"]!.s) && E.eligibility($0).isEmpty }
+      : tab == "entered" ? views.filter { truthy(es[$0["id"]!.s]?["en"]) && !truthy(es[$0["id"]!.s]?["done"]) }
+      : views.filter { $0["status"]!.s != "cancelled" }
     List {
+      CareerTitle(kick: "Season \(E.season), week \(E.weekOfDay(day))", title: "Calendar")
       Section {
-        ForEach(list.indices, id: \.self) { i in
-          let ev = list[i], id = ev["id"]!.s, entered = truthy(S["es"]![id]?["en"]), why = E.eligibility(ev)
-          HStack {
-            VStack(alignment: .leading, spacing: 2) {
-              Text(ev["name"]!.s)
-              Text("\(CareerStore.gameName(ev["disc"]!.s)), week \(ev["start"]!.i % Y / 7 + 1), tier \(ev["tier"]?.i ?? 0)" + (entered ? ", entered" : why.isEmpty ? "" : ". \(why[0].prefix(1).uppercased() + why[0].dropFirst())"))
-                .font(.footnote).foregroundStyle(.secondary)
+        Picker("Show", selection: $tab) { Text("Open to You").tag("open"); Text("Entered").tag("entered"); Text("All").tag("all") }
+          .pickerStyle(.segmented).labelsHidden()
+      }
+      .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+      Section {
+        if list.isEmpty {
+          Text(tab == "entered" ? "Nothing entered. Events open to you are under Open to You."
+               : tab == "open" && !avail.isEmpty ? "Nothing you can enter right now. All lists the season, and what each event needs." : "No events left this season. Advance to the next season from the hub.")
+            .font(.system(size: 15)).foregroundStyle(.secondary)
+        }
+        ForEach(Array(list.enumerated()), id: \.offset) { _, e in
+          let id = e["id"]!.s, isAvail = avail.contains(id), why = isAvail ? E.eligibility(e) : [], st = e["status"]!.s
+          let val = st == "entered" ? "Entered" : st == "live" ? "Under way" : st == "done" ? "Over" : st == "closed" ? "Closed"
+            : isAvail ? (why.isEmpty ? CareerWords.crWords(e["fee"]!.d + e["trav"]!.d) : "Not eligible") : CareerWords.crWords(e["fee"]!.d + e["trav"]!.d)
+          NavigationLink { CareerEvent(store: store, id: id) } label: {
+            HStack(spacing: 12) {
+              VStack(spacing: 0) {
+                Text("Wk").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("\(e["week"]!.i)").font(.system(size: 17, weight: .bold)).monospacedDigit()
+              }
+              .frame(width: 34)
+              VStack(alignment: .leading, spacing: 1) {
+                Text(e["name"]!.s.replacingOccurrences(of: "-", with: "\u{2011}")).font(.system(size: 17)).fixedSize(horizontal: false, vertical: true).accessibilityLabel(e["name"]!.s)
+                Text("\(e["game"]!.s), \(e["kindName"]!.s), tier \(e["tier"]!.i)" + (why.isEmpty ? "" : ". \(why[0].prefix(1).uppercased() + why[0].dropFirst())"))
+                  .font(.system(size: 15)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+              }
+              Spacer(minLength: 8)
+              Text(val).font(.system(size: 15, weight: truthy(e["entered"]) ? .semibold : .regular)).monospacedDigit()
+                .foregroundStyle(truthy(e["entered"]) ? Color(rgb: 0x3d, 0xdc, 0x84) : !why.isEmpty ? Color(rgb: 0xff, 0x8a, 0x7a) : Color.secondary)
             }
-            Spacer()
-            if !entered && why.isEmpty { Button(CareerWords.crWords(ev["fee"]!.d + ev["trav"]!.d)) { E.enter(id); store.touch() }.buttonStyle(.borderless).bold().foregroundStyle(.white) }
+          }
+          .accessibilityIdentifier("ev-" + id.replacingOccurrences(of: ".", with: "-"))
+        }
+      } footer: {
+        Text("Entry fees come back if you withdraw before the deadline; travel does not. Weeks 51 and 52 are the off-season.").font(.system(size: 13))
+      }
+      .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+    }
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+/* PAGES.event: the kind and tier over the name; the card's lines (Where, When, Entries close, Format, Game, Rules, Race,
+   Custom, Entry, Purse, Ranking points, Last champion, Status); Enter (or why you cannot), Withdraw, Bracket and
+   Standings */
+struct CareerEvent: View {
+  @Bindable var store: CareerStore
+  let id: String
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, ev = E.S["cal"]!.a.first { $0["id"]!.s == id }
+    List {
+      if let ev {
+        let e = E.evView(ev), why = E.eligibility(ev), st = e["status"]!.s, r = e["rules"]!
+        let wk = { (d: String) in E.weekOfDay(e[d]!.i) }
+        CareerTitle(kick: "\(e["kindName"]!.s), tier \(e["tier"]!.i)", title: e["name"]!.s)
+        if !store.msg.isEmpty { Section { Text(store.msg).font(.system(size: 15)) } }
+        Section {
+          VStack(spacing: 6) {
+            line("Where", "\(e["venue"]?.str ?? ""), \(e["city"]?.str ?? "")")
+            line("When", wk("start") == wk("end") ? "Week \(wk("start"))" : "Weeks \(wk("start")) to \(wk("end"))")
+            line("Entries Close", "Week \(wk("dl"))")
+            line("Format", "\(e["fmtName"]!.s), \(e["size"]!.i) players")
+            line("Game", "\(e["game"]!.s), \(CareerWords.tableWords(r))")
+            line("Rules", CareerWords.rulesWords(r))
+            line("Race", "First to \(CareerWords.unitWords(e["disc"]!.s, e["race"]!.i))")
+            if let c = r["custom"]?.str { line("Custom", c) }
+            line("Entry", "\(CareerWords.crWords(e["fee"]!.d)) fee, \(CareerWords.crWords(e["trav"]!.d)) travel")
+            line("Purse", CareerWords.crWords(e["purse"]?.d ?? 0))
+            line("Ranking Points", (e["pts"]?.d ?? 0) > 0 ? "\(e["pts"]!.i) to the winner, \(e["circuit"]!.s)" : "None")
+            if let ch = e["champion"], ch != .null { line("Last Champion", "\(ch["name"]!.s) (season \(ch["season"]!.i))" + (truthy(e["defending"]) ? ", you defend" : "")) }
+            line("Status", ["open": "Open for entries", "closed": "Entries closed", "entered": "Entered", "live": "Under way", "done": "Over", "cancelled": "Cancelled"][st] ?? st)
+          }
+          .padding(.vertical, 6)
+        }
+        if !truthy(e["live"]) { Section { Text("\(e["game"]!.s) matches cannot be played on this table yet: yours are settled by the match model, and shown as simulated.").font(.system(size: 15)).foregroundStyle(.secondary) } }
+        if st == "open" && !truthy(e["entered"]) {
+          if why.isEmpty {
+            Section {
+              act("Enter, \(CareerWords.crWords(e["fee"]!.d + e["trav"]!.d))", "cvEnter", primary: true) {
+                let no = E.enter(id)
+                store.msg = no.isEmpty ? "Entered \(e["name"]!.s): \(CareerWords.crWords(e["fee"]!.d + e["trav"]!.d)) paid." : "Not entered: \(no.joined(separator: ", "))."
+                E.save(); store.touch()
+              }
+            }
+            .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+          } else {
+            Section { ForEach(why, id: \.self) { w in Text(w.prefix(1).uppercased() + w.dropFirst()).font(.system(size: 17)) } } header: { CareerPageHead(t: "Why You Cannot Enter") }
           }
         }
+        if truthy(e["entered"]) && st == "entered" {
+          Section {
+            act("Withdraw", "cvWithdraw", warn: true) {
+              let no = E.withdraw(id)
+              store.msg = no == nil ? "Withdrawn: the \(CareerWords.crWords(e["fee"]!.d)) fee is back, the travel is not." : "Cannot withdraw: \(no!)."
+              E.save(); store.touch()
+            }
+          } footer: { Text("Before the deadline the fee comes back; the travel does not.").font(.system(size: 13)) }
+          .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+        }
+        if st == "live" || st == "done" {
+          Section {
+            NavigationLink { CareerBracket(store: store, id: id) } label: { Text("Bracket and Standings").font(.headline).frame(maxWidth: .infinity) }
+              .accessibilityIdentifier("cvSeeBracket")
+          }
+        }
+      } else {
+        CareerTitle(kick: "Event", title: "Not Found")
+        Section { Text("This event is no longer on the calendar.").foregroundStyle(.secondary) }
       }
     }
-    .navigationTitle("Calendar")
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+    .onDisappear { store.msg = "" }
+  }
+  private func line(_ k: String, _ v: String) -> some View {
+    HStack(alignment: .firstTextBaseline) {
+      Text(k).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+      Spacer(minLength: 12)
+      Text(v).multilineTextAlignment(.trailing)
+    }
+    .font(.system(size: 15))
+  }
+  private func act(_ t: String, _ id: String, primary: Bool = false, warn: Bool = false, _ go: @escaping () -> Void) -> some View {
+    Button(action: go) {
+      Text(t).font(.system(size: 17, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 50)
+        .foregroundStyle(primary ? Color.black : warn ? Color(rgb: 0xff, 0x8a, 0x7a) : Color.white)
+        .background(Capsule().fill(primary ? Color.white : Color(rgb: 0x2c, 0x2c, 0x30)))
+    }
+    .buttonStyle(.plain).accessibilityIdentifier(id)
   }
 }
 
@@ -768,6 +891,8 @@ struct CareerHub: View {
     /* `-felt-career-bracket`: the next match's event's bracket in place of the hub (a test hook) */
     if ProcessInfo.processInfo.arguments.contains("-felt-career-bracket"), let id = nm["event"]?.str {
       CareerBracket(store: store, id: id)
+    } else if ProcessInfo.processInfo.arguments.contains("-felt-career-calendar") {
+      if ProcessInfo.processInfo.arguments.contains("-felt-career-event"), let id = nm["event"]?.str { CareerEvent(store: store, id: id) } else { CareerCalendar(store: store) }
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-options") {
       CareerOptions(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-rivals") {
