@@ -23,6 +23,7 @@ struct Home: View {
   @State private var setupGame: TableGame? = nil
   @State private var intro = IntroModel()
   @State private var titleRect = CGRect.zero
+  @State private var statsPath: String? = nil
   struct PartyGo: Identifiable { let game: TableGame, names: [String], ruleset: String; var id: String { ruleset + names.joined() } }
   struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var archs: [String] = ["allround", "allround"]; var id: String { game.rawValue + levels.joined() + archs.joined() } }
   var body: some View {
@@ -88,9 +89,14 @@ struct Home: View {
       }
       .navigationTitle("").navigationBarTitleDisplayMode(.inline)
       .navigationDestination(isPresented: $showCareer) { CareerView(store: career) }
+      .navigationDestination(item: $statsPath) { k in if k == "all" { StatsView() } else { StatsKindPage(kind: k, rec: Rec.load()) } }
       .navigationDestination(item: $setupGame) { g in GameSetup(game: g) { playing = g } }
       .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { store.markLive(); playingTourney = true } }
       .toolbar {
+        /* #statsBtn: Stats and records (6s) */
+        ToolbarItem(placement: .topBarTrailing) {
+          NavigationLink { StatsView() } label: { Image(systemName: "chart.bar") }.accessibilityLabel("Stats").accessibilityIdentifier("stats")
+        }
         ToolbarItem(placement: .topBarTrailing) {
           NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }.accessibilityLabel("Settings").accessibilityIdentifier("settings")
         }
@@ -104,6 +110,8 @@ struct Home: View {
       /* `-felt-tourney`: the golden's first tournament (9-ball, 8 players, seed 11), its screen open */
       /* `-felt-setup "8-Ball"`: that game's setup open */
       if let i = a.firstIndex(of: "-felt-setup"), i + 1 < a.count { setupGame = TableGame(rawValue: a[i + 1]) }
+      /* `-felt-stats [kind]`: Stats open, or a game's page */
+      if let i = a.firstIndex(of: "-felt-stats") { statsPath = i + 1 < a.count && !a[i + 1].hasPrefix("-") ? a[i + 1] : "all" }
       /* `-felt-career`: the career's screen open */
       if a.contains("-felt-career") { showCareer = true }
       if a.contains("-felt-tourney") { store.start(Tourney.make(kind: "9", ruleset: nil, size: 8, fmt: "single", race: 3, field: "mixed", seed: 11)); showTourney = true }
@@ -1094,7 +1102,7 @@ struct GameSetup: View {
   }
   /* the hero is rebuilt when the table changes */
   /* .wl: the record against that CPU, after the level ("Medium · 3 won, 1 lost") */
-  func wl(_ lv: String) -> String { let r = Record.of(kind, lv); return r.w + r.l > 0 ? " \u{00b7} \(r.w) won, \(r.l) lost" : "" }
+  func wl(_ lv: String) -> String { let r = Rec.load().kinds[kind]?.cpu[lv] ?? RecLevel(); return r.w + r.l > 0 ? " \u{00b7} \(r.w) won, \(r.l) lost" : "" }
   /* the form's rows: Opponent, the CPU's three, then the game's table and rules rows */
   var rows: Int {
     let foes = opponent == "two" ? 0 : 3
@@ -1154,18 +1162,36 @@ struct GameSetup: View {
   }
 }
 
-/* a little ball for a row (the foes' 1, 5 and 8: .b1, .b5, .b8): a lit sphere, the ivory circle to 30%, its number */
+/* a little ball for a row (the page's .ball classes: .b1, .b5, .b8 solids; .b9, .b10, .b14, .b15 stripes; "bb" bumper
+   pool's red with its spot, "bc" carom's yellow, "bsblk" snooker's black): a lit sphere with the inset shade, the ivory
+   circle to 30%, its number */
 struct BallDot: View {
-  let n: Int
+  var n: Int = 0
+  var style: String? = nil
   var body: some View {
-    let c: (Color, Color) = n == 1 ? (Color(rgb: 0xff, 0xd8, 0x66), Color(rgb: 0xd2, 0x9a, 0x0e)) : n == 5 ? (Color(rgb: 0xff, 0x9e, 0x57), Color(rgb: 0xc4, 0x52, 0x0c)) : (Color(rgb: 0x4a, 0x4a, 0x4e), Color(rgb: 0x16, 0x16, 0x18))
     GeometryReader { g in
       let d = min(g.size.width, g.size.height)
       ZStack {
-        Circle().fill(RadialGradient(colors: [c.0, c.1], center: UnitPoint(x: 0.35, y: 0.3), startRadius: 0, endRadius: d * 0.72))
-        Circle().fill(Color(rgb: 0xf6, 0xf4, 0xec)).frame(width: d * 0.6, height: d * 0.6)
-        Text("\(n)").font(.system(size: d * 0.36, weight: .bold)).foregroundStyle(.black)
+        switch style {
+        case "bb":
+          Circle().fill(RadialGradient(colors: [Color(rgb: 0xe0, 0x47, 0x3f), Color(rgb: 0x8e, 0x1a, 0x1d)], center: UnitPoint(x: 0.35, y: 0.3), startRadius: 0, endRadius: d * 0.72))
+          Circle().fill(Color(rgb: 0xf6, 0xf4, 0xec)).frame(width: d * 0.34, height: d * 0.34)
+        case "bc": Circle().fill(RadialGradient(colors: [Color(rgb: 0xff, 0xe4, 0x8a), Color(rgb: 0xc9, 0x95, 0x12)], center: UnitPoint(x: 0.35, y: 0.3), startRadius: 0, endRadius: d * 0.72))
+        case "bsblk": Circle().fill(RadialGradient(colors: [Color(rgb: 0x55, 0x55, 0x5a), Color(rgb: 0x16, 0x16, 0x18)], center: UnitPoint(x: 0.35, y: 0.3), startRadius: 0, endRadius: d * 0.7))
+        default:
+          if let band = [9: Color(rgb: 0xf2, 0xbe, 0x28), 10: Color(rgb: 0x1c, 0x48, 0xb8), 14: Color(rgb: 0x16, 0x78, 0x42), 15: Color(rgb: 0x7a, 0x1e, 0x20)][n] {
+            ZStack { Color(rgb: 0xf6, 0xf4, 0xec); band.frame(height: d * 0.56) }.clipShape(Circle())
+          } else {
+            let c: (Color, Color) = n == 1 ? (Color(rgb: 0xff, 0xd8, 0x66), Color(rgb: 0xd2, 0x9a, 0x0e)) : n == 5 ? (Color(rgb: 0xff, 0x9e, 0x57), Color(rgb: 0xc4, 0x52, 0x0c)) : (Color(rgb: 0x4a, 0x4a, 0x4e), Color(rgb: 0x16, 0x16, 0x18))
+            Circle().fill(RadialGradient(colors: [c.0, c.1], center: UnitPoint(x: 0.35, y: 0.3), startRadius: 0, endRadius: d * 0.72))
+          }
+          Circle().fill(Color(rgb: 0xf6, 0xf4, 0xec)).frame(width: d * 0.6, height: d * 0.6)
+          Text("\(n)").font(.system(size: d * (n >= 10 ? 0.3 : 0.36), weight: .heavy)).foregroundStyle(Color(rgb: 0x14, 0x14, 0x14))
+        }
+        /* the inset shade (box-shadow: inset -4px -5px 8px rgba(0,0,0,.35)) */
+        Circle().fill(RadialGradient(colors: [.clear, .black.opacity(0.35)], center: UnitPoint(x: 0.38, y: 0.35), startRadius: d * 0.3, endRadius: d * 0.62))
       }
+      .frame(width: d, height: d)
     }
     .accessibilityHidden(true)
   }

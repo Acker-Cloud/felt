@@ -154,6 +154,8 @@ final class TableModel {
     /* a career match (careerTerms): its event's calls and table, the event's own words */
     var call: CallConfig? = nil, spec: (table: String, shape: String?, pockets: String)? = nil, career = false, dress: Dress? = nil }
   private(set) var tmatch: TMatch?
+  /* the visit so far (stats.visit): its shooter and legal pots */
+  @ObservationIgnored private var visit: (p: Int, pots: Int)? = nil
   /* what the table, the cue and the balls wear (4l) */
   @ObservationIgnored var dress: Dress = .standard
   /* 4g: the fine-aim wheel held (fineAim), the loupe's fade, place and clock, the guide's last verdict */
@@ -389,6 +391,11 @@ final class TableModel {
     let shooter = before.turn, next = engine.judge(before, shot)
     potCount += next.verdict?.potted.count ?? 0
     if let gm0 = gBefore, gm0.turn < 4 { pottedBy[gm0.turn] += next.verdict?.potted.filter { $0 > 0 } ?? [] }
+    /* the record (recordShot, recordFrame): the visit's legal pots (any shooter), then a human shot's numbers */
+    if visit?.p != shooter { visit = (shooter, 0) }
+    visit!.pots += Rec.legal(before, shot, next)
+    if exhib == nil && !(cpuLevel != nil && shooter != 0) { Rec.shot(before, shot, next, p: shooter, vis: visit!.pots, pockets: sim.POCKETS) }
+    if exhib == nil && next.kind == "snooker" { Rec.frame(next, cpu: cpuLevel != nil) }
     g = next; rolling = nil; spin = Spin(); v3Top2d = false
     /* a party: the device is handed over each time the turn goes to another player (or a choice to another) */
     if party != nil, next.winner == nil, (next.option?.who ?? next.turn) != shooter { handoff = (next.option?.who ?? next.turn, false) }
@@ -401,7 +408,7 @@ final class TableModel {
     /* the page's cues: a win (or, against the CPU, a loss: two soft falling notes), a foul, carom's point, the turn passing */
     if let w = gm.winner {
       sound.cue(cpuLevel != nil && w == 1 ? "lose" : "win")
-      if let lv = cpuLevel, exhib == nil, gm.mode == nil { Record.game(gm.kind, lv, won: w == 0) }
+      if exhib == nil { Rec.game(gm, level: cpuLevel) }
     }
     else if v.foul != nil { sound.cue("foul") }
     else if gm.kind == "carom" && v.carom?.point == true { sound.cue("point") }

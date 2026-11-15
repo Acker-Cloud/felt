@@ -162,22 +162,6 @@ struct SettingsView: View {
   }
 }
 
-/* the record's games against the CPU (rec.kinds[kind].cpu[level], recordGame): wins and losses per game and level, an
-   exhibition nobody's */
-enum Record {
-  static let key = "felt.record.cpu"
-  static func of(_ kind: String, _ level: String) -> (w: Int, l: Int) {
-    let a = (UserDefaults.standard.dictionary(forKey: key)?[kind + "." + level] as? [Int]) ?? [0, 0]
-    return (a.count > 0 ? a[0] : 0, a.count > 1 ? a[1] : 0)
-  }
-  static func game(_ kind: String, _ level: String, won: Bool) {
-    var d = UserDefaults.standard.dictionary(forKey: key) ?? [:], r = of(kind, level)
-    if won { r.w += 1 } else { r.l += 1 }
-    d[kind + "." + level] = [r.w, r.l]
-    UserDefaults.standard.set(d, forKey: key)
-  }
-}
-
 /* rulesInfoOf: the (i) popover's words for a game: the ruleset's name (RULES_SRC), its description, the choices' fine print */
 enum RulesInfo {
   static let SRC = ["8-house": "House rules", "8-wpa": "WPA world standardized rules", "9-house": "House rules", "9-wpa": "WPA world standardized rules, with the push out",
