@@ -122,6 +122,7 @@ struct TableScreen: View {
   @State private var placing = false
   @State private var picking = false
   @State private var gest: AimGesture? = nil
+  @State private var pinch0: Double? = nil
   @Environment(\.displayScale) private var scale
   /* the window's interface orientation, read as the size changes (a turn) */
   private var interface: UIInterfaceOrientation { (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.effectiveGeometry.interfaceOrientation ?? .portrait }
@@ -174,14 +175,33 @@ struct TableScreen: View {
     layout {
       GeometryReader { tg in
         TimelineView(.animation(paused: model.paused)) { tl in
-          Group { if model.view3d && !model.v3Top2d { Table3DView(model: model) } else { TableCanvas(model: model, look: Look.of(model.dress, game: model.game)) } }
+          Group {
+            if model.view3d && !model.v3Top2d {
+              /* the rail row pinned to the stage's foot (V3_PIN_B 26 up), off the projected pockets and sights */
+              Table3DView(model: model).overlay {
+                Canvas { ctx, size in
+                  _ = tl.date
+                  guard let (C, box) = model.v3Cam else { return }
+                  let tc = TableCanvas(model: model, look: Look.of(model.dress, game: model.game)), m = Mapper(size: size, TL: model.sim.TL, TW: model.sim.TW)
+                  tc.drawRail(&ctx, m, model.ballPainter(upright: m.upright, scale: scale), row: (Double(size.height) - 26, Double(size.width), C, box))
+                }
+                .allowsHitTesting(false)
+              }
+            } else { TableCanvas(model: model, look: Look.of(model.dress, game: model.game)) }
+          }
             .onChange(of: tl.date) { _, d in model.tick(d.timeIntervalSinceReferenceDate) }
         }
         .overlay { FlashBanner(model: model, size: tg.size) }
         .onAppear { model.bake(tg.size, scale: scale) }
         .onChange(of: tg.size) { _, s in model.bake(s, scale: scale) }
         .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 0).onChanged { v in touch(v, tg.size, began: v.translation == .zero) }
+        /* v3Pinch: two fingers move the 3D camera in or out (its distance by their spread, kept) */
+        .simultaneousGesture(MagnifyGesture().onChanged { v in
+          guard model.view3d else { return }
+          if pinch0 == nil { pinch0 = model.v3Dist; gest = nil }
+          model.v3Dist = min(V3.DIST[1], max(V3.DIST[0], pinch0! / Double(v.magnification)))
+        }.onEnded { _ in pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist") })
+        .gesture(DragGesture(minimumDistance: 0).onChanged { v in if pinch0 == nil { touch(v, tg.size, began: v.translation == .zero) } }
           .onEnded { v in touchEnd(v, tg.size); placing = false; picking = false; gest = nil })
         .accessibilityElement()
         .accessibilityLabel("Table")

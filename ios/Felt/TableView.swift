@@ -265,7 +265,9 @@ struct TableCanvas: View {
      head rail, on its side the near long rail), each centred in a gap of the rail clear of every pocket and
      sight (railSpans), the score keeper's two in the gaps nearest the middle, snooker's bar in the next. Pearl
      ink (--ink) cut dark all round (RAIL_EDGE), the shooter lit with the lamp's glow, the other dimmed. */
-  private func drawRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter) {
+  /* row: the 3D view's (placeRail when V3.live): the stage's bottom row (V3_PIN_B up from its foot), its gaps the stage's
+     width less every pocket (hole, jaws) and sight as the camera projects them */
+  func drawRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter, row: (y: Double, width: Double, C: V3.Cam, box: V3.Box)? = nil) {
     /* a party of three or four: the cards in the pause menu and the handoff carry the scores (the rail's .many chips are
        not ported) */
     guard let g = model.g, g.winner == nil, (model.party?.names.count ?? 2) <= 2 else { return }
@@ -273,13 +275,32 @@ struct TableCanvas: View {
     let ink = Color(.sRGB, red: 0xef / 255.0, green: 0xe7 / 255.0, blue: 0xda / 255.0), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85)
     let mid = -(band.co + band.rail) / 2   /* the band's middle, metres out from the nose */
     /* the rail's run on screen: along y (upright, the head rail at x = 0) or along x (on its side, the rail at y = TW) */
-    func at(_ u: Double) -> CGPoint { m.upright ? m.pt(mid, u) : m.pt(u, s.TW - mid) }
-    /* the pill's height: the wood's, but never under Caption 2's 11 pt (--rf), as the page widens slim wood to WOOD_MIN */
-    let ph = Swift.max(14, (band.rail - band.co) * m.k * 0.62), dot = ph * 0.8
+    func at(_ u: Double) -> CGPoint { row.map { CGPoint(x: u, y: $0.y) } ?? (m.upright ? m.pt(mid, u) : m.pt(u, s.TW - mid)) }
+    /* the pill's height: the wood's, but never under Caption 2's 11 pt (--rf), as the page widens slim wood to WOOD_MIN;
+       in 3D the row's 22 */
+    let ph = row != nil ? 22 * 0.62 : Swift.max(14, (band.rail - band.co) * m.k * 0.62), dot = ph * 0.8
     /* the gaps: the rail's span less every pocket (hole, jaws) and sight, with their pads */
-    let len = m.upright ? s.TW : s.TL
-    var spans: [[Double]] = [[0, len]]
+    let len = row?.width ?? (m.upright ? s.TW : s.TL)
+    var spans: [[Double]] = row != nil ? [[6, len - 6]] : [[0, len]]
     var holes: [[Double]] = []
+    if let r = row {
+      /* railHoles through the camera: each pocket's box at the bed (RAIL_PAD 4), each sight's at the cushion tops
+         (SIGHT_PAD 1), those reaching the row (22 either side of its middle) */
+      func box(_ pts: [[Double]], _ z: Double, _ pad: Double) {
+        let q = pts.compactMap { V3.proj(r.C, r.box, $0[0], $0[1], z) }
+        if q.count < pts.count { return }
+        let ys = q.map { $0[1] }
+        if ys.max()! < r.y - 22 || ys.min()! > r.y + 22 { return }
+        holes.append([q.map { $0[0] }.min()! - pad, q.map { $0[0] }.max()! + pad])
+      }
+      for (i, p) in s.POCKETS.enumerated() {
+        let rr = s.POCKET_R[i]
+        var pts = [[p[0] - rr, p[1]], [p[0] + rr, p[1]], [p[0], p[1] - rr], [p[0], p[1] + rr]]
+        if s.MOUTHS.indices.contains(i) { for j in s.MOUTHS[i] { pts.append(j.p); pts.append(j.e) } }
+        box(pts, 0, 4)
+      }
+      for q in T.railSights() { box([[q[0] - q[2], q[1] - q[3]], [q[0] + q[2], q[1] - q[3]], [q[0] + q[2], q[1] + q[3]], [q[0] - q[2], q[1] + q[3]]], s.BALL_R * (1 + NOSE_S), 1) }
+    } else {
     for (i, p) in s.POCKETS.enumerated() {
       let near = m.upright ? p[0] < s.TL / 2 : p[1] > s.TW / 2
       if !near { continue }
@@ -293,6 +314,7 @@ struct TableCanvas: View {
       if !onRail { continue }
       let c = m.upright ? q[1] : q[0], h = (m.upright ? q[3] : q[2]) + 1 / m.k
       holes.append([c - h, c + h])
+    }
     }
     for h in holes { spans = spans.flatMap { [[$0[0], Swift.min($0[1], h[0])], [Swift.max($0[0], h[1]), $0[1]]] }.filter { $0[1] - $0[0] > 0.01 } }
     /* a gap across the middle (snooker's head rail has no sights) holds both seats: split it there */
