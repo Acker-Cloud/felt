@@ -198,8 +198,11 @@ final class TableModel {
     rolling = tab; heard = 0; carry = 0; lastT = t; inHand = false; power = 0; stroke = nil; shotAt = t
   }
 
+  /* the pause menu is up: the table stands still (frameBody does not run under it) */
+  var paused = false
   func tick(_ now: TimeInterval) {
     defer { frame &+= 1 }
+    if paused { lastT = nil; return }
     self.now = now
     pots.removeAll { now - $0.t >= TableModel.POT_MS }
     if let b = banner, now >= b.until { banner = nil }
