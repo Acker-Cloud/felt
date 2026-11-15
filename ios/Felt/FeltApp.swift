@@ -346,6 +346,7 @@ struct PowerBar: View {
   let model: TableModel
   let upright: Bool
   @State private var t0: Date? = nil
+  @State private var fullOnce = false
   @Environment(\.accessibilityReduceMotion) private var still
   var body: some View {
     GeometryReader { g in
@@ -394,11 +395,14 @@ struct PowerBar: View {
         if t0 == nil { t0 = Date() }
         let d = upright ? v.translation.width : v.translation.height
         /* the bar does not arm without a needed call */
+        let was = model.power
         model.power = model.callReady ? min(1, max(0, Double(d / len))) : 0
+        /* powerFull: the bar at 100%, a soft tick in the ear and one in the hand, once per pull */
+        if model.power >= 1 && was < 1 && !fullOnce { fullOnce = true; Sound.shared.cue("full") }
       }.onEnded { v in
         /* a tap (under BAR_TAP 10 pt of travel and BAR_TAP_MS 600 ms) opens the call's menu, never shoots */
         let tap = hypot(v.translation.width, v.translation.height) < 10 && Date().timeIntervalSince(t0 ?? Date()) < 0.6
-        t0 = nil
+        t0 = nil; fullOnce = false
         if tap && model.callMenuOffered { model.power = 0; model.callMenu.toggle(); return }
         model.shoot()
       })

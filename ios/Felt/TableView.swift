@@ -5,6 +5,7 @@
 import FeltRender
 import FeltSim
 import SwiftUI
+import QuartzCore
 
 struct Look {
   var cloth: Color, cushion: Color, rail: Color, railDark: Color
@@ -79,6 +80,8 @@ struct TableCanvas: View {
 
   var body: some View {
     Canvas { ctx, size in
+      let dt0 = CACurrentMediaTime()
+      defer { if TableModel.fpsOn { let d = CACurrentMediaTime() - dt0; if d > 0.1 { print(String(format: "felt-fps slow draw %.0f ms", d * 1000)) } } }
       _ = model.frame
       let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW)
       /* the last baked table, even for another size while this one bakes (never a blank frame) */

@@ -9,6 +9,7 @@ import CoreGraphics
 import FeltRender
 import FeltSim
 import Observation
+import QuartzCore
 
 enum TableGame: String, CaseIterable, Identifiable {
   /* the page's home order: 8, 9, 10, 14.1, rotation, bumper, snooker, carom, Chinese 8-ball */
@@ -59,7 +60,7 @@ final class TableModel {
   @ObservationIgnored private var carry = 0.0
   @ObservationIgnored private var lastT: TimeInterval?
   @ObservationIgnored private var heard = 0
-  @ObservationIgnored let sound = Sound()
+  @ObservationIgnored let sound = Sound.shared
   /* the rules (sim 1e): the game being played, nil on the practice tables */
   @ObservationIgnored let engine: RulesEngine
   private(set) var g: Game?
@@ -173,6 +174,7 @@ final class TableModel {
     }
     TableModel.setUp(sim, spec)
     engine = RulesEngine(sim: sim)
+    sound.cupTable = !sim.BUMPERS.isEmpty
     tmatch = tm
     rerack()
     /* a test hook: `-felt-paused` opens the table with the pause menu up */
@@ -273,9 +275,13 @@ final class TableModel {
     rolling = tab; heard = 0; carry = 0; lastT = t; inHand = false; power = 0; stroke = nil; shotAt = t
   }
 
+  static let fpsOn = ProcessInfo.processInfo.arguments.contains("-felt-fps")
+  @ObservationIgnored var fps: (t0: Double?, prev: Double?, n: Int, sim: Double, dtMax: Double) = (nil, nil, 0, 0, 0)
   /* the pause menu is up: the table stands still (frameBody does not run under it) */
   var paused = false
   func tick(_ now: TimeInterval) {
+    let tt0 = CACurrentMediaTime()
+    defer { if TableModel.fpsOn { let d = CACurrentMediaTime() - tt0; if d > 0.1 { print(String(format: "felt-fps slow tick %.0f ms", d * 1000)) } } }
     defer { frame &+= 1 }
     if paused { lastT = nil; return }
     self.now = now
@@ -293,6 +299,13 @@ final class TableModel {
     let dt = min(0.05, max(0, lastT.map { now - $0 } ?? 1.0 / 60))
     lastT = now
     let want = dt / SIM_DT * speed + carry
+    /* a test hook: `-felt-fps` prints the frame rate and the roll's pace (sim seconds per real second) every 2 s */
+    if TableModel.fpsOn {
+      if let p = fps.prev, now - p > 0.2 { print(String(format: "felt-fps stall %.0f ms: %.2f s into the roll, pots %d, effects %d, banner %d, hits %d", (now - p) * 1000, p - shotAt, pots.count, effects.count, banner != nil ? 1 : 0, rolling?.hits.count ?? -1)) }
+      fps.n += 1; fps.sim += dt * speed; fps.dtMax = max(fps.dtMax, now - (fps.prev ?? now)); fps.prev = now
+      if fps.t0 == nil { fps.t0 = now }
+      if now - fps.t0! >= 2 { print(String(format: "felt-fps %.1f frames/s, pace %.2f, worst frame %.0f ms", Double(fps.n) / (now - fps.t0!), fps.sim / (now - fps.t0!), fps.dtMax * 1000)); fps = (nil, nil, 0, 0, 0) }
+    }
     var n = Int(want)
     carry = want - Double(n)
     let before = tab.balls.map { ($0.x, $0.y, $0.on) }
@@ -354,6 +367,11 @@ final class TableModel {
   }
   private func words(_ gm: Game, _ shooter: Int, chose: (who: Int, kind: String, choice: String)? = nil) {
     guard let v = gm.verdict else { return }
+    /* the page's cues: a win (or, against the CPU, a loss: two soft falling notes), a foul, carom's point, the turn passing */
+    if let w = gm.winner { sound.cue(cpuLevel != nil && w == 1 ? "lose" : "win") }
+    else if v.foul != nil { sound.cue("foul") }
+    else if gm.kind == "carom" && v.carom?.point == true { sound.cue("point") }
+    else if gm.turn != shooter { sound.cue("turn") }
     if gm.winner != nil { msg = Words.overLine(gm); banner = nil; tourneyRackOver(); return }
     if gm.kind == "bumper" {
       let w = Words.bumper(v, gm, shooter, gm.turn)
