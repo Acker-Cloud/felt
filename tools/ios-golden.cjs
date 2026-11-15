@@ -43,6 +43,10 @@ function loadFd() {
   const at1 = '    assignTiers(Object.keys(S.pop.m).map(Number), i => ratingOf(i, prefOf(i)));';
   if (!src.includes(at1)) throw new Error('ios-golden: Career create moved');
   src = src.replace(at1, at1 + ' __trace.push(JSON.stringify(S));');
+  for (const at of ['    S.ser = genSeries(seed, pr.nat, pr.town);', '    S.cal = genCalendar(1);']) {
+    if (!src.includes(at)) throw new Error('ios-golden: Career create moved: ' + at);
+    src = src.replace(at, at + ' __trace.push(JSON.stringify(S));');
+  }
   src = 'var __trace = [];\n' + src;
   src = src.replace(libAt, '    lib: { __data: () => ({ ATTRS, ARCH, WEIGHTS, BRK_ADV, SPECIALIST: [...SPECIALIST], NAT, NICKS, AV_COLS, POP }), __consts: () => ({ DISCS, GAMES, SHORT, RULESETS, CIRCUITS, CIRC_NAMES, TIERS, FEE, TRAVEL, POT, BP, RACE, BAND, QUOTA, RACE_UNITS, FORMATS, EVENT_KINDS, ATTR_NAMES, SKILLS, SKILL_NAMES, SKILL_EFFECTS, STYLES, DIFFS, STARTS, BNR_F, HEY_NAT, VEN_A, VEN_B, VEN_BIG, BRANDS, SPONSOR_CATS, SHOP, SHOP_SLOTS, DEFAULT_EQ, NEED_WORDS, DRILLS, MILESTONES, LEVEL_BREADTH, PLAN, ONE_OFF, HUMAN, YEAR, MAX_SLOTS, VERSION, HOF_LEG, K_INDEX, K_V1, K_V1_BAK, K_PRE, CARD_KEEP, INVITE_TOP, FR_K, FR_STEP, FR_RACKS, RIVAL_GAP, CHALLENGES }), hashStr, seedOf,');
   const ctx = vm.createContext({});

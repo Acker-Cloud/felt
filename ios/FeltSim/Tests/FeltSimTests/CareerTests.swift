@@ -99,11 +99,14 @@ import Testing
     for c in fx["careers"]!.a {
       let r = E.create(c["profile"]!, seed: c["seed"]!.i)
       #expect(r.ok && r.id == c["id"]!.s, "\(c["profile"]!["name"]!.s): id \(String(describing: r.id))")
-      let want = c["trace"]![0]!.s, got = E.S.stringify()
+      for (k, want) in c["trace"]!.a.map({ $0.s }).enumerated() {
+      let got = k < E.trace.count ? E.trace[k] : ""
       if got != want {
         let w = Array(want.utf8), g = Array(got.utf8), i = (0..<Swift.min(w.count, g.count)).first { w[$0] != g[$0] } ?? Swift.min(w.count, g.count)
-        Issue.record("\(c["profile"]!["name"]!.s): first difference at \(i): ...\(String(decoding: g[Swift.max(0, i - 60)..<Swift.min(g.count, i + 60)], as: UTF8.self))... vs ...\(String(decoding: w[Swift.max(0, i - 60)..<Swift.min(w.count, i + 60)], as: UTF8.self))...")
+        Issue.record("\(c["profile"]!["name"]!.s) checkpoint \(k): first difference at \(i): ...\(String(decoding: g[Swift.max(0, i - 60)..<Swift.min(g.count, i + 60)], as: UTF8.self))... vs ...\(String(decoding: w[Swift.max(0, i - 60)..<Swift.min(w.count, i + 60)], as: UTF8.self))...")
       }
+      }
+      E.trace = []
     }
   }
 }
