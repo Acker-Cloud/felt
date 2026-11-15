@@ -55,6 +55,12 @@ final class TableModel {
   var aim = 0.0
   var power = 0.0                         /* the bar's pull, 0 to 1, while held */
   var spin = Spin()
+  /* #elevPop: the cue elevation sheet, opened by a hold on the pad; spinOk: the player's turn to aim */
+  var elevOpen = false
+  var spinOk: Bool { rolling == nil && stroke == nil && !cpuTurn && trickRes == nil && (g?.winner == nil) }
+  /* setElev: whole degrees 0 to 60 on spin.e (radians) */
+  func setElev(_ deg: Double) { spin = spinOf(x: spin.x, y: spin.y, e: max(0, min(60, deg.rounded())) * Double.pi / 180) }
+  var elevDeg: Int { Int((spin.e * 180 / Double.pi).rounded()) }
   private(set) var inHand = false
   private(set) var potCount = 0
   @ObservationIgnored private var carry = 0.0
@@ -370,6 +376,8 @@ final class TableModel {
     /* the look: a career match wears the career's equipped items (lookCareer), else the settings' (look()) */
     dress = tm?.dress ?? Prefs.dress(game.table.2)
     rerack()
+    /* a test hook: `-felt-elev` opens the elevation sheet at 45 degrees */
+    if ProcessInfo.processInfo.arguments.contains("-felt-elev") { setElev(45); elevOpen = true }
     /* a test hook: `-felt-showme` plays the trick's stored solution a moment after it opens */
     if trick != nil && ProcessInfo.processInfo.arguments.contains("-felt-showme") {
       Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(1.5)); self?.showMe() }

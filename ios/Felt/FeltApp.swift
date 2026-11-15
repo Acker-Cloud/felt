@@ -141,7 +141,7 @@ struct Home: View {
       if let i = a.firstIndex(of: "-felt-stats") { statsPath = i + 1 < a.count && !a[i + 1].hasPrefix("-") ? a[i + 1] : "all" }
       /* `-felt-practice 8|9|heyball|scatter|empty`: a practice session */
       if let i = a.firstIndex(of: "-felt-practice"), i + 1 < a.count { practicing = PracticeGo(layout: a[i + 1]) }
-      /* `-felt-trick id`: that trick shot */
+      /* `-felt-trick id`: that trick shot (`-felt-elev` opens the elevation sheet) */
       if let i = a.firstIndex(of: "-felt-trick"), i + 1 < a.count { tricking = PracticeGo(layout: a[i + 1]) }
       /* `-felt-career`: the career's screen open */
       if a.contains("-felt-career") { showCareer = true }
@@ -229,6 +229,16 @@ struct TableScreen: View {
     }
     .background(Color(rgb: 9, 9, 10).ignoresSafeArea())
     .overlay(alignment: .topTrailing) { if model.prac != nil && !model.paused { PracticeTools(model: model).padding(.top, 8).padding(.trailing, 12) } }
+    /* the elevation sheet over the pad (upright: above it, at the strip's leading end), a tap anywhere else closing it */
+    .overlay(alignment: .bottomLeading) {
+      if model.elevOpen && model.spinOk && !model.paused {
+        ZStack(alignment: .bottomLeading) {
+          Color.black.opacity(0.001).ignoresSafeArea().onTapGesture { model.elevOpen = false }
+          ElevPop(model: model).padding(.leading, 8).padding(.bottom, 84)
+        }
+      }
+    }
+    .onChange(of: model.spinOk) { _, ok in if !ok { model.elevOpen = false } }
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
     .overlay { if let r = model.trickRes, !model.paused { TrickResult(model: model, res: r, back: { dismiss() }) } }
     .onDisappear { model.abandonCpuGame() }
@@ -507,6 +517,10 @@ struct FineWheel: View {
    ring is |spin| = 1 (inset 19%), the crosshair 62% long, the tip a chalk-blue dot ringed in white */
 struct SpinPad: View {
   let model: TableModel
+  /* the press: when and where it began, how far it has gone, the tip before it (a hold puts it back) */
+  @State private var down: (t: Date, p: CGPoint, far: CGFloat, before: Spin)? = nil
+  @State private var hold: Task<Void, Never>? = nil
+  static let ELEV_HOLD_MS = 450
   var body: some View {
     GeometryReader { g in
       let d = min(g.size.width, g.size.height), R = d * 0.31
@@ -527,16 +541,87 @@ struct SpinPad: View {
           .offset(x: CGFloat(model.spin.x) * R, y: -CGFloat(model.spin.y) * R)
       }
       .frame(width: d, height: d)
+      /* #elevTag: the cue's elevation, in the pad's corner, while it is raised */
+      .overlay(alignment: .bottomTrailing) {
+        if model.elevDeg > 0 {
+          Text("\(model.elevDeg)\u{00b0}").font(.system(size: 11, weight: .bold)).monospacedDigit().foregroundStyle(.white)
+            .padding(.horizontal, 4).frame(height: 14).background(RoundedRectangle(cornerRadius: 8).fill(Color(rgb: 0x1f, 0x1f, 0x24)))
+            .offset(x: 4, y: 4).allowsHitTesting(false)
+        }
+      }
       .contentShape(Circle())
       .gesture(DragGesture(minimumDistance: 0).onChanged { v in
-        let dx = (v.location.x - d / 2) / R, dy = -(v.location.y - d / 2) / R
-        model.spin = spinOf(x: Double(dx), y: Double(dy), e: nil)
-      })
-      .onTapGesture(count: 2) { model.spin = Spin() }
+        guard model.spinOk else { return }
+        if down == nil {
+          down = (v.time, v.startLocation, 0, model.spin)
+          hold?.cancel()
+          /* a hold (ELEV_HOLD_MS, still) leaves the tip where it was and opens the elevation sheet */
+          hold = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(SpinPad.ELEV_HOLD_MS))
+            guard !Task.isCancelled, let dn = down, dn.far < 8, model.spinOk else { return }
+            model.spin = dn.before; down = (dn.t, dn.p, .infinity, dn.before); model.elevOpen = true
+          }
+        }
+        guard var dn = down, dn.far.isFinite else { return }
+        dn.far = max(dn.far, hypot(v.location.x - dn.p.x, v.location.y - dn.p.y)); down = dn
+        /* spinAt: inside the safe circle, the centre snaps; the elevation kept */
+        var x = Double((v.location.x - d / 2) / R), y = -Double((v.location.y - d / 2) / R)
+        let L = hypot(x, y)
+        if L > 1 { x /= L; y /= L }
+        if L < 0.08 { x = 0; y = 0 }
+        model.spin = spinOf(x: x, y: y, e: model.spin.e)
+      }.onEnded { _ in hold?.cancel(); down = nil })
+      .onTapGesture(count: 2) { if model.spinOk { model.spin = spinOf(x: 0, y: 0, e: model.spin.e) } }
     }
     .frame(width: 56, height: 56)
     .accessibilityLabel("English")
-    .accessibilityValue("side \(Int(model.spin.x * 100)), follow \(Int(model.spin.y * 100))")
+    .accessibilityValue("side \(Int(model.spin.x * 100)), follow \(Int(model.spin.y * 100))" + (model.elevDeg > 0 ? ", cue up \(model.elevDeg) degrees" : ""))
+    .accessibilityAction(named: "Cue Elevation") { if model.spinOk { model.elevOpen = true } }
+  }
+}
+
+/* #elevPop: the cue's elevation, 0 to 60 degrees in whole degrees: the value, a slider that fills from the bed up with
+   the cue drawn at its angle (drag or tap it; swipe up or down with VoiceOver for 5 degrees), Level. Closed by a tap
+   anywhere else or once the turn is not the player's to aim; every shot starts level */
+struct ElevPop: View {
+  let model: TableModel
+  var body: some View {
+    let deg = model.elevDeg
+    VStack(spacing: 8) {
+      Text(deg > 0 ? "\(deg)\u{00b0}" : "Level").font(.system(size: 13, weight: .bold)).monospacedDigit()
+      GeometryReader { g in
+        ZStack(alignment: .bottom) {
+          Rectangle().fill(Color(rgb: 91, 149, 208).opacity(0.55)).frame(height: g.size.height * CGFloat(deg) / 60)
+          RoundedRectangle(cornerRadius: 2).fill(Color(rgb: 0xe9, 0xd9, 0xb0)).frame(width: 3, height: 70)
+            .rotationEffect(.degrees(Double(90 - deg)), anchor: .bottom).padding(.bottom, 10)
+        }
+        .frame(width: g.size.width, height: g.size.height, alignment: .bottom)
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0).onChanged { v in
+          if model.spinOk { model.setElev(60 * min(1, max(0, Double((g.size.height - v.location.y) / g.size.height)))) }
+        })
+      }
+      .frame(width: 48, height: 150)
+      .background(Color(rgb: 0x2c, 0x2c, 0x2e))
+      .clipShape(RoundedRectangle(cornerRadius: 12))
+      .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(rgb: 0x6b, 0x6b, 0x74), lineWidth: 1))
+      .accessibilityElement()
+      .accessibilityLabel("Cue elevation: raise the cue and side spin curves the ball; raised steeply and struck firmly, the ball jumps.")
+      .accessibilityValue(deg > 0 ? "cue up \(deg) degrees" : "level")
+      .accessibilityAdjustableAction { d in model.setElev(Double(deg) + (d == .increment ? 5 : -5)) }
+      Button { if model.spinOk { model.setElev(0) }; model.elevOpen = false } label: {
+        Text("Level").font(.system(size: 13, weight: .bold)).frame(minWidth: 64, minHeight: 44)
+          .background(RoundedRectangle(cornerRadius: 12).fill(Color(rgb: 0x2c, 0x2c, 0x2e)))
+          .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
+      }
+      .foregroundStyle(.white).accessibilityIdentifier("elevLevel")
+    }
+    .padding(10)
+    .background(RoundedRectangle(cornerRadius: 16).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
+    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
+    .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
+    .accessibilityAddTraits(.isModal)
+    .accessibilityLabel("Cue elevation")
   }
 }
 
