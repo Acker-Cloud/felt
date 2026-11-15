@@ -306,10 +306,19 @@ struct CareerCreate: View {
     let req = r["call"]?["require"]?.str ?? "official"
     return "\(label), \(CALL_WORDS[req] ?? "official calls")" + (req != "off" ? " (\(DETAIL_WORDS[r["call"]?["detail"]?.str ?? ""] ?? "ball and pocket"))" : "")
   }
-  /* avatarEl: initials on the avatar's colour, else the page's fallback (AV_COLS by hashStr of the name) */
+  /* avatarEl's fallback, without a kept avatar: one of six colours by the sum of the name's character codes, and the
+     words' first letters, two, upper case */
+  static let AV_PAL = ["#1f7a55", "#2f6fb0", "#b03a2e", "#8a5a12", "#7b3fa0", "#375a7f"]
+  static func avCol(_ name: String) -> String { AV_PAL[name.unicodeScalars.reduce(0) { $0 + Int(String($1).utf16.first!) } % AV_PAL.count] }
+  static func avIni(_ name: String) -> String {
+    /* w[0]: the word's first UTF-16 unit, as JS indexes a string */
+    let first = name.split(separator: " ", omittingEmptySubsequences: false).compactMap { $0.utf16.first.map { String(utf16CodeUnits: [$0], count: 1) } }.joined()
+    return String(first.utf16.prefix(2).map { Character(UnicodeScalar($0) ?? " ") }).uppercased()
+  }
+  /* avatarEl: initials on the avatar's colour, else the fallback */
   static func avatar(_ name: String, _ av: JV?, _ d: CGFloat = 46, ring: String? = nil) -> some View {
-    let col = av?["col"]?.str ?? TourneyRun.AV_COLS[Int(TourneyRun.hashStr(name) % UInt32(TourneyRun.AV_COLS.count))]
-    let ini = av?["ini"]?.str ?? name.split(separator: " ").compactMap { $0.first }.prefix(2).map(String.init).joined()
+    let col = av?["col"]?.str ?? avCol(name)
+    let ini = av?["ini"]?.str ?? avIni(name)
     /* framedAv: the equipped ring (ring-gold is RINGS gold) 2 pt out, 2.5 pt wide; a star badge for the earned ones */
     let key = ring.map { String($0.split(separator: "-", maxSplits: 1).last ?? "") }, fr = key.flatMap { CareerShop.RINGS[$0] }
     let star = ["champion", "centurion", "drill", "legacy"].contains(key ?? "")

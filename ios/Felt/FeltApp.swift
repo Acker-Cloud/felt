@@ -1027,9 +1027,6 @@ struct TourneyRun: View {
   let t: Tourney
   let play: () -> Void
   @State private var ending = false
-  static let AV_COLS = ["#1f7a55", "#2f6fb0", "#b03a2e", "#8a5a12", "#7b3fa0", "#375a7f", "#0f6e78", "#9c2f62", "#4d6b1f", "#a4501c", "#355c99", "#6b4a8a"]
-  /* the page's hashStr (FNV-1a), for an avatar's colour when none is kept */
-  static func hashStr(_ s: String) -> UInt32 { var h: UInt32 = 0x811c9dc5; for u in s.utf16 { h ^= UInt32(u); h = h &* 0x01000193 }; return h }
   static func unitWords(_ kind: String, _ n: Int) -> String {
     kind == "straight" || kind == "carom" ? "\(n) points" : kind == "snooker" ? "\(n) frame\(n == 1 ? "" : "s")" : "\(n) rack\(n == 1 ? "" : "s")"
   }
@@ -1056,9 +1053,8 @@ struct TourneyRun: View {
                   .background(Capsule().fill(Color.white.opacity(0.1)))
               }
               HStack(spacing: 12) {
-                let ini = foe.name.split(separator: " ").compactMap { $0.first }.prefix(2).map(String.init).joined()
-                Text(ini).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).frame(width: 46, height: 46)
-                  .background(Circle().fill(css(Self.AV_COLS[Int(Self.hashStr(foe.name) % UInt32(Self.AV_COLS.count))])))
+                Text(foe.ini ?? CareerWords.avIni(foe.name)).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).frame(width: 46, height: 46)
+                  .background(Circle().fill(css(foe.col ?? CareerWords.avCol(foe.name))))
                   .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                   Text(foe.name).font(.system(size: 17, weight: .semibold))
@@ -1154,10 +1150,9 @@ struct TourneyDone: View {
         if !t.msg.isEmpty { Text(t.msg).font(.system(size: 15)) }
         ModeField("Tournament Over") {
           HStack(spacing: 12) {
-            let name = pl == 1 ? "You" : champ?.name ?? ""
-            let ini = name.split(separator: " ").compactMap { $0.first }.prefix(2).map(String.init).joined()
-            Text(ini).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).frame(width: 46, height: 46)
-              .background(Circle().fill(css(TourneyRun.AV_COLS[Int(TourneyRun.hashStr(name) % UInt32(TourneyRun.AV_COLS.count))])))
+            let name = pl == 1 ? "You" : champ?.name ?? "", av = pl == 1 ? nil : champ
+            Text(av?.ini ?? CareerWords.avIni(name)).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).frame(width: 46, height: 46)
+              .background(Circle().fill(css(av?.col ?? CareerWords.avCol(name))))
               .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
               Text(pl == 1 ? "You are the champion" : "\(champ?.name ?? "") wins it").font(.system(size: 17, weight: .semibold))

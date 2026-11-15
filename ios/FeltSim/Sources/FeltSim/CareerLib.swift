@@ -362,7 +362,8 @@ public enum CareerLib {
 /* 6f's quick tournament, its pure part, line for line (T_KINDS to tourneyNew): the field (the player and CPU entrants
    from genPlayer, each a level), the draw, every CPU match the model settles before the player's next, the places */
 public struct Tourney: Codable, Sendable {
-  public struct Entrant: Codable, Sendable { public var name: String, first: String, me: Bool? = nil, arch: String? = nil, level: String? = nil }
+  /* ini and col: the generated player's avatar (tourneyNew's av: g.avatar); absent in a tournament saved before them */
+  public struct Entrant: Codable, Sendable { public var name: String, first: String, me: Bool? = nil, arch: String? = nil, level: String? = nil, ini: String? = nil, col: String? = nil }
   public var v = 1, seed: Int, kind: String, ruleset: String, fmt: String, size: Int, race: Int, str: String
   public var field: [Entrant], f: [Int], res: [[Int]?], sim: [Bool], ff: [Bool], live: Int? = nil, done = false, places: [[Int]]? = nil, msg = ""
   public static let KINDS = ["8", "9", "10", "straight", "rotation", "heyball", "snooker", "carom"], SIZES = [4, 8, 16], FMTS = ["single", "double"], FIELDS = ["mixed", "easy", "medium", "hard"]
@@ -415,7 +416,7 @@ public struct Tourney: Codable, Sendable {
     var names: Set<String> = ["You"], field = [Entrant(name: "You", first: "You", me: true)]
     for i in 1..<size {
       let g = CareerLib.genPlayer(seed, i, &names), u = cpuRng(Double(CareerLib.seedOf([String(seed), "lv", String(i)])))()
-      field.append(Entrant(name: g.name, first: g.first, arch: g.arch, level: str != "mixed" ? str : u < 0.3 ? "easy" : u < 0.7 ? "medium" : "hard"))
+      field.append(Entrant(name: g.name, first: g.first, arch: g.arch, level: str != "mixed" ? str : u < 0.3 ? "easy" : u < 0.7 ? "medium" : "hard", ini: g.ini, col: g.col))
     }
     var f = Array(0..<field.count)
     let rr = cpuRng(Double(CareerLib.seedOf([String(seed), "draw"])))
