@@ -462,7 +462,7 @@ public final class CareerEngine {
     let pts = S["aw"]!.a.reduce(0.0) { $0 + ($1[0]!.i == Self.HUMAN && $1[4]!.i > gw - 26 ? $1[3]!.d : 0) }
     return 0.5 + 0.75 * Self.cl(pts / (Self.c("BP")[t]!.d * 2), 0, 1)
   }
-  func objText(_ o: JV) -> String {
+  public func objText(_ o: JV) -> String {
     let k = o["k"]!.s, n = o["n"]!.i
     switch k {
     case "wins": return "Win \(n) matches"

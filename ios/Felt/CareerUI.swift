@@ -75,6 +75,7 @@ import SwiftUI
 struct CareerView: View {
   @Bindable var store: CareerStore
   @State private var playing: PlayTerms? = nil
+  @State private var page: String? = nil
   struct PlayTerms: Identifiable { let id = UUID(); let game: TableGame; let tm: TableModel.TMatch }
   var body: some View {
     Group {
@@ -83,6 +84,11 @@ struct CareerView: View {
     }
     .navigationTitle(store.loaded ? (store.E.S["profile"]?["name"]?.str ?? "Career") : "Career")
     /* a test hook: `-felt-career-play` opens the next match on the table */
+    .navigationDestination(item: $page) { p in
+      switch p { case "stats": CareerStats(store: store); case "shop": CareerShop(store: store); case "sponsors": CareerSponsors(store: store); default: CareerRankings(store: store) }
+    }
+    /* a test hook: `-felt-career-page rankings|stats|shop|sponsors` opens that page */
+    .onAppear { let a = ProcessInfo.processInfo.arguments; if let i = a.firstIndex(of: "-felt-career-page"), i + 1 < a.count, page == nil { page = a[i + 1] } }
     .onAppear { if ProcessInfo.processInfo.arguments.contains("-felt-career-play"), playing == nil, let m = store.match() { playing = PlayTerms(game: m.game, tm: m.tm) } }
     .fullScreenCover(item: $playing) { p in
       TableScreen(model: { let m = TableModel(game: p.game, match: p.tm); m.onReport = { _, a, b, f in store.report(a, b, f) }; return m }())
@@ -166,6 +172,7 @@ struct CareerHub: View {
         row("Reputation", JV.numberString(me["rep"]!.d))
       }
       if !store.msg.isEmpty { Section { Text(store.msg).font(.subheadline) } }
+      if E.reviewDue { CareerReview(store: store) }
       if nm != .null {
         Section("Next Match") {
           VStack(alignment: .leading, spacing: 4) {
@@ -212,9 +219,134 @@ struct CareerHub: View {
           }
         }
       }
+      Section {
+        NavigationLink("Rankings") { CareerRankings(store: store) }
+        NavigationLink("Stats") { CareerStats(store: store) }
+        NavigationLink("Shop") { CareerShop(store: store) }
+        NavigationLink("Sponsors") { CareerSponsors(store: store) }
+      }
       Section("News") { ForEach(Array(S["news"]!.a.suffix(8).reversed().enumerated()), id: \.offset) { _, n in Text(n[1]!.s).font(.footnote) } }
       Section { Button("Switch Career") { E.save(); E.S = .null; store.touch() }.foregroundStyle(.secondary) }
     }
   }
   func row(_ k: String, _ v: String) -> some View { HStack { Text(k); Spacer(); Text(v).foregroundStyle(.secondary) } }
+}
+
+/* the season just ended (review): its line, the verdict, next season's targets; Done marks it seen */
+struct CareerReview: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let r = store.E.review()
+    Section("Season \(r["season"]!.i) Review") {
+      Text(r["moved"]!.s == "up" ? "Promoted to \(r["tier"]!.s)." : r["moved"]!.s == "down" ? "Relegated to \(r["tier"]!.s)." : "Staying at \(r["tier"]!.s).").font(.headline)
+      Text("\(r["w"]!.i)-\(r["l"]!.i) in matches, \(r["ti"]!.i) title\(r["ti"]!.i == 1 ? "" : "s"), \(JV.numberString(r["prize"]!.d)) credits in prize money.").font(.subheadline)
+      ForEach(r["targets"]!.a.indices, id: \.self) { i in Text(r["targets"]!.a[i].s).font(.footnote).foregroundStyle(.secondary) }
+      Button("Done") { store.E.reviewSeen(); store.E.save(); store.touch() }.bold().foregroundStyle(.white)
+    }
+  }
+}
+
+/* the rankings: a circuit, a game, or the season's points; the player's row in weight 700 */
+struct CareerRankings: View {
+  @Bindable var store: CareerStore
+  @State private var key = "local"
+  var body: some View {
+    let _ = store.rev
+    let keys = CareerEngine.const("CIRCUITS").a.map { $0.s } + ["season"] + CareerEngine.const("DISCS").a.map { $0.s }
+    List {
+      Picker("Ranking", selection: $key) { ForEach(keys, id: \.self) { k in Text(CareerStore.game(k) != nil ? CareerStore.gameName(k) : k.capitalized).tag(k) } }
+      let rows = store.E.rankings(key, top: 50).a
+      if rows.isEmpty { Text("No points yet.").foregroundStyle(.secondary) }
+      ForEach(rows.indices, id: \.self) { i in
+        let r = rows[i], me = r["human"] == true
+        HStack {
+          Text("\(r["rank"]!.i)").monospacedDigit().frame(width: 32, alignment: .trailing).foregroundStyle(.secondary)
+          Text(r["name"]!.s).fontWeight(me ? .bold : .regular)
+          Spacer()
+          Text(JV.numberString(r["pts"]!.d)).monospacedDigit().fontWeight(me ? .bold : .regular)
+        }
+      }
+    }
+    .navigationTitle("Rankings")
+  }
+}
+
+/* the player's numbers: all games, then each game played */
+struct CareerStats: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let st = store.E.stats()
+    List {
+      block("All Games", st["all"]!)
+      ForEach(st["byDisc"]!.keys, id: \.self) { d in block(CareerStore.gameName(d), st["byDisc"]![d]!) }
+    }
+    .navigationTitle("Stats")
+  }
+  func pctWords(_ p: JV) -> String { p["d"]!.d != 0 ? "\(p["n"]!.i) of \(p["d"]!.i), \(JV.numberString(p["pct"]!.d))%" : "None yet" }
+  @ViewBuilder func block(_ title: String, _ b: JV) -> some View {
+    Section(title) {
+      row("Matches", "\(b["won"]!.i)-\(b["lost"]!.i)")
+      row("Win Rate", pctWords(b["winPct"]!))
+      row("Racks", pctWords(b["racks"]!["pct"]!))
+      row("Titles", "\(b["titles"]!.i)")
+      row("Shot Accuracy", pctWords(b["shotAccuracy"]!))
+      row("Safeties", pctWords(b["safety"]!))
+      row("Break and Run", pctWords(b["breakAndRun"]!))
+      row("Best Streak", "\(b["bestStreak"]!.i)")
+    }
+  }
+  func row(_ k: String, _ v: String) -> some View { HStack { Text(k); Spacer(); Text(v).foregroundStyle(.secondary) } }
+}
+
+/* the shop: each item's price or lock, Buy, and Equip for what is owned; a checkmark on what is worn */
+struct CareerShop: View {
+  @Bindable var store: CareerStore
+  @State private var msg = ""
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, eq = E.equipped(), items = CareerEngine.const("SHOP").a
+    let slots = CareerEngine.const("SHOP_SLOTS").a.map { $0.s }
+    List {
+      Section { Text("Credits: \(JV.numberString(E.S["me"]!["money"]!.d))") ; if !msg.isEmpty { Text(msg).font(.footnote).foregroundStyle(.secondary) } }
+      ForEach(slots, id: \.self) { slot in
+        Section(slot.capitalized) {
+          ForEach(items.indices.filter { items[$0]["slot"]?.str == slot }, id: \.self) { i in
+            let it = items[i], id = it["id"]!.s, owned = E.owns(id), worn = eq[slot]?.str == id
+            HStack {
+              Text(it["name"]!.s).fontWeight(worn ? .bold : .regular)
+              if worn { Image(systemName: "checkmark").foregroundStyle(.white) }
+              Spacer()
+              if owned { if !worn { Button("Equip") { E.equip(id); E.save(); store.touch() }.buttonStyle(.borderless).foregroundStyle(.white) } }
+              else { Button("Buy, \(JV.numberString(it["price"]!.d))") { msg = E.buy(id).map { "Can't buy: \($0)." } ?? "Bought \(it["name"]!.s)."; E.save(); store.touch() }.buttonStyle(.borderless).foregroundStyle(.white) }
+            }
+          }
+        }
+      }
+    }
+    .navigationTitle("Shop")
+  }
+}
+
+/* the sponsors: each contract, its weeks left, retainer and objectives (met in weight 700) */
+struct CareerSponsors: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let _ = store.rev
+    let S = store.E.S, day = S["day"]!.d
+    List {
+      let sp = S["spons"]!.a
+      if sp.isEmpty { Text("No sponsor yet. Offers come with results and reputation.").foregroundStyle(.secondary) }
+      ForEach(sp.indices, id: \.self) { i in
+        let c = sp[i]
+        Section(c["brand"]!.s) {
+          Text("\(JV.numberString(c["ret"]!.d)) credits a week, \(Int(((c["to"]!.d - day) / 7).rounded(.up))) weeks left").font(.subheadline)
+          ForEach(c["obj"]!.a.indices, id: \.self) { j in
+            let o = c["obj"]!.a[j]
+            Text("\(store.E.objText(o)), pays \(JV.numberString(o["pay"]!.d))").font(.footnote).fontWeight(truthy(o["done"]) ? .bold : .regular)
+          }
+        }
+      }
+    }
+    .navigationTitle("Sponsors")
+  }
 }

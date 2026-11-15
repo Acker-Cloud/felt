@@ -227,4 +227,50 @@ extension CareerEngine {
     save()
     return recap
   }
+
+  // MARK: views: stats, rankings, the season's review
+  static func statView(_ b: JV) -> JV {
+    let v = { (k: String) in b[k]!.d }
+    return ["matches": b["m"]!, "won": b["w"]!, "lost": b["l"]!, "winPct": pct(v("w"), v("m")), "titles": b["ti"]!, "finals": b["fi"]!, "events": b["ev"]!, "prize": b["prize"]!,
+            "racks": ["won": b["rw"]!, "lost": b["rl"]!, "pct": pct(v("rw"), v("rw") + v("rl"))], "breakAndRun": pct(v("bnr"), v("br")), "legalBreak": pct(v("lb"), v("br")),
+            "runout": pct(v("ro"), v("rk")), "shotAccuracy": pct(v("sp"), v("sa")), "calledShot": pct(v("cm"), v("ca")), "safety": pct(v("ss"), v("sf")), "fouls": b["fo"]!,
+            "scratches": b["sc"]!, "foulsPerRack": pct(v("fo"), v("rk")), "streak": b["st"]!, "bestStreak": b["bs"]!, "worstStreak": b["ls"]!]
+  }
+  public func stats() -> JV {
+    var by = JObj()
+    for d in S["st"]!["d"]!.keys { by[d] = Self.statView(S["st"]!["d"]![d]!) }
+    let lg = S["legacy"] ?? .null
+    var legacy: JV = .null
+    if lg.truthy { legacy = lg; legacy["winPct"] = Self.pct(lg["won"]!.d, lg["played"]!.d) }
+    return ["all": Self.statView(S["st"]!["all"]!), "byDisc": .obj(by), "season": S["ss"]!, "legacy": legacy, "mastery": S["me"]!["mas"]!, "skills": S["me"]!["sk"]!]
+  }
+  /* circuit: "local", "regional", ... (CIRCUITS), a discipline, or "season": rank, id, name, nat, pts, tier, human, move */
+  public func rankings(_ circuit: String = "local", top: Int = 50) -> JV {
+    let CI = Self.c("CIRCUITS").a.map { $0.s }, key: RankKey = CI.contains(circuit) ? .circ(CI.firstIndex(of: circuit)!) : Self.DISCS.contains(circuit) ? .disc(circuit) : .season
+    let gw = gweek(S["day"]!.i)
+    var prev: [Int: Int] = [:]
+    for (i, x) in rankList(key, gw - 1).enumerated() where prev[x.0] == nil { prev[x.0] = i + 1 }
+    return .arr(rankList(key, gw).prefix(top).enumerated().map { i, x in
+      let cd = cardOf(x.0)
+      return ["rank": .n(i + 1), "id": .n(x.0), "name": cd["name"]!, "nat": cd["nat"]!, "pts": .n(x.1), "tier": cd["tier"]!, "human": .bool(x.0 == Self.HUMAN),
+              "move": prev[x.0].map { .n($0 - (i + 1)) } ?? .null]
+    })
+  }
+  public var reviewDue: Bool { S["rev"]!.d < Double(S["arch"]!.count) }
+  public func reviewSeen() { let n = S["arch"]!.count; S["rev"] = .n(n) }
+  /* the season just ended: its row, the verdict, the card, next season's targets */
+  public func review() -> JV {
+    guard let a = S["arch"]!.a.last else { return .null }
+    let t = me("tier").i
+    var targets: [JV] = []
+    if t >= 8 && t < 12 { targets.append(.str("Finish in the top \(Self.c("CARD_KEEP").i) of the two-year money list to keep your card")) }
+    if t < 11 {
+      let to = t + 1
+      targets.append(.str((to == 8 || to == 10) && me("card").d < Double(to) ? "Win the qualifier for a tour card, then finish in the top 15% of tier \(t)"
+        : "Finish in the top 15% of tier \(t) and win half your matches\(t < 7 ? ", or win a title at tier \(t) or above" : "")"))
+    }
+    if let rv = rivalList(1).first { targets.append(.str("Settle it with \(nameOf(rv))")) }
+    return ["season": a["s"]!, "t0": a["t0"]!, "t1": a["t1"]!, "moved": a["moved"]!, "m": a["m"]!, "w": a["w"]!, "l": a["l"]!, "ti": a["ti"]!, "fi": a["fi"]!, "ev": a["ev"]!,
+            "prize": a["prize"]!, "rk": a["rk"]!, "tier": Self.c("TIERS")[t]!["name"]!, "moneyRank": a["ml"]!.truthy ? a["ml"]! : 0, "fr": me("fr"), "targets": .arr(targets)]
+  }
 }

@@ -158,6 +158,9 @@ import Testing
     rec("edit", E.editProfile(pr))
     for _ in 0..<3 { if E.advance(week: true) == "match" { E.simMatch() } }
     for o in E.S["off"]!.a { let id = o["id"]!.s; rec("decline " + id, ["ok": .bool(E.decline(id))]) }
+    rec("review", E.review())
+    for c in ["local", "regional", "9", "season"] { rec("rankings " + c, E.rankings(c)) }
+    rec("stats", E.stats())
     rec("retire", E.retire())
     #expect(k == steps.count, "api: \(k) of the page's \(steps.count) steps")
   }

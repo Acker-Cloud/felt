@@ -553,6 +553,9 @@ function build() {
     rec('edit', C.editProfile(Object.assign(C.profile(), { name: 'Siobhan Two', nick: 'S2' })));
     for (let k = 0; k < 3; k++) { const a = C.advance('week'); if (a.stopped === 'match') C.simMatch(); }
     for (const o of JSON.parse(C.__state()).off) rec('decline ' + o.id, C.decline(o.id));
+    rec('review', C.review());
+    for (const c of ['local', 'regional', '9', 'season']) rec('rankings ' + c, C.rankings(c));
+    rec('stats', C.stats());
     rec('retire', C.retire());
   }
   /* saves: a store of its own, a career created and played with autosave, its main save corrupted and recovered, a
