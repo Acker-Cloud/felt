@@ -751,6 +751,16 @@ struct PowerBar: View {
         RoundedRectangle(cornerRadius: 14).fill(Color(rgb: 0x26, 0x26, 0x2a))
         Rectangle().fill(LinearGradient(stops: fill, startPoint: upright ? .leading : .top, endPoint: upright ? .trailing : .bottom))
           .frame(width: upright ? len * p : nil, height: upright ? nil : len * p)
+        /* #powerMark: the marked power (the shot a Space press would play), a 2 pt tick 9 pt long at each edge of the bar */
+        let mk = len * CGFloat(model.markPower) - 1, tick = Color(rgb: 0xec, 0xec, 0xee).opacity(0.6)
+        Group {
+          if upright {
+            VStack { tick.frame(width: 2, height: 9); Spacer(minLength: 0); tick.frame(width: 2, height: 9) }.offset(x: mk)
+          } else {
+            HStack { tick.frame(width: 9, height: 2); Spacer(minLength: 0); tick.frame(width: 9, height: 2) }.offset(y: mk)
+          }
+        }
+        .accessibilityHidden(true).allowsHitTesting(false)
         if live {
           Text("\(Int((p * 100).rounded()))%").font(.system(size: 13, weight: .bold)).monospacedDigit().foregroundStyle(Color(rgb: 0xec, 0xec, 0xee))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: upright ? .trailing : .bottom).padding(upright ? .trailing : .bottom, 10)
