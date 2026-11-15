@@ -161,3 +161,49 @@ struct SettingsView: View {
     Picker(title, selection: sel) { ForEach(Prefs.rulesets(kind), id: \.id) { r in Text(r.id.hasSuffix("house") ? "House Rules" : "WPA").tag(r.id) } }
   }
 }
+
+/* the record's games against the CPU (rec.kinds[kind].cpu[level], recordGame): wins and losses per game and level, an
+   exhibition nobody's */
+enum Record {
+  static let key = "felt.record.cpu"
+  static func of(_ kind: String, _ level: String) -> (w: Int, l: Int) {
+    let a = (UserDefaults.standard.dictionary(forKey: key)?[kind + "." + level] as? [Int]) ?? [0, 0]
+    return (a.count > 0 ? a[0] : 0, a.count > 1 ? a[1] : 0)
+  }
+  static func game(_ kind: String, _ level: String, won: Bool) {
+    var d = UserDefaults.standard.dictionary(forKey: key) ?? [:], r = of(kind, level)
+    if won { r.w += 1 } else { r.l += 1 }
+    d[kind + "." + level] = [r.w, r.l]
+    UserDefaults.standard.set(d, forKey: key)
+  }
+}
+
+/* rulesInfoOf: the (i) popover's words for a game: the ruleset's name (RULES_SRC), its description, the choices' fine print */
+enum RulesInfo {
+  static let SRC = ["8-house": "House rules", "8-wpa": "WPA world standardized rules", "9-house": "House rules", "9-wpa": "WPA world standardized rules, with the push out",
+    "10-wpa": "WPA world standardized rules", "straight-wpa": "14.1 continuous, WPA world standardized rules",
+    "rotation": "House rules, after the BCA game", "bumper": "House rules", "carom": "UMB rules, simplified", "snooker": "WPBSA rules, simplified",
+    "heyball": "WPA Rules of Heyball, 2025"]
+  static let DESC = [
+    "8-house": "Hit one of your group first, pot it to carry on. No calls unless your settings ask for them. An 8 on the break is spotted and the breaker carries on.",
+    "8-wpa": "Call every shot that is not obvious, and the 8 always with its pocket. A legal break pots a ball or drives four to the cushions. An 8 on the break: spot it or re-rack. A ball off the table on the break: the table as it lies, or ball in hand behind the head string.",
+    "9-house": "Lowest ball first. A legal 9 wins, early or on the break. Three fouls in a row lose.",
+    "9-wpa": "Lowest ball first, any legal 9 wins. Push out on the shot after the break; your opponent may hand it back. A legal break pots a ball or drives four to the cushions, and three must drop or lie past the head string, or your opponent may hand it back and any 9 is spotted. Three fouls lose.",
+    "10-wpa": "Lowest ball first, and call your shots; an obvious one is called from your aim, and there is no safety. The 10 wins only when called as the last ball; on the break or early it is spotted. Push out after the break. Three fouls lose.",
+    "straight-wpa": "Any ball, called with its pocket: a point each. With one ball left the other 14 are racked again. A foul costs a point, three in a row 15 more and a new break.",
+    "rotation": "Lowest ball first; every ball potted on a legal shot scores its number. 61 wins. Balls potted on a foul are spotted.",
+    "bumper": "Five balls each round the posts to the far cup; the marked ball first.",
+    "carom": "Your cue ball meets both others, with three cushions before the second. A point each.",
+    "snooker": "A red, then a colour, until the reds are gone; then the colours in order.",
+    "heyball": "Balls potted on the break leave the table open: the first legal pot after it chooses your group, the group of the ball you hit first. A legal break pots a ball or drives four to the cushions. A foul on the break: ball in hand behind the head string, or a re-rack. Any other foul: ball in hand anywhere. The 8 last, in any pocket: nothing is called."]
+  static func of(_ kind: String, title: String) -> (title: String, src: String, ps: [String]) {
+    let id = kind == "8" ? Prefs.rules8 : kind == "9" ? Prefs.rules9 : kind == "10" ? Prefs.rules10 : DEFAULT_RULESET[kind]!
+    var ps = [DESC[id] ?? ""]
+    if kind == "8" || kind == "9" { ps.append(Prefs.bool("stalemate", false) ? "Stalemate: after 6 innings with no ball potted, the balls are racked again." : "Stalemate: play on. A rack with no ball potted is played out.") }
+    if kind == "straight" { ps.append("First to \(Prefs.race141) points wins.") }
+    if kind == "heyball" { ps.append("The 8 loses the rack if it drops before your group is clear, on a foul, or off the table. An 8 on the break is spotted, or the breaker breaks again.") }
+    if kind == "carom" { ps.append("First to \(Prefs.caromRace) points wins." + (Prefs.caromCush == 1 ? " The easier game: one cushion before the second ball is enough." : "")) }
+    if kind == "snooker" { ps.append(Prefs.snookerFrames == 3 ? "Best of three frames." : "One frame."); ps.append("After a foul the player fouled chooses: play on, have it played again, or take a free ball when snookered.") }
+    return (title + " Rules", SRC[id] ?? "", ps)
+  }
+}

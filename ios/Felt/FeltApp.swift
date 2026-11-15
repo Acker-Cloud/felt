@@ -1039,6 +1039,17 @@ struct GameSetup: View {
   @AppStorage("felt.settings.stalemate") private var stalemate = false
   /* the form's measured height (setupRoom), which the hero gives way to */
   @State private var formContent = 0.0
+  @State private var showRules = false
+  /* #rulesPop: its title, the ruleset's name, the words; following the choices live */
+  var rulesPop: some View {
+    let I = RulesInfo.of(kind, title: game.rawValue)
+    return VStack(alignment: .leading, spacing: 8) {
+      HStack { Text(I.title).font(.headline); Spacer(); Button("Done") { showRules = false }.font(.body.weight(.semibold)).foregroundStyle(.primary) }
+      Text(I.src).font(.footnote).foregroundStyle(.secondary)
+      ForEach(I.ps, id: \.self) { Text($0).font(.subheadline).fixedSize(horizontal: false, vertical: true) }
+    }
+    .padding(16).frame(width: 320)
+  }
   static let SUB: [TableGame: String] = [
     .eight: "Solids and stripes. Clear your group, then pot the 8.", .nine: "Lowest ball first. A legal 9 wins, whenever it drops.",
     .bumper: "Red against white, five each, round the posts to the far cup.", .carom: "No pockets. Your cue ball meets both others, three cushions before the second.",
@@ -1057,7 +1068,14 @@ struct GameSetup: View {
         HeroView(game: game, txt: 104).frame(height: min(g.size.height * 0.5, max(g.size.height * 0.2, g.size.height + g.safeAreaInsets.top - formH)))
           .overlay(alignment: .bottomLeading) {
             VStack(alignment: .leading, spacing: 4) {
-              Text(game.rawValue).font(.largeTitle.bold()).foregroundStyle(.white)
+              HStack(alignment: .center) {
+                Text(game.rawValue).font(.largeTitle.bold()).foregroundStyle(.white)
+                Spacer()
+                /* #rulesInfo: the (i) at the title's trailing end, the rules' words in a popover */
+                Button { showRules = true } label: { Image(systemName: "info.circle").font(.title2).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).frame(width: 44, height: 44) }
+                  .accessibilityLabel("About \(game.rawValue) Rules").accessibilityIdentifier("rulesInfo")
+                  .popover(isPresented: $showRules, arrowEdge: .top) { rulesPop.presentationCompactAdaptation(.popover) }
+              }
               Text(Self.SUB[game] ?? game.line).font(.subheadline).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).lineLimit(2)
             }
             .padding(.horizontal, 16).padding(.bottom, 8)
@@ -1071,8 +1089,12 @@ struct GameSetup: View {
     }
     .background(Color.black)
     .ignoresSafeArea(edges: .top)
+    /* `-felt-rules`: the (i) popover open (with -felt-setup) */
+    .task { if ProcessInfo.processInfo.arguments.contains("-felt-rules") { try? await Task.sleep(for: .seconds(1)); showRules = true } }
   }
   /* the hero is rebuilt when the table changes */
+  /* .wl: the record against that CPU, after the level ("Medium · 3 won, 1 lost") */
+  func wl(_ lv: String) -> String { let r = Record.of(kind, lv); return r.w + r.l > 0 ? " \u{00b7} \(r.w) won, \(r.l) lost" : "" }
   /* the form's rows: Opponent, the CPU's three, then the game's table and rules rows */
   var rows: Int {
     let foes = opponent == "two" ? 0 : 3
@@ -1093,7 +1115,7 @@ struct GameSetup: View {
               HStack(spacing: 12) {
                 BallDot(n: f.n).frame(width: 26, height: 26)
                 Text(f.name).font(.body.weight(.semibold)).foregroundStyle(.primary)
-                Text(f.level).font(.subheadline).foregroundStyle(.secondary)
+                Text(f.level + wl(f.id)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 if opponent == f.id { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(.primary) }
               }

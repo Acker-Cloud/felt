@@ -399,7 +399,10 @@ final class TableModel {
   private func words(_ gm: Game, _ shooter: Int, chose: (who: Int, kind: String, choice: String)? = nil) {
     guard let v = gm.verdict else { return }
     /* the page's cues: a win (or, against the CPU, a loss: two soft falling notes), a foul, carom's point, the turn passing */
-    if let w = gm.winner { sound.cue(cpuLevel != nil && w == 1 ? "lose" : "win") }
+    if let w = gm.winner {
+      sound.cue(cpuLevel != nil && w == 1 ? "lose" : "win")
+      if let lv = cpuLevel, exhib == nil, gm.mode == nil { Record.game(gm.kind, lv, won: w == 0) }
+    }
     else if v.foul != nil { sound.cue("foul") }
     else if gm.kind == "carom" && v.carom?.point == true { sound.cue("point") }
     else if gm.turn != shooter { sound.cue("turn") }
