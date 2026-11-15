@@ -33,7 +33,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R'];
+    'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -198,7 +198,50 @@ function build() {
           objHit: P.objHit, cueStop: P.cueStop, air: pts(P.air), bounces: pts(P.bounces || null) } });
     }
   }
-  return { math, golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), tables, cases, guides };
+  /* the rules: whole games played by the page's own judge on fdlibm physics, every shot and choice
+     recorded as the game in, the shot's facts, and the game out (JSON, as copyGame sees a game) */
+  const games = [];
+  const RULE_GAMES = [['8', '8-house', 'official'], ['8', '8-wpa', 'official'], ['8', '8-wpa', 'all'], ['heyball', 'heyball', 'official'], ['9', '9-house', 'official'],
+    ['9', '9-wpa', 'official'], ['10', '10-wpa', 'official'], ['rotation', 'rotation', 'official'], ['straight', 'straight-wpa', 'official'], ['9', '9-ring', 'official']];
+  for (const [kind, ruleset, mode] of RULE_GAMES) {
+    for (let gi = 0; gi < 3; gi++) {
+      setT(kind === 'heyball' ? ['heyball', null, 'regulation'] : [gi === 2 ? '9' : '7', null, 'regulation']);
+      let g = S.newGame(kind, { rules: { ruleset, call: { mode }, race: kind === 'straight' ? 12 : kind === 'rotation' ? 40 : undefined } });
+      const steps = [], bare = x => { const o = JSON.parse(JSON.stringify(x)); delete o.rules; return o; }, g0 = bare(g);
+      for (let k = 0; k < 140 && g.winner === null; k++) {
+        if (g.option) {
+          const choice = g.option.choices[Math.floor(rnd() * g.option.choices.length)], out = S.chooseOption(g, choice);
+          steps.push({ choice, out: bare(out) });
+          g = out; continue;
+        }
+        const step = {};
+        if (g.inHand) {
+          for (let t = 0; t < 400; t++) {
+            const x = S.BALL_R + rnd() * (S.TL - 2 * S.BALL_R), y = S.BALL_R + rnd() * (S.TW - 2 * S.BALL_R);
+            if (S.canPlace(g, x, y)) { g = S.placeCue(g, x, y); step.place = [x, y]; break; }
+          }
+        }
+        const c = g.balls.find(b => b.n === 0), tg = S.legalTargets(g), on = g.balls.filter(b => b.on && b.n > 0);
+        if (!on.length || !tg.length) break;
+        const pick = rnd() < 0.85 ? tg[Math.floor(rnd() * tg.length)] : on[Math.floor(rnd() * on.length)].n, t = g.balls.find(b => b.n === pick);
+        const ang = Math.atan2(t.y - c.y, t.x - c.x) + (rnd() - 0.5) * 0.08, power = g.breakShot ? 0.25 + rnd() * 0.75 : 0.2 + rnd() * 0.6;
+        const need = S.callNeed(g);
+        if (need || (kind === 'straight' && g.breakShot && rnd() < 0.5)) {
+          const pk = Math.floor(rnd() * S.POCKET_AIM.length), roll = rnd();
+          g = Object.assign({}, g, { call: roll < 0.1 ? { safety: true } : roll < 0.15 ? {} : { ball: t.n, pocket: pk } });
+        } else if (g.pushAvail && rnd() < 0.3) g = Object.assign({}, g, { call: { push: true } });
+        if (g.call) step.call = g.call;
+        const res = S.simulateShot(g.balls, { angle: ang, power, spin: rnd() < 0.5 ? 0 : { x: rnd() - 0.5, y: rnd() - 0.5 } });
+        step.r = JSON.parse(JSON.stringify({ balls: res.balls, first: res.first, railAfter: res.railAfter, crossed: res.crossed, potted: res.potted, pocketOf: res.pocketOf, rails: res.rails, kick: res.kick }));
+        const out = S.judge(g, res);
+        step.out = bare(out);
+        steps.push(step);
+        g = out;
+      }
+      games.push({ name: `${ruleset}/${mode} game ${gi}`, kind, ruleset, mode, race: kind === 'straight' ? 12 : kind === 'rotation' ? 40 : null, table: kind === 'heyball' ? 'heyball' : gi === 2 ? '9' : '7', g0, steps });
+    }
+  }
+  return { math, golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), tables, cases, guides, games };
 }
 /* tests/ios-check.cjs rebuilds both in memory and requires the committed files to match */
 module.exports = { build, OUT, loadFd };
@@ -207,6 +250,7 @@ if (require.main === module) {
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, 'math.txt'), b.math);
   fs.writeFileSync(path.join(OUT, 'golden.json'), b.golden);
+  fs.writeFileSync(path.join(OUT, 'rules.json'), b.rules);
   const steps = b.cases.reduce((a, c) => a + c.result.steps, 0);
-  console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);
+  console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${b.games.length} games (${b.games.reduce((a, g) => a + g.steps.length, 0)} judgements), ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);
 }
