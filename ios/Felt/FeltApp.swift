@@ -1406,6 +1406,11 @@ struct GameSetup: View {
     .straight: "14.1 continuous: any ball, called, a point each. Fourteen down, rack again.", .rotation: "Lowest ball first; every ball scores its number. 61 wins.",
     .heyball: "Snooker pockets, pool balls. Clear your group, then the 8 in any pocket."]
   /* FOES: the CPU opponents, one per level, each with its ball (1, 5, 8) */
+  /* GAMES' setup balls (#setupBall): b8, b9, b10, b14, b15; bumper's red, carom's yellow, snooker's red */
+  static let NUM: [TableGame: Int] = [.eight: 8, .nine: 9, .ten: 10, .straight: 14, .rotation: 15, .heyball: 8]
+  static let BALL: [TableGame: String] = [.bumper: "bb", .carom: "bc", .snooker: "bsnk"]
+  /* a row's insets: 16 pt in from the group's sides, none above or below (the row is its own 44 pt) */
+  static let ROW = EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
   static let FOES: [(id: String, name: String, level: String, n: Int)] = [("easy", "Rookie", "Easy", 1), ("medium", "Regular", "Medium", 5), ("hard", "Hustler", "Hard", 8)]
   var kind: String { game.table.2 }
   var pool: Bool { ["8", "9", "10", "straight", "rotation"].contains(kind) }
@@ -1428,6 +1433,11 @@ struct GameSetup: View {
               Text(Self.SUB[game] ?? game.line).font(.subheadline).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).lineLimit(2)
             }
             .padding(.horizontal, 16).padding(.bottom, 8)
+          }
+          .overlay(alignment: .topTrailing) {
+            /* #setupBall: the game's ball, 40 pt, top right of the hero */
+            Group { if let st = Self.BALL[game] { BallDot(style: st) } else { BallDot(n: Self.NUM[game] ?? 8) } }
+              .frame(width: 40, height: 40).padding(.top, g.safeAreaInsets.top + 12).padding(.trailing, 16).accessibilityHidden(true)
           }
           .id(setupKey)
         form
@@ -1474,61 +1484,71 @@ struct GameSetup: View {
         Section {
           Button { learn(k) } label: {
             HStack(spacing: 12) {
-              Image(systemName: "graduationcap").foregroundStyle(.primary).accessibilityHidden(true)
+              Image(systemName: "graduationcap").foregroundStyle(Color(rgb: 0x3d, 0xdc, 0x84)).accessibilityHidden(true)
               Text(titleCaseWords("Learn \(game.rawValue)")).foregroundStyle(.primary)
               Spacer(); Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
             }
           }
-          .accessibilityIdentifier("tutLink")
+          .accessibilityIdentifier("tutLink").frame(minHeight: 44).listRowInsets(Self.ROW)
         }
       }
       Section {
         Picker("Opponent", selection: Binding(get: { opponent == "two" ? "two" : "cpu" }, set: { opponent = $0 == "two" ? "two" : (opponent == "two" ? "medium" : opponent) })) {
           Text("Two Players").tag("two"); Text("CPU").tag("cpu")
         }
-        .pickerStyle(.segmented).accessibilityIdentifier("opponent")
+        .pickerStyle(.segmented).accessibilityIdentifier("opponent").frame(minHeight: 44).listRowInsets(Self.ROW)
         if opponent != "two" {
           ForEach(Self.FOES, id: \.id) { f in
             Button { opponent = f.id } label: {
+              /* .foe: ball, the name over its level and record, a checkmark in the accent */
               HStack(spacing: 12) {
-                BallDot(n: f.n).frame(width: 26, height: 26)
-                Text(f.name).font(.body.weight(.semibold)).foregroundStyle(.primary)
-                Text(f.level + wl(f.id)).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                BallDot(n: f.n).frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 0) {
+                  Text(f.name).font(.system(size: 17)).foregroundStyle(.primary)
+                  Text(f.level + wl(f.id)).font(.system(size: 15)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).lineLimit(1)
+                }
                 Spacer()
-                if opponent == f.id { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(.primary) }
+                if opponent == f.id { Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(rgb: 0x3d, 0xdc, 0x84)) }
               }
+              .frame(minHeight: 54)
             }
             .accessibilityAddTraits(opponent == f.id ? .isSelected : []).accessibilityIdentifier("foe-" + f.id)
+            .listRowInsets(Self.ROW)
           }
         }
       }
       Section {
         if pool {
-          Picker("Table", selection: $table) { Text("7 ft Bar").tag("7"); Text("9 ft Pro").tag("9") }
-          Picker("Pockets", selection: $pockets) { Text("Regulation").tag("regulation"); Text("Generous").tag("generous") }
+          Picker("Table", selection: $table) { Text("7 ft Bar").tag("7"); Text("9 ft Pro").tag("9") }.listRowInsets(Self.ROW)
+          Picker("Pockets", selection: $pockets) { Text("Regulation").tag("regulation"); Text("Generous").tag("generous") }.listRowInsets(Self.ROW)
         }
-        if kind == "bumper" { Picker("Table", selection: $bumperTable) { Text("Octagon").tag("octagon"); Text("Rectangle").tag("rect") } }
+        if kind == "bumper" { Picker("Table", selection: $bumperTable) { Text("Octagon").tag("octagon"); Text("Rectangle").tag("rect") }.listRowInsets(Self.ROW) }
         if kind == "carom" {
-          Picker("Race To", selection: $caromRace) { Text("5").tag(5); Text("10").tag(10); Text("15").tag(15) }
-          Picker("Cushions", selection: $caromCush) { Text("Three").tag(3); Text("1-Cushion (Easier)").tag(1) }
+          Picker("Race To", selection: $caromRace) { Text("5").tag(5); Text("10").tag(10); Text("15").tag(15) }.listRowInsets(Self.ROW)
+          Picker("Cushions", selection: $caromCush) { Text("Three").tag(3); Text("1-Cushion (Easier)").tag(1) }.listRowInsets(Self.ROW)
         }
         if kind == "snooker" {
-          Picker("Table", selection: $snookerTable) { Text("Compact 10 ft").tag("compact"); Text("Full 12 ft").tag("full") }
-          Picker("Frames", selection: $snookerFrames) { Text("One Frame").tag(1); Text("Best of 3").tag(3) }
+          Picker("Table", selection: $snookerTable) { Text("Compact 10 ft").tag("compact"); Text("Full 12 ft").tag("full") }.listRowInsets(Self.ROW)
+          Picker("Frames", selection: $snookerFrames) { Text("One Frame").tag(1); Text("Best of 3").tag(3) }.listRowInsets(Self.ROW)
         }
-        if kind == "8" { Picker("Rules", selection: $rules8) { Text("House Rules").tag("8-house"); Text("WPA").tag("8-wpa") } }
-        if kind == "9" { Picker("Rules", selection: $rules9) { Text("House Rules").tag("9-house"); Text("WPA, Push Out").tag("9-wpa") } }
-        if kind == "straight" { Picker("Race To", selection: $race141) { ForEach([25, 50, 100, 150], id: \.self) { Text("\($0)").tag($0) } } }
-        if kind == "8" || kind == "9" { Picker("Stalemate", selection: $stalemate) { Text("Play On").tag(false); Text("Re-Rack (House)").tag(true) } }
+      }
+      /* the rules' group, apart from the table's */
+      Section {
+        if kind == "8" { Picker("Rules", selection: $rules8) { Text("House Rules").tag("8-house"); Text("WPA").tag("8-wpa") }.listRowInsets(Self.ROW) }
+        if kind == "9" { Picker("Rules", selection: $rules9) { Text("House Rules").tag("9-house"); Text("WPA, Push Out").tag("9-wpa") }.listRowInsets(Self.ROW) }
+        if kind == "straight" { Picker("Race To", selection: $race141) { ForEach([25, 50, 100, 150], id: \.self) { Text("\($0)").tag($0) } }.listRowInsets(Self.ROW) }
+        if kind == "8" || kind == "9" { Picker("Stalemate", selection: $stalemate) { Text("Play On").tag(false); Text("Re-Rack (House)").tag(true) }.listRowInsets(Self.ROW) }
       }
     }
     .pickerStyle(.menu)
     .tint(.primary)
+    .font(.system(size: 17))
     .environment(\.defaultMinListRowHeight, 44)
     .listSectionSpacing(16)
     .contentMargins(.top, 12, for: .scrollContent)
+    .contentMargins(.bottom, 0, for: .scrollContent)
     .scrollBounceBehavior(.basedOnSize)
-    .onScrollGeometryChange(for: Double.self) { $0.contentSize.height + $0.contentInsets.top + $0.contentInsets.bottom } action: { _, h in formContent = h }
+    .onScrollGeometryChange(for: Double.self) { $0.contentSize.height + $0.contentInsets.top } action: { _, h in formContent = h }
   }
 }
 
@@ -1548,6 +1568,7 @@ struct BallDot: View {
           Circle().fill(Color(rgb: 0xf6, 0xf4, 0xec)).frame(width: d * 0.34, height: d * 0.34)
         case "bc": Circle().fill(RadialGradient(colors: [Color(rgb: 0xff, 0xe4, 0x8a), Color(rgb: 0xc9, 0x95, 0x12)], center: UnitPoint(x: 0.35, y: 0.3), startRadius: 0, endRadius: d * 0.72))
         case "bsblk": Circle().fill(RadialGradient(colors: [Color(rgb: 0x55, 0x55, 0x5a), Color(rgb: 0x16, 0x16, 0x18)], center: UnitPoint(x: 0.35, y: 0.3), startRadius: 0, endRadius: d * 0.7))
+        case "bsnk": Circle().fill(RadialGradient(colors: [Color(rgb: 0xe8, 0x50, 0x4a), Color(rgb: 0x8a, 0x12, 0x18)], center: UnitPoint(x: 0.35, y: 0.3), startRadius: 0, endRadius: d * 0.72))
         default:
           if let band = [9: Color(rgb: 0xf2, 0xbe, 0x28), 10: Color(rgb: 0x1c, 0x48, 0xb8), 14: Color(rgb: 0x16, 0x78, 0x42), 15: Color(rgb: 0x7a, 0x1e, 0x20)][n] {
             ZStack { Color(rgb: 0xf6, 0xf4, 0xec); band.frame(height: d * 0.56) }.clipShape(Circle())
