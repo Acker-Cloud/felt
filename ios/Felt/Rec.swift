@@ -115,28 +115,15 @@ struct Rec: Codable {
     } else { r.kinds[g.kind]!.two += 1 }
     r.save()
   }
-  /* shotMoments' legal count: the balls down legally for the shooter (none on a foul, a push, a safety or a missed call) */
-  static func legal(_ g0: Game, _ r: RuleShot, _ n: Game) -> Int {
-    guard let v = n.verdict, g0.kind != "carom" else { return 0 }
-    let me = g0.turn, down = (g0.kind == "snooker" ? r.potted : v.potted).filter { $0 != 0 }
-    if v.foul != nil || v.call.push || v.call.safety || (v.call.need && v.call.made != true) { return 0 }
-    if g0.kind == "bumper" { return down.count }
-    if (g0.kind == "8" || g0.kind == "heyball") && g0.mode == nil {
-      let mine = g0.groups[me]
-      return down.filter { $0 == 8 ? v.win == me : g0.open || ($0 < 8 ? "solids" : "stripes") == mine }.count
-    }
-    return down.count
-  }
   /* recordShot: a human shot's numbers. vis: the legal pots of this visit so far, this shot's included */
-  static func shot(_ g0: Game, _ r: RuleShot, _ n: Game, p: Int, vis: Int, pockets: [[Double]]) {
+  static func shot(_ g0: Game, _ r: RuleShot, _ n: Game, p: Int, vis: Int, legal m: Int, keys: [String], pockets: [[Double]]) {
     guard g0.mode == nil, Rec.KINDS.contains(g0.kind) else { return }
     var R = load()
     var k = R.kinds[g0.kind]!
     let v = n.verdict
     k.sh += 1
     if v?.foul != nil { k.fo += 1 }
-    let m = legal(g0, r, n)
-    k.pot += g0.kind == "carom" ? (v?.carom?.point == true && v?.foul == nil ? 1 : 0) : m
+    k.pot += g0.kind == "carom" ? (keys.contains("point") ? 1 : 0) : m
     if g0.breakShot { k.br += 1; if v?.foul == nil && (v?.potted ?? []).contains(where: { $0 != 0 }) { k.brOk += 1 } }
     better(&k.run, g0.kind == "carom" ? (n.high ?? [])[safe: p] ?? 0 : vis)
     /* the longest pot: a legal pot's distance from where the ball lay to its pocket */

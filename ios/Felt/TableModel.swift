@@ -515,7 +515,9 @@ final class TableModel {
     Rec.countLoss(k, lv)
   }
   /* the visit so far (stats.visit): its shooter and legal pots */
-  @ObservationIgnored private var visit: (p: Int, pots: Int)? = nil
+  @ObservationIgnored private var visit: (p: Int, pots: Int, fromBreak: Bool)? = nil
+  /* #callout (6c): the shot's moment named over the far end of the cloth, about 1.3 s */
+  private(set) var callout: (text: String, at: TimeInterval)? = nil
   /* what the table, the cue and the balls wear (4l) */
   @ObservationIgnored var dress: Dress = .standard
   /* 4g: the fine-aim wheel held (fineAim), the loupe's fade, place and clock, the guide's last verdict */
@@ -626,6 +628,11 @@ final class TableModel {
     /* the look: a career match wears the career's equipped items (lookCareer), else the settings' (look()) */
     dress = tm?.dress ?? Prefs.dress(game.table.2)
     rerack()
+    /* a test hook: `-felt-callout "Bank shot"` calls that moment out a moment after the table opens */
+    if let i = ProcessInfo.processInfo.arguments.firstIndex(of: "-felt-callout"), i + 1 < ProcessInfo.processInfo.arguments.count {
+      let w = ProcessInfo.processInfo.arguments[i + 1]
+      Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(2)); guard let s = self else { return }; s.callout = (w, s.now); s.sound.cue("moment") }
+    }
     /* a test hook: `-felt-lessonrun` walks the lesson as the controls would: the aim onto the line, the wheel's nudge, the bar */
     if lesson, ProcessInfo.processInfo.arguments.contains("-felt-lessonrun") {
       Task { @MainActor [weak self] in
@@ -882,12 +889,15 @@ final class TableModel {
     let shooter = before.turn, next = engine.judge(before, shot)
     potCount += next.verdict?.potted.count ?? 0
     if let gm0 = gBefore, gm0.turn < 4 { pottedBy[gm0.turn] += next.verdict?.potted.filter { $0 > 0 } ?? [] }
-    /* the record (recordShot, recordFrame): the visit's legal pots (any shooter), then a human shot's numbers */
-    if visit?.p != shooter { visit = (shooter, 0) }
-    visit!.pots += Rec.legal(before, shot, next)
+    /* noteShot: the shot's moments (shotMoments) with the visit so far, which carries on while the same player keeps the
+       table without a foul; the record (recordShot, recordFrame); the moment called out */
+    let vis: (p: Int, pots: Int, fromBreak: Bool) = visit.flatMap { $0.p == shooter ? $0 : nil } ?? (shooter, 0, before.breakShot)
+    let mo = engine.shotMoments(before, r, next, run: (vis.pots, vis.fromBreak))
+    visit = next.winner == nil && next.turn == shooter && next.verdict?.foul == nil ? (shooter, vis.pots + mo.legal, vis.fromBreak) : nil
+    if let k = mo.keys.first, next.winner == nil, before.kind != "carom" { callout = (momentWord(k, before.kind), now); sound.cue("moment") }
     /* markBegun: the player's first shot of a CPU game */
     if !begun, cpuLevel != nil, exhib == nil, tmatch == nil, before.mode == nil, shooter == 0 { begun = true; Rec.markBegun(before.kind, cpuLevel!) }
-    if exhib == nil && !(cpuLevel != nil && shooter != 0) { Rec.shot(before, shot, next, p: shooter, vis: visit!.pots, pockets: sim.POCKETS) }
+    if exhib == nil && !(cpuLevel != nil && shooter != 0) { Rec.shot(before, shot, next, p: shooter, vis: vis.pots + mo.legal, legal: mo.legal, keys: mo.keys, pockets: sim.POCKETS) }
     if exhib == nil && next.kind == "snooker" { Rec.frame(next, cpu: cpuLevel != nil) }
     g = next; rolling = nil; spin = Spin(); v3Top2d = false
     /* a party: the device is handed over each time the turn goes to another player (or a choice to another) */

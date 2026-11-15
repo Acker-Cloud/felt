@@ -321,6 +321,7 @@ struct TableScreen: View {
     }
     .onChange(of: model.spinOk) { _, ok in if !ok { model.elevOpen = false } }
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
+    .overlay(alignment: .top) { CalloutView(model: model).padding(.top, 0) }
     .overlay { if let r = model.trickRes, !model.paused { TrickResult(model: model, res: r, back: { dismiss() }) } }
     .overlay { if let r = model.drillRes, !model.paused { DrillResultView(model: model, res: r, back: { dismiss() }) } }
     .overlay(alignment: model.coachAtTop ? .top : .bottom) { if model.tut != nil, !model.tutDone, !model.paused { CoachCard(model: model).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
@@ -1803,5 +1804,37 @@ struct LessonDoneView: View {
       .padding(.horizontal, 12).padding(.bottom, 12)
     }
     .fullScreenCover(isPresented: $play) { NavigationStack { GameSetup(game: .eight, go: {}) } }
+  }
+}
+
+/* #callout: a pill with the moment's dot (green; on a red cloth the coral) and its name, popping in over the top of the
+   cloth (12% down the stage), held, then gone: callIn's 1.25 s */
+struct CalloutView: View {
+  let model: TableModel
+  var body: some View {
+    TimelineView(.animation(paused: model.callout == nil)) { tl in
+      let t = model.callout.map { tl.date.timeIntervalSinceReferenceDate - $0.at } ?? 9
+      let u = t / 1.25, on = model.callout != nil && u >= 0 && u < 1
+      let o = u < 0.14 ? u / 0.14 : u < 0.76 ? 1 : max(0, 1 - (u - 0.76) / 0.24)
+      let sc = u < 0.14 ? 0.86 + (1.035 - 0.86) * u / 0.14 : u < 0.26 ? 1.035 - 0.035 * (u - 0.14) / 0.12 : 1
+      let red = model.dress.cloth == "red"
+      GeometryReader { g in
+        if on, let c = model.callout {
+          HStack(spacing: 8) {
+            Circle().fill(red ? Color(rgb: 0xff, 0x8a, 0x7a) : Color(rgb: 0x3d, 0xdc, 0x84)).frame(width: 8, height: 8)
+              .overlay(Circle().stroke((red ? Color(rgb: 0xff, 0x8a, 0x7a) : Color(rgb: 0x3d, 0xdc, 0x84)).opacity(0.26), lineWidth: 6))
+            Text(c.text).font(.system(size: 16, weight: .semibold)).kerning(-0.19).foregroundStyle(Color(rgb: 0xf5, 0xf5, 0xf7)).lineLimit(1)
+          }
+          .padding(.leading, 12).padding(.trailing, 16).padding(.vertical, 7.5)
+          .background(Capsule().fill(Color(rgb: 18, 18, 20).opacity(0.9)))
+          .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+          .shadow(color: .black.opacity(0.35), radius: 15, y: 10)
+          .scaleEffect(sc).opacity(o)
+          .position(x: g.size.width / 2, y: g.size.height * 0.12)
+          .accessibilityLabel(c.text)
+        }
+      }
+    }
+    .allowsHitTesting(false)
   }
 }
