@@ -437,6 +437,21 @@ struct TableScreen: View {
     tch.placing = false; tch.picking = false; tch.gest = nil; model.touching = false; model.placeEnd()
   }
   private func touchBench(_ size: CGSize) async {
+    /* `-felt-touchbench-slow`: a press, 14 pt in 100 ms (still a possible tap), then still: the aim printed at 50, 250,
+       320 and 600 ms (the wait's catch-up is due at TAP_MS) */
+    if ProcessInfo.processInfo.arguments.contains("-felt-touchbench-slow") {
+      try? await Task.sleep(for: .seconds(2))
+      let t0 = Date.timeIntervalSinceReferenceDate, p0 = CGPoint(x: size.width * 0.3, y: size.height * 0.3)
+      for k in 0...12 { touch(CGPoint(x: p0.x + 14 * CGFloat(k) / 12, y: p0.y), t0 + Double(k) / 120, size, began: k == 0); try? await Task.sleep(for: .milliseconds(8)) }
+      var out: [String] = []
+      for ms in [50, 250, 320, 600] {
+        let wait = ms - Int((Date.timeIntervalSinceReferenceDate - t0) * 1000)
+        if wait > 0 { try? await Task.sleep(for: .milliseconds(wait)) }
+        out.append(String(format: "%d ms %.5f", ms, model.aim))
+      }
+      print("felt-touchbench-slow " + out.joined(separator: ", "))
+      return
+    }
     while !Task.isCancelled {
       let t0 = Date.timeIntervalSinceReferenceDate
       /* `-felt-touchbench-hand`: the press on the cue ball (in hand on the break), carried round a small circle */
@@ -517,6 +532,19 @@ struct TableScreen: View {
     }
     /* while a let-go would still be a tap the line waits, then catches up with the finger in one step */
     if g.sweep && !g.maybeTap(t) { if !g.shown { model.takeAim() }; g.shown = true; turnTo(&g, b, t, m, c) }
+    /* while a let-go would still be a tap the line waits; once it cannot be (TAP_MS from the press) it catches up with the
+       finger in one step even if the finger has stopped, as the page's g.wait timer (else it waited for the next move) */
+    else if g.sweep && !g.wait {
+      g.wait = true
+      let t0 = g.t0, due = max(0, AimFeel.TAP_MS - (t - g.t0)) + 5
+      Task { @MainActor in
+        try? await Task.sleep(for: .milliseconds(Int(due)))
+        guard var w = tch.gest, w.t0 == t0, w.sweep, !w.shown, model.rolling == nil, let c2 = model.cue else { return }
+        model.takeAim(); w.shown = true
+        turnTo(&w, w.last, w.tLast, Mapper(size: size, TL: model.sim.TL, TW: model.sim.TW), c2)
+        tch.gest = w
+      }
+    }
     tch.gest = g
   }
   /* v3Drag: across turns the aim (rate by finger speed, 0.02 to 0.3 deg a point), up and down tilts (0.25 deg a point) */

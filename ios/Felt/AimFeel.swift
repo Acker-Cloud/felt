@@ -61,5 +61,7 @@ struct AimGesture {
   var trail: AimFeel.Trail = []
   /* a cue ball in hand grabbed: the offset from the finger to the ball (table metres), live once past GRAB_SLOP */
   var grab: (dx: Double, dy: Double)? = nil, moving = false
+  /* the catch-up timer is set (the page's g.wait) */
+  var wait = false
   func maybeTap(_ t: Double) -> Bool { !held && !shown && far <= AimFeel.TAP_MAX && t - t0 < AimFeel.TAP_MS }
 }

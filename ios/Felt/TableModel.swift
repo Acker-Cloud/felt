@@ -1021,7 +1021,7 @@ final class TableModel {
   /* a test hook: `-felt-aimbench` turns the aim a little every frame, as a slow sweep, and prints every 2 s the frames,
      the worst gap between them and how many times each counted view's body ran (Bench.bodies) */
   static let aimBench = ProcessInfo.processInfo.arguments.contains("-felt-aimbench")
-  static let touchBench = ProcessInfo.processInfo.arguments.contains("-felt-touchbench") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-hand")
+  static let touchBench = ProcessInfo.processInfo.arguments.contains("-felt-touchbench") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-hand") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-slow")
   @ObservationIgnored private var bench: (t0: Double, prev: Double, n: Int, worst: Double)?
   func tick(_ now: TimeInterval) {
     if (TableModel.aimBench || TableModel.touchBench) && rolling == nil && !cpuTurn && g?.winner == nil {
