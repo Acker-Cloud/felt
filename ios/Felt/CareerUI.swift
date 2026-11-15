@@ -101,7 +101,8 @@ struct CareerView: View {
       if store.loaded { CareerHub(store: store, play: { if let m = store.match() { playing = PlayTerms(game: m.game, tm: m.tm) } }, onPractice: { page = "practice" }) }
       else { CareerSlots(store: store) }
     }
-    .navigationTitle(store.loaded ? (store.E.S["profile"]?["name"]?.str ?? "Career") : "Career")
+    /* the hub carries its own header (the season over the name); the slots keep the bar's title */
+    .navigationTitle(store.loaded ? "" : "Career")
     /* a test hook: `-felt-career-play` opens the next match on the table */
     .navigationDestination(item: $page) { p in
       switch p { case "stats": CareerStats(store: store); case "shop": CareerShop(store: store); case "sponsors": CareerSponsors(store: store)
@@ -183,6 +184,132 @@ struct CareerSlots: View {
 }
 
 /* the hub: the player's standing, the next match, a week ahead, events to enter, offers, the news */
+/* PAGES.hub's top: the player's card (#cvMe: the avatar, name and line, Credits, Rating and Titles, the season's bar) and
+   the Next Match card (#cvNext: the table's banner, the event and a round tag, the opponent's avatar, name and line, the
+   match's lines: Game, Rules, Race, Break, Opponent, Head to head, Odds; Play Match, Forfeit This Match) */
+@MainActor enum CareerWords {
+  static func natName(_ id: String) -> String { CareerData.NAT.first { $0.id == id }?.name ?? id }
+  static func crWords(_ n: Double) -> String { let f = NumberFormatter(); f.numberStyle = .decimal; f.locale = Locale(identifier: "en_US"); return "\(f.string(from: NSNumber(value: n.rounded())) ?? "0") cr" }
+  static func unitWords(_ kind: String, _ n: Int) -> String { TourneyRun.unitWords(kind, n) }
+  static func tableWords(_ r: JV) -> String {
+    let g = r["game"]?.str ?? ""
+    if g == "heyball" { return "9 ft table, snooker pockets" }
+    if g == "snooker" { return r["table"]?.str == "full" ? "12 ft table" : "10 ft table" }
+    if g == "carom" { return "10 ft carom table" }
+    if g == "bumper" { return "Octagon bumper table" }
+    return "\(r["table"].map { $0.str ?? String($0.i) } ?? "7") ft table, \(r["pockets"]?.str ?? "regulation") pockets"
+  }
+  static let CALL_WORDS = ["off": "no calls", "8ball": "call the 8", "official": "official calls", "all": "call every shot"]
+  static let DETAIL_WORDS = ["ball": "the ball", "pocket": "ball and pocket", "rails": "ball, pocket and rails", "strict": "strict"]
+  static func rulesWords(_ r: JV) -> String {
+    let label = CareerStore.T("RULESETS")[r["ruleset"]?.str ?? ""]?["label"]?.str ?? CareerStore.gameName(r["game"]?.str ?? "")
+    let req = r["call"]?["require"]?.str ?? "official"
+    return "\(label), \(CALL_WORDS[req] ?? "official calls")" + (req != "off" ? " (\(DETAIL_WORDS[r["call"]?["detail"]?.str ?? ""] ?? "ball and pocket"))" : "")
+  }
+  /* avatarEl: initials on the avatar's colour, else the page's fallback (AV_COLS by hashStr of the name) */
+  static func avatar(_ name: String, _ av: JV?, _ d: CGFloat = 46) -> some View {
+    let col = av?["col"]?.str ?? TourneyRun.AV_COLS[Int(TourneyRun.hashStr(name) % UInt32(TourneyRun.AV_COLS.count))]
+    let ini = av?["ini"]?.str ?? name.split(separator: " ").compactMap { $0.first }.prefix(2).map(String.init).joined()
+    return Text(ini).font(.system(size: d * 0.37, weight: .bold)).foregroundStyle(.white).frame(width: d, height: d).background(Circle().fill(css(col))).accessibilityHidden(true)
+  }
+}
+struct CareerHubTop: View {
+  @Bindable var store: CareerStore
+  let play: () -> Void
+  @State private var forfeit = false
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, S = E.S, me = S["me"]!, pr = S["profile"]!, tier = me["tier"]!.i, day = S["day"]!.i, week = day % CareerEngine.const("YEAR").i / 7 + 1
+    let tierName = CareerStore.T("TIERS")[tier]!["name"]!.s, nm = E.nextMatch(), titles = E.stats()["all"]?["titles"]?.i ?? 0
+    VStack(alignment: .leading, spacing: 14) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Season \(E.season), week \(week)").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+        Text(pr["name"]!.s).font(.system(size: 28, weight: .bold)).accessibilityAddTraits(.isHeader)
+      }
+      .padding(.leading, 4)
+      VStack(alignment: .leading, spacing: 12) {
+        HStack(spacing: 12) {
+          CareerWords.avatar(pr["name"]!.s, pr["avatar"])
+          VStack(alignment: .leading, spacing: 1) {
+            Text(pr["name"]!.s + (pr["nick"]?.str.flatMap { $0.isEmpty ? nil : " \"\($0)\"" } ?? "")).font(.system(size: 17, weight: .semibold))
+            Text("\(tierName), tier \(tier). \(CareerWords.natName(pr["nat"]!.s)), \(CareerStore.gameName(pr["disc"]!.s))").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+          }
+        }
+        HStack(alignment: .top) {
+          fact("Credits", CareerWords.crWords(me["money"]!.d)); fact("Rating", "\(me["fr"]?.i ?? 0)"); fact("Titles", "\(titles)")
+        }
+        GeometryReader { g in
+          ZStack(alignment: .leading) {
+            Capsule().fill(Color.white.opacity(0.12))
+            Capsule().fill(Color(rgb: 0x3d, 0xdc, 0x84)).frame(width: g.size.width * CGFloat(min(52, week)) / 52)
+          }
+        }
+        .frame(height: 4).accessibilityHidden(true)
+      }
+      .padding(16).background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color(rgb: 0x1c, 0x1c, 0x1f)))
+      if nm != .null {
+        let o = nm["opponent"]!, r = nm["rules"]!, g = r["game"]!.s, h = nm["h2h"]!.a, fr = nm["fr"]!
+        ModeField("Next Match") {
+          VStack(alignment: .leading, spacing: 12) {
+            if let tg = TourneyView.game(g) { HeroView(game: tg, txt: 0).frame(height: 170).clipped().allowsHitTesting(false) }
+            VStack(alignment: .leading, spacing: 12) {
+              HStack {
+                Text(nm["eventName"]!.s).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.7)).lineLimit(1)
+                Spacer()
+                Text(nm["round"]!.s).font(.system(size: 13, weight: .semibold)).padding(.horizontal, 10).padding(.vertical, 4).background(Capsule().fill(Color.white.opacity(0.1)))
+              }
+              HStack(spacing: 12) {
+                CareerWords.avatar(o["name"]!.s, o["avatar"])
+                VStack(alignment: .leading, spacing: 1) {
+                  Text(o["name"]!.s + (o["nick"]?.str.flatMap { $0.isEmpty ? nil : " \"\($0)\"" } ?? "")).font(.system(size: 17, weight: .semibold))
+                  Text("\(CareerWords.natName(o["nat"]!.s)), \(o["archName"]?.str ?? ""), rating \(o["rating"]?.i ?? 0)").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+                }
+              }
+              VStack(spacing: 6) {
+                line("Game", "\(CareerStore.gameName(g)), \(CareerWords.tableWords(r))")
+                line("Rules", CareerWords.rulesWords(r))
+                line("Race", "First to \(CareerWords.unitWords(g, nm["race"]!.i))")
+                line("Break", g == "bumper" || g == "carom" ? "You open" : nm["breaker"]!.i == 0 ? "You break first" : "\(o["name"]!.s.split(separator: " ").first ?? "") breaks first")
+                line("Opponent", "Tier \(o["tier"]?.i ?? 0), plays as the \(nm["level"]!.s) CPU")
+                line("Head to Head", "\(h.first?.i ?? 0)-\(h.count > 1 ? h[1].i : 0)")
+                line("Odds", "\(Int((100 * fr["odds"]!.d).rounded()))% by performance rating, \(fr["me"]?.i ?? 0) to \(fr["opp"]?.i ?? 0)")
+                if let c = r["custom"]?.str { line("Format", c) }
+              }
+              Button(action: play) { Text("Play Match").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+                .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("career-play")
+              Button {
+                if forfeit { forfeit = false; store.report(0, 0, true) } else { forfeit = true; Task { try? await Task.sleep(for: .seconds(4)); forfeit = false } }
+              } label: {
+                Text(forfeit ? "Tap again to forfeit" : "Forfeit This Match").font(.system(size: 17, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 50)
+                  .foregroundStyle(forfeit ? Color.white : Color(rgb: 0xff, 0x8a, 0x7a))
+                  .background(Capsule().fill(forfeit ? Color(rgb: 0xc0, 0x39, 0x2b) : Color(rgb: 0x2c, 0x2c, 0x30)))
+              }
+            }
+            .padding(.horizontal, 16).padding(.bottom, 16).padding(.top, TourneyView.game(g) == nil ? 16 : 0)
+          }
+          .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color(rgb: 0x1c, 0x1c, 0x1f)))
+          .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+      }
+    }
+  }
+  private func fact(_ k: String, _ v: String) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(k).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+      Text(v).font(.system(size: 17, weight: .bold)).monospacedDigit()
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+  private func line(_ k: String, _ v: String) -> some View {
+    HStack(alignment: .firstTextBaseline) {
+      Text(k).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+      Spacer(minLength: 12)
+      Text(v).multilineTextAlignment(.trailing)
+    }
+    .font(.system(size: 15))
+  }
+}
+
 struct CareerHub: View {
   @Bindable var store: CareerStore
   let play: () -> Void
@@ -193,24 +320,11 @@ struct CareerHub: View {
     let nm = E.nextMatch()
     List {
       Section {
-        row("Tier", "\(tier): \(CareerStore.T("TIERS")[tier]!["name"]!.s)")
-        row("Season", "\(E.season), week \(day % CareerEngine.const("YEAR").i / 7 + 1)")
-        row("Credits", JV.numberString(me["money"]!.d))
-        row("Reputation", JV.numberString(me["rep"]!.d))
+        CareerHubTop(store: store, play: play).padding(.top, 6).listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
       }
       if !store.msg.isEmpty { Section { Text(store.msg).font(.subheadline) } }
       if E.reviewDue { CareerReview(store: store) }
-      if nm != .null {
-        Section("Next Match") {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("\(nm["eventName"]!.s), \(nm["round"]!.s)").font(.footnote).foregroundStyle(.secondary)
-            Text("vs \(nm["opponent"]!["name"]!.s)").font(.headline)
-            Text("Race to \(nm["race"]!.i), \(CareerStore.gameName(nm["rules"]!["game"]!.s)), \(nm["level"]!.s.capitalized) opponent").font(.footnote).foregroundStyle(.secondary)
-          }
-          Button("Play Match", action: play).bold().foregroundStyle(.white).accessibilityIdentifier("career-play")
-          Button("Simulate Match") { E.simMatch(); store.msg = "Match simulated."; store.touch() }.foregroundStyle(.white)
-        }
-      } else {
+      if nm == .null {
         Section {
           Button("Next Week") { let r = E.advance(week: true); store.msg = r == "match" ? "A match is due." : ""; store.touch() }.bold().foregroundStyle(.white).accessibilityIdentifier("career-week")
         }
