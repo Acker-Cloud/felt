@@ -197,6 +197,8 @@ public final class BallPainter {
     if dark > 0 { g.fillStyle = .color(RGBA(0, 0, 0, dark)); g.beginPath(); g.arc(X, Y, r + 0.5, 0, Double.pi * 2); g.fill() }
     g.globalAlpha = 1
   }
+  /* setBall: a ball's colour in this set and the set's ivory (the rail's flat inlay, nextBallEl) */
+  public func flatOf(_ n: Int) -> (col: [Double], iv: String) { ((n >= 1 && n <= 15 ? setCol(n) : nil) ?? colorOf(n), set.ivory) }
   func lowBall(_ n: Int) -> Bool {
     guard lowRim else { return false }
     let c = (n >= 1 && n <= 15 ? setCol(n) : nil) ?? colorOf(n)

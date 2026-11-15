@@ -94,6 +94,7 @@ final class TableModel {
     if spec.table == "bumper" { sim.setTable("7") }
     sim.setPockets(spec.pockets)
     sim.setTable(spec.table, spec.shape)
+    Mapper.note(sim)
   }
   struct Baked { let image: CGImage; let size: CGSize; let scale: CGFloat }
   private(set) var tableImage: Baked?
@@ -105,9 +106,10 @@ final class TableModel {
     guard size.width > 0, size.height > 0, tableImage?.size != size, baking != size else { return }
     baking = size
     let look = dress, spec = spec
+    let ext = Mapper.current
     Task.detached(priority: .userInitiated) {
       let sim = Sim(); TableModel.setUp(sim, spec)
-      let m = Mapper(size: size, TL: sim.TL, TW: sim.TW)
+      let m = Mapper(size: size, TL: sim.TL, TW: sim.TW, ext: ext)
       let p = TablePainter(sim: sim, view: m.view, dpr: Double(scale), rail: m.rail, look: TableLook.of(look), pageColor: "rgb(9, 9, 10)")
       let img = p.paint(width: Int((size.width * scale).rounded()), height: Int((size.height * scale).rounded())).image()
       await MainActor.run { if self.baking == size { self.tableImage = Baked(image: img, size: size, scale: scale); self.baking = nil } }
@@ -636,6 +638,14 @@ final class TableModel {
   @ObservationIgnored var guideLegal = true
   /* the 3D view (4o): on, its pitch and distance (the player's, kept in the settings), the camera last drawn */
   var view3d = Prefs.view == "3d"
+  /* the rail's 3D switch: its centre on the stage as last drawn (nil: not shown) */
+  @ObservationIgnored var railSwitch: CGPoint?
+  /* #viewBtn's tap: 3D on or off, kept as the setting */
+  func toggleView() {
+    view3d.toggle()
+    UserDefaults.standard.set(view3d ? "3d" : "top", forKey: "felt.settings.view")
+    frame &+= 1
+  }
   @ObservationIgnored var v3Pitch = Prefs.viewPitch
   @ObservationIgnored var v3Dist = Prefs.viewDist
   @ObservationIgnored var v3Cam: (V3.Cam, V3.Box)? = nil

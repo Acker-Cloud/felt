@@ -60,15 +60,58 @@ func ballColor(_ n: Int) -> (Int, Int, Int) {
    the foot of the screen. */
 struct Mapper {
   let k: Double, ox: Double, oy: Double, upright: Bool, TL: Double, TW: Double, rail: Double
-  init(size: CGSize, TL: Double, TW: Double) {
-    self.TL = TL; self.TW = TW
-    let w = Double(size.width), h = Double(size.height)
+  /* tableExt: how far the rails (never the bed) may run past the stage into a safe-area inset on each side (the status
+     bar or the island; never the controls' side or the foot). The stage's canvas is drawn that much bigger on those sides,
+     so its coordinates start at the inset's edge: the safe stage begins at (l, t). */
+  struct Ext: Equatable, Sendable { var t = 0.0, l = 0.0, r = 0.0 }
+  nonisolated(unsafe) private static var cur = Ext()
+  private static let extLock = NSLock()
+  /* the game screen's ext, as last laid out (any thread may read it) */
+  static var current: Ext { get { extLock.lock(); defer { extLock.unlock() }; return cur } set { extLock.lock(); cur = newValue; extLock.unlock() } }
+  init(size: CGSize, TL: Double, TW: Double, ext: Ext = Mapper.current) {
+    /* the safe stage: the canvas less the ext */
+    let w = Double(size.width) - ext.l - ext.r, h = Double(size.height) - ext.t
     let e = max(0, min(1, (min(w, h) - 430) / (700 - 430)))
-    rail = RAIL_MIN + (RAIL_MAX - RAIL_MIN) * e * e * (3 - 2 * e)
-    upright = h > w
-    let L = TL + 2 * rail, W = TW + 2 * rail, (sw, sh) = upright ? (W, L) : (L, W)
-    k = min(w / sw, h / sh)
-    ox = (w - sw * k) / 2 + rail * k; oy = (h - sh * k) / 2 + rail * k
+    var rail = RAIL_MIN + (RAIL_MAX - RAIL_MIN) * e * e * (3 - 2 * e)
+    /* railFit: the scale at which a bed B with its rails fits a span S, its rails up to a and b past either end;
+       railStart: where its footprint then starts, centred where it can be (relative to the safe stage) */
+    func feas(_ k: Double, _ S: Double, _ a: Double, _ b: Double, _ B: Double, _ R: Double) -> Bool { max(-a, -R * k) <= min(S + b - (B + 2 * R) * k, S - (R + B) * k) + 1e-9 }
+    func railFit(_ S: Double, _ a: Double, _ b: Double, _ B: Double, _ R: Double) -> Double {
+      var lo = 0.0, hi = (S + a + b) / B
+      for _ in 0..<48 { let m = (lo + hi) / 2; if feas(m, S, a, b, B, R) { lo = m } else { hi = m } }
+      return lo
+    }
+    func railStart(_ k: Double, _ S: Double, _ a: Double, _ b: Double, _ B: Double, _ R: Double) -> Double {
+      let lo = max(-a, -R * k), hi = min(S + b - (B + 2 * R) * k, S - (R + B) * k)
+      return min(max((S - (B + 2 * R) * k) / 2, lo), max(lo, hi))
+    }
+    /* fitTable: upright or along the screen, whichever is bigger */
+    func fit(_ R: Double) -> (k: Double, up: Bool) {
+      let kp = min(railFit(w, ext.l, ext.r, TW, R), railFit(h, ext.t, 0, TL, R)), kl = min(railFit(w, ext.l, ext.r, TL, R), railFit(h, ext.t, 0, TW, R))
+      return kp > kl ? (kp, true) : (kl, false)
+    }
+    var f = fit(rail)
+    /* layout()'s WOOD_MIN: the wood (rail past the cushion's depth) never slimmer than 13 pt, so the rail row's inlays
+       have room; the rails drawn wider (the cushions and the physics are the table's own) and the table fitted again */
+    if let co = Mapper.co(TL, TW) {
+      var i = 0
+      while i < 3 && (rail - co) * f.k < Mapper.WOOD_MIN - 0.01 { rail = co + Mapper.WOOD_MIN / f.k + 0.0005; f = fit(rail); i += 1 }
+    }
+    let k = f.k, bw = f.up ? TW : TL, bh = f.up ? TL : TW
+    self.TL = TL; self.TW = TW; self.upright = f.up; self.rail = rail; self.k = k
+    ox = ext.l + railStart(k, w, ext.l, ext.r, bw, rail) + rail * k; oy = ext.t + railStart(k, h, ext.t, 0, bh, rail) + rail * k
+  }
+  static let WOOD_MIN = 13.0
+  /* each table's cushion depth (TablePainter.cushionDepth at RAIL_MAX), by its size, recorded when a Sim is set to it
+     (any thread: the home's cards and the bakes set theirs off the main one) */
+  nonisolated(unsafe) private static var coBy: [String: Double] = [:]
+  private static let coLock = NSLock()
+  private static func key(_ TL: Double, _ TW: Double) -> String { "\(TL)x\(TW)" }
+  static func co(_ TL: Double, _ TW: Double) -> Double? { coLock.lock(); defer { coLock.unlock() }; return coBy[key(TL, TW)] }
+  static func note(_ s: Sim) {
+    var d = 0.02
+    for p in s.CUSHION_POLYS { for q in p { d = max(d, -q[0], -q[1], q[0] - s.TL, q[1] - s.TW) } }
+    coLock.lock(); coBy[key(s.TL, s.TW)] = min(d, RAIL_MAX - 0.02); coLock.unlock()
   }
   var view: TableView2D { TableView2D(k: k, ox: ox, oy: oy, portrait: upright) }
   func pt(_ x: Double, _ y: Double) -> CGPoint {
@@ -513,7 +556,9 @@ struct TableCanvas: View {
     func at(_ u: Double) -> CGPoint { row.map { CGPoint(x: u, y: $0.y) } ?? (m.upright ? m.pt(mid, u) : m.pt(u, s.TW - mid)) }
     /* the pill's height: the wood's, but never under Caption 2's 11 pt (--rf), as the page widens slim wood to WOOD_MIN;
        in 3D the row's 22 */
-    let ph = row != nil ? 22 * 0.62 : Swift.max(14, (band.rail - band.co) * m.k * 0.62), dot = ph * 0.8
+    /* --ph: the wood band less 2 px, 11 to 22 (placeRail); in 3D the row's 22. The next ball (nextBallEl) is --ph tall,
+       a pip or a group's glyph smaller */
+    let ph = row != nil ? 22 : Swift.min(22, Swift.max(11, ((band.rail - band.co) * m.k - 2).rounded(.down))), dot = Swift.min(12, ph * 0.62)
     /* the gaps: the rail's span less every pocket (hole, jaws) and sight, with their pads */
     let len = row?.width ?? (m.upright ? s.TW : s.TL)
     var spans: [[Double]] = row != nil ? [[6, len - 6]] : [[0, len]]
@@ -563,6 +608,25 @@ struct TableCanvas: View {
       : g.mode == "drill" ? model.drill.flatMap { D in drillById(D.id).map { "\(min(D.js.count + (D.beat || model.drillRes != nil ? 0 : 1), $0.shots))/\($0.shots)" } } : nil
     let seats: [(Int, [Double]?)] = g.mode == "practice" || model.tut != nil ? [] : soloNum != nil ? [(0, left.first)] : [(0, left.first), (1, right.first)]
     let next = model.railNext()
+    /* #viewBtn (v3Btn, placeRail's side(viewBtn, left)): the 3D switch, a cube inlaid in the first gap from the left that
+       no seat holds, bright while 3D is on; shown in a game, never in the lesson */
+    model.railSwitch = nil
+    if model.lesson == nil {
+      let unit = row != nil ? 1.0 : 1 / m.k, gl = Swift.min(16, ph + 1), held = seats.compactMap { $0.1 }
+      if let g = spans.sorted(by: { $0[0] < $1[0] }).first(where: { sp in !held.contains { $0 == sp } && sp[1] - sp[0] >= (gl + 4) * unit }) {
+        let c = at((g[0] + g[1]) / 2), on = model.view3d
+        model.railSwitch = c
+        var e = ctx
+        e.opacity = on ? 1 : 0.78
+        e.addFilter(.shadow(color: edge, radius: 0.7))
+        if on { e.addFilter(.shadow(color: Color(.sRGB, red: 1, green: 236 / 255, blue: 190 / 255, opacity: 0.75), radius: 3)) }
+        let k = gl / 24, o = CGPoint(x: c.x - gl / 2, y: c.y - gl / 2)
+        func P(_ pts: [(Double, Double)]) -> Path { var p = Path(); for (i, q) in pts.enumerated() { let v = CGPoint(x: o.x + q.0 * k, y: o.y + q.1 * k); i == 0 ? p.move(to: v) : p.addLine(to: v) }; p.closeSubpath(); return p }
+        e.fill(P([(12, 2.5), (21, 7.5), (12, 12.5), (3, 7.5)]), with: .color(ink))
+        e.fill(P([(3, 7.5), (12, 12.5), (12, 22), (3, 17)]), with: .color(ink.opacity(0.72)))
+        e.fill(P([(21, 7.5), (12, 12.5), (12, 22), (21, 17)]), with: .color(ink.opacity(0.5)))
+      }
+    }
     for (p, span) in seats {
       guard let span else { continue }
       let lit = p == g.turn || soloNum != nil
@@ -593,20 +657,18 @@ struct TableCanvas: View {
       }
       if items.isEmpty { items.append(("pip", 0, "")) }
       /* each item's width, then laid out centred in the gap */
-      let font = Font.system(size: Swift.max(11, ph * 0.78), weight: .bold, design: .rounded).monospacedDigit()
-      let widths = items.map { it -> Double in it.kind == "num" || it.kind == "of" ? Double(ctx.resolve(Text(it.text).font(font)).measure(in: CGSize(width: 200, height: 100)).width) : dot }
-      let gap = ph * 0.22, total = widths.reduce(0, +) + gap * Double(items.count - 1)
+      let font = Font.system(size: Swift.max(11, Swift.min(13, ph * 0.62)), weight: .bold, design: .rounded).monospacedDigit()
+      let widths = items.map { it -> Double in it.kind == "num" || it.kind == "of" ? Double(ctx.resolve(Text(it.text).font(font)).measure(in: CGSize(width: 200, height: 100)).width) : it.kind == "ball" ? ph : dot }
+      let gap = 4.0, total = widths.reduce(0, +) + gap * Double(items.count - 1)
       let c0 = at((span[0] + span[1]) / 2)
       var g2 = ctx
-      g2.opacity = lit ? 1 : 0.45
+      g2.opacity = lit ? 1 : 0.78
       if lit { g2.addFilter(.shadow(color: Color(.sRGB, red: 1, green: 236 / 255, blue: 190 / 255, opacity: 0.75), radius: 3)) }
       var x = Double(c0.x) - total / 2
       for (i, it) in items.enumerated() {
         let w = widths[i], cx = x + w / 2, cy = Double(c0.y)
         switch it.kind {
-        case "ball":
-          let r = dot / 2 * model.scaleFactor, (img, ix, iy) = bp.ballImage(it.n, cx * model.scaleFactor, cy * model.scaleFactor, r, bp.axesOf(IDENT, screen: true))
-          g2.draw(Image(decorative: img, scale: model.scaleFactor), in: CGRect(x: ix / model.scaleFactor, y: iy / model.scaleFactor, width: Double(img.width) / model.scaleFactor, height: Double(img.height) / model.scaleFactor))
+        case "ball": drawNB(&g2, bp, it.n, CGPoint(x: cx, y: cy), ph, inset: 0.19)
         case "grp":
           let rect = CGRect(x: cx - dot / 2, y: cy - dot / 2, width: dot, height: dot), disc = Path(ellipseIn: rect)
           g2.stroke(disc, with: .color(edge), lineWidth: 1.5)
@@ -616,10 +678,14 @@ struct TableCanvas: View {
             c.fill(Path(rect), with: .color(ink)); c.fill(Path(CGRect(x: rect.minX, y: cy - dot * 0.22, width: dot, height: dot * 0.44)), with: .color(edge))
           }
         case "pip":
-          g2.stroke(Path(ellipseIn: CGRect(x: cx - dot * 0.3, y: cy - dot * 0.3, width: dot * 0.6, height: dot * 0.6)), with: .color(ink), lineWidth: 1.5)
+          /* .pip: --dot less 2 across, a 1.5 px ink ring inside, cut dark inside and out */
+          let pd = Swift.min(10, ph - 3) - 2, pr = CGRect(x: cx - pd / 2, y: cy - pd / 2, width: pd, height: pd)
+          g2.stroke(Path(ellipseIn: pr.insetBy(dx: -0.5, dy: -0.5)), with: .color(edge), lineWidth: 1)
+          g2.stroke(Path(ellipseIn: pr.insetBy(dx: 1.75, dy: 1.75)), with: .color(edge), lineWidth: 1)
+          g2.stroke(Path(ellipseIn: pr.insetBy(dx: 0.75, dy: 0.75)), with: .color(ink), lineWidth: 1.5)
         default:
           let col: Color = it.kind == "num" && it.n >= 70 ? { let c = ballColor(it.n); return Color(rgb: c.0, c.1, c.2) }() : ink
-          let t = Text(it.text).font(it.kind == "of" ? Font.system(size: Swift.max(11, ph * 0.6), weight: .semibold, design: .rounded) : font).foregroundColor(col)
+          let t = Text(it.text).font(it.kind == "of" ? Font.system(size: ph < 16 ? 11 : 12, weight: .semibold, design: .rounded) : font).foregroundColor(col)
           var e = g2; e.addFilter(.shadow(color: edge, radius: 0.7))
           e.draw(t, at: CGPoint(x: cx, y: cy))
         }
@@ -641,8 +707,42 @@ struct TableCanvas: View {
       }
       if S.brk > 0 {
         var e = ctx; e.addFilter(.shadow(color: edge, radius: 0.7))
-        e.draw(Text(String(S.brk)).font(.system(size: ph * 0.78, weight: .bold, design: .rounded).monospacedDigit()).foregroundColor(ink), at: CGPoint(x: x + ph * 0.6, y: Double(c0.y)))
+        e.draw(Text(String(S.brk)).font(.system(size: ph < 16 ? 11 : 12, weight: .bold, design: .rounded).monospacedDigit()).foregroundColor(ink), at: CGPoint(x: x + ph * 0.6, y: Double(c0.y)))
       }
+    }
+  }
+
+  /* nextBallEl (.dot.nb): the ball to play as a true little ball, flat: the set's colour (a stripe's ivory caps, 21% top
+     and bottom), cut dark round its edge with a soft shade at its foot, its number in heavy type (half its height) on the
+     ivory circle (inset 19%; the potted windows' 21%); two digits drawn condensed (scaleX .8) to sit at the one-digit size */
+  func drawNB(_ ctx: inout GraphicsContext, _ bp: BallPainter, _ n: Int, _ c: CGPoint, _ d: Double, inset: Double, pot: Bool = false) {
+    let (col, iv) = bp.flatOf(n), C = Color(rgb: Int(col[0]), Int(col[1]), Int(col[2])), I = css(iv)
+    let r = CGRect(x: c.x - d / 2, y: c.y - d / 2, width: d, height: d), disc = Path(ellipseIn: r)
+    var g = ctx
+    g.clip(to: disc)
+    if n > 8 && n <= 15 {
+      g.fill(Path(r), with: .color(I))
+      g.fill(Path(CGRect(x: r.minX, y: r.minY + d * 0.21, width: d, height: d * 0.58)), with: .color(C))
+    } else { g.fill(Path(r), with: .color(C)) }
+    if !pot {
+      /* inset -1px -2px 2px rgba(0,0,0,.28): the shade at its lower right; inset 1px the inlay's dark edge */
+      g.stroke(Path(ellipseIn: r.offsetBy(dx: 1, dy: 2).insetBy(dx: -1, dy: -1)), with: .color(.black.opacity(0.28)), lineWidth: 3.5)
+      g.stroke(disc, with: .color(Color(.sRGB, red: 25 / 255, green: 10 / 255, blue: 4 / 255, opacity: 0.6)), lineWidth: 2)
+    }
+    let ir = r.insetBy(dx: d * inset, dy: d * inset)
+    g.fill(Path(ellipseIn: ir), with: .color(I))
+    var t = g
+    if n > 9 { t.translateBy(x: c.x, y: c.y); t.scaleBy(x: 0.8, y: 1); t.translateBy(x: -c.x, y: -c.y) }
+    t.draw(Text(String(n)).font(.system(size: d * (pot ? 0.46 : 0.5), weight: .heavy)).foregroundColor(Color(rgb: 0x14, 0x14, 0x14)), at: c)
+    if pot {
+      /* #potRail .nb::after, the lamp's light: a highlight up and to the left, the far side in shade (CSS radial
+         gradients reach the box's farthest corner); its edge inset .5px rgba(0,0,0,.45) */
+      func far(_ fx: Double, _ fy: Double) -> Double { let x = max(fx, 1 - fx) * d, y = max(fy, 1 - fy) * d; return (x * x + y * y).squareRoot() }
+      let h = CGPoint(x: r.minX + d * 0.34, y: r.minY + d * 0.28), hr = far(0.34, 0.28)
+      g.fill(Path(r), with: .radialGradient(Gradient(stops: [.init(color: .white.opacity(0.62), location: 0), .init(color: .white.opacity(0.14), location: 0.16), .init(color: .white.opacity(0), location: 0.34)]), center: h, startRadius: 0, endRadius: hr))
+      let sh = CGPoint(x: r.minX + d * 0.42, y: r.minY + d * 0.38), sr = far(0.42, 0.38)
+      g.fill(Path(r), with: .radialGradient(Gradient(stops: [.init(color: .black.opacity(0), location: 0.52), .init(color: .black.opacity(0.42), location: 1)]), center: sh, startRadius: 0, endRadius: sr))
+      g.stroke(disc, with: .color(.black.opacity(0.45)), lineWidth: 1)
     }
   }
 
@@ -709,8 +809,7 @@ struct TableCanvas: View {
       let rr = CGRect(x: c.x - sz / 2, y: c.y - sz / 2, width: sz, height: sz)
       ctx.fill(Path(ellipseIn: rr), with: .color(recess))
       ctx.stroke(Path(ellipseIn: rr), with: .color(edge), lineWidth: 1)
-      let (img, ix, iy) = bp.ballImage(n, Double(c.x) * f, Double(c.y) * f, ballD / 2 * f, bp.axesOf(IDENT, screen: true))
-      ctx.draw(Image(decorative: img, scale: f), in: CGRect(x: ix / f, y: iy / f, width: Double(img.width) / f, height: Double(img.height) / f))
+      drawNB(&ctx, bp, n, c, ballD, inset: 0.21, pot: true)
       /* a ball too dark for the recess (a solid under 3:1 on it) gets a rim of light */
       let col = ballColor(n), lum = { (v: Int) -> Double in let x = Double(v) / 255; return x <= 0.03928 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
       let L1 = 0.2126 * lum(col.0) + 0.7152 * lum(col.1) + 0.0722 * lum(col.2), L2 = 0.2126 * lum(16) + 0.7152 * lum(11) + 0.0722 * lum(8)

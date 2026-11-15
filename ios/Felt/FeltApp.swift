@@ -356,6 +356,10 @@ struct TableScreen: View {
      strip stood in from the sides by 0.35 of the foot's inset (the display's rounded corners); else a column */
   @ViewBuilder private func screen(W: CGFloat, H: CGFloat, ins: EdgeInsets, upright: Bool) -> some View {
     let layout = upright ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 8))
+    /* tableExt: the rails may run under the top inset (the status bar or the island) and, on its side, the leading one
+       (the controls' column is trailing), 2 pt short of each; the stage's canvas reaches into them */
+    let ext = Mapper.Ext(t: ins.top > 2 ? Double(ins.top) - 2 : 0, l: !upright && ins.leading > 2 ? Double(ins.leading) - 2 : 0, r: 0)
+    let _ = { if Mapper.current != ext { Mapper.current = ext } }()
     layout {
       GeometryReader { tg in
         TimelineView(.animation(paused: model.paused)) { tl in
@@ -391,6 +395,7 @@ struct TableScreen: View {
         .accessibilityLabel("Table")
         .accessibilityIdentifier("table")
       }
+      .padding(.top, -ext.t).padding(.leading, -ext.l)
       Controls(model: model, upright: upright)
         .frame(width: upright ? nil : 64, height: upright ? 56 : nil)
         .padding(.horizontal, upright ? ins.bottom * 0.35 : 0)
@@ -404,6 +409,8 @@ struct TableScreen: View {
     /* during a replay nothing reaches the game: the first touch ends it and the rest of it is eaten; an offer goes on a touch */
     if began, model.rp != nil { model.endReplay(); eating = true; return }
     if eating { return }
+    /* the rail's 3D switch: a 44 pt target round its glyph; the tap is the switch's, the rest of it eaten */
+    if began, let c = model.railSwitch, abs(v.location.x - c.x) < 22, abs(v.location.y - c.y) < 22 { model.toggleView(); eating = true; return }
     if began { model.hideOffer() }
     let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW)
     model.uprightView = m.upright
