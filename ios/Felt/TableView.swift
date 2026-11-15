@@ -263,7 +263,9 @@ struct TableCanvas: View {
      sight (railSpans), the score keeper's two in the gaps nearest the middle, snooker's bar in the next. Pearl
      ink (--ink) cut dark all round (RAIL_EDGE), the shooter lit with the lamp's glow, the other dimmed. */
   private func drawRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter) {
-    guard let g = model.g, g.winner == nil else { return }
+    /* a party of three or four: the cards in the pause menu and the handoff carry the scores (the rail's .many chips are
+       not ported) */
+    guard let g = model.g, g.winner == nil, (model.party?.names.count ?? 2) <= 2 else { return }
     let s = model.sim, T = model.potGeometry(m), band = T.railBand
     let ink = Color(.sRGB, red: 0xef / 255.0, green: 0xe7 / 255.0, blue: 0xda / 255.0), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85)
     let mid = -(band.co + band.rail) / 2   /* the band's middle, metres out from the nose */

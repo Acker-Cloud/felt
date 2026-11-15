@@ -135,15 +135,21 @@ final class TableModel {
   let cpuLevel: String?
   /* an exhibition (6f, 'exhibit'): both players the CPU, each at its own level */
   let exhib: [String]?
+  /* a party (6f, 'party'): 2 to 4 people in turn on a ring ruleset; their racks won, the rack, the ruleset */
+  struct Party { var names: [String], wins: [Int], rack = 0, ruleset: String }
+  private(set) var party: Party?
+  /* the handoff: the player the device is passed to (the breaker at a rack's start), until they are ready */
+  var handoff: (p: Int, first: Bool)? = nil
   @ObservationIgnored private var cpuBusy = false
   private(set) var cpuThinking = false
 
-  init(game: TableGame, cpu: String? = nil, exhib: [String]? = nil) {
+  init(game: TableGame, cpu: String? = nil, exhib: [String]? = nil, party: (names: [String], ruleset: String)? = nil) {
     self.game = game
-    cpuLevel = exhib == nil ? cpu : nil
+    cpuLevel = exhib == nil && party == nil ? cpu : nil
     self.exhib = exhib
+    self.party = party.map { Party(names: $0.names, wins: $0.names.map { _ in 0 }, ruleset: $0.ruleset) }
     Words.cpuMode = cpuLevel != nil
-    Words.names = exhib.map { $0.map { TableModel.FOES[$0] ?? "CPU" } }
+    Words.names = exhib.map { $0.map { TableModel.FOES[$0] ?? "CPU" } } ?? party?.names
     /* start(): the settings' table (every pool game on its size and pockets; snooker's size; the bumper table's shape) */
     spec = switch game {
     case .eight, .nine, .ten, .straight, .rotation: (Prefs.table, nil, Prefs.pockets)
@@ -166,12 +172,12 @@ final class TableModel {
   }
 
   func rerack() {
-    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], []]; potCount = 0; banner = nil
+    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], [], [], []]; potCount = 0; banner = nil
     if let k = rulesKind {
       /* newGame with the settings' rules, snooker's frames and carom's race and cushions */
       g = k == "snooker" ? engine.snookerGame(frames: Prefs.snookerFrames, first: 0)
         : k == "carom" ? engine.caromGame(race: Prefs.caromRace, cushions: Prefs.caromCush)
-        : engine.newGame(k, rules: Prefs.rules(k))
+        : party != nil ? partyGame(k) : engine.newGame(k, rules: Prefs.rules(k))
       /* a test hook: `-felt-pots "1,9,8"` starts the rack with those balls down (the potted windows) */
       let a = ProcessInfo.processInfo.arguments
       if let i = a.firstIndex(of: "-felt-pots"), i + 1 < a.count {
@@ -323,8 +329,10 @@ final class TableModel {
     let shot = RuleShot(r)
     let shooter = before.turn, next = engine.judge(before, shot)
     potCount += next.verdict?.potted.count ?? 0
-    if let gm0 = gBefore, gm0.turn < 2 { pottedBy[gm0.turn] += next.verdict?.potted.filter { $0 > 0 } ?? [] }
+    if let gm0 = gBefore, gm0.turn < 4 { pottedBy[gm0.turn] += next.verdict?.potted.filter { $0 > 0 } ?? [] }
     g = next; rolling = nil; spin = Spin()
+    /* a party: the device is handed over each time the turn goes to another player (or a choice to another) */
+    if party != nil, next.winner == nil, (next.option?.who ?? next.turn) != shooter { handoff = (next.option?.who ?? next.turn, false) }
     syncBalls()
     words(next, shooter)
     aimAtNearest()
@@ -527,8 +535,30 @@ final class TableModel {
   }
 
 
+  /* partyTerms: the ring ruleset for the party's players, the settings' calls; the break passed round (rack % n) */
+  private func partyGame(_ k: String) -> Game {
+    let P = party!
+    var c = CallConfig(); c.mode = Prefs.calls
+    var gm = engine.newGame(k, rules: makeRules(k, ruleset: P.ruleset, call: c, players: P.names.count))
+    let b = P.rack % P.names.count
+    if b > 0 { gm.turn = b; gm.breaker = b }
+    handoff = (b, true)
+    return gm
+  }
+  /* Play Again in a party: the rack's winner gets it, the next rack breaks round */
+  func partyAgain() {
+    if var P = party, let w = g?.winner, w < P.wins.count { P.wins[w] += 1; P.rack += 1; party = P }
+    rerack()
+  }
+  /* the scores the handoff shows: the game's points, else racks won */
+  func partyScore(_ p: Int) -> String {
+    if let s = g?.score, p < s.count { return "\(s[p]) of \(g!.race!)" }
+    let w = party?.wins[p] ?? 0
+    return "\(w) rack\(w == 1 ? "" : "s")"
+  }
+
   /* stats.potted: each player's pots (the verdict's potted, their own), for the pause menu's cards */
-  @ObservationIgnored private(set) var pottedBy: [[Int]] = [[], []]
+  @ObservationIgnored private(set) var pottedBy: [[Int]] = [[], [], [], []]
   @ObservationIgnored private var gBefore: Game? = nil
 
   /* cardOf (page 6b): a player's card in the pause menu, the second line in words and its balls */

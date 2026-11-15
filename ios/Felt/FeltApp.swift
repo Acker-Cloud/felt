@@ -14,6 +14,8 @@ struct Home: View {
   @State private var playing: TableGame?
   @AppStorage("felt.opponent") private var opponent = "medium"
   @State private var exhibit: Exhibit?
+  @State private var party: PartyGo?
+  struct PartyGo: Identifiable { let game: TableGame, names: [String], ruleset: String; var id: String { ruleset + names.joined() } }
   struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var id: String { game.rawValue + levels.joined() } }
   var body: some View {
     NavigationStack {
@@ -46,6 +48,13 @@ struct Home: View {
             }.frame(minHeight: 44, alignment: .leading)
           }
           .accessibilityIdentifier("mode-exhibit")
+          NavigationLink { PartySetup { party = $0 } } label: {
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Party").font(.body.weight(.semibold))
+              Text("2 to 4 players, one device").font(.footnote).foregroundStyle(.secondary)
+            }.frame(minHeight: 44, alignment: .leading)
+          }
+          .accessibilityIdentifier("mode-party")
         } header: { Text("Modes") } footer: {
           Text("Watch the CPU play itself, each player at its own level.")
         }
@@ -62,6 +71,7 @@ struct Home: View {
     .onAppear {
       let a = ProcessInfo.processInfo.arguments
       if let i = a.firstIndex(of: "-felt-game"), i + 1 < a.count { playing = TableGame(rawValue: a[i + 1]) }
+      if let i = a.firstIndex(of: "-felt-party"), i + 1 < a.count, let n = Int(a[i + 1]) { party = PartyGo(game: .nine, names: (1...n).map { "Player \($0)" }, ruleset: "9-ring") }
       if let i = a.firstIndex(of: "-felt-exhibit"), i + 1 < a.count, let g = TableGame(rawValue: a[i + 1]) { exhibit = Exhibit(game: g, levels: ["medium", "hard"]) }
       /* `-felt-landscape left|right`: the interface turned on its side (the simulator cannot be turned from a script) */
       if let i = a.firstIndex(of: "-felt-landscape"), i + 1 < a.count,
@@ -71,6 +81,7 @@ struct Home: View {
     }
     .fullScreenCover(item: $playing) { g in TableScreen(model: TableModel(game: g, cpu: opponent == "two" ? nil : opponent)) }
     .fullScreenCover(item: $exhibit) { e in TableScreen(model: TableModel(game: e.game, exhib: e.levels)) }
+    .fullScreenCover(item: $party) { p in TableScreen(model: TableModel(game: p.game, party: (p.names, p.ruleset))) }
   }
 }
 
@@ -113,6 +124,7 @@ struct TableScreen: View {
     .background(Color(rgb: 9, 9, 10).ignoresSafeArea())
     .overlay { Overlays(model: model, back: { dismiss() }) }
     .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
+    .overlay { if let h = model.handoff, !model.paused { Handoff(model: model, p: h.p, first: h.first) } }
     .tint(.primary)
     .statusBarHidden()
   }
@@ -376,6 +388,71 @@ struct PowerBar: View {
   }
 }
 
+/* the party's setup (6f): the game (a ring ruleset: 9-ball ring, rotation ring, Around the table), how many play
+   and their names */
+struct PartySetup: View {
+  let start: (Home.PartyGo) -> Void
+  @State private var ruleset = "9-ring"
+  @State private var count = 3
+  @State private var names = ["", "", "", ""]
+  static let SETS: [(String, String, TableGame)] = [("9-ring", "9-Ball Ring", .nine), ("rotation-ring", "Rotation Ring", .rotation), ("straight-ring", "Around the Table", .straight)]
+  var body: some View {
+    List {
+      Section { Picker("Game", selection: $ruleset) { ForEach(Self.SETS, id: \.0) { Text($0.1).tag($0.0) } } }
+      Section {
+        Picker("Players", selection: $count) { Text("2").tag(2); Text("3").tag(3); Text("4").tag(4) }.pickerStyle(.segmented)
+        ForEach(0..<count, id: \.self) { i in TextField("Player \(i + 1)", text: $names[i]).textInputAutocapitalization(.words) }
+      } header: { Text("Players") } footer: { Text("The device is passed round as the turn goes to each player; racks won are kept.") }
+      Section {
+        Button {
+          let set = Self.SETS.first { $0.0 == ruleset }!
+          let nm = (0..<count).map { i in names[i].trimmingCharacters(in: .whitespaces).isEmpty ? "Player \(i + 1)" : String(names[i].prefix(16)) }
+          start(Home.PartyGo(game: set.2, names: nm, ruleset: ruleset))
+        } label: { Text("Start").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+          .background(Capsule().fill(.white)).foregroundStyle(.black).listRowBackground(Color.clear).accessibilityIdentifier("party-start")
+      }
+    }
+    .navigationTitle("Party").navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+/* showHandoff: whose turn it is, what they are on, everyone's score, and Ready; the table hidden under it */
+struct Handoff: View {
+  let model: TableModel
+  let p: Int, first: Bool
+  var body: some View {
+    let gm = model.g!, P = model.party!, prev = (p + P.names.count - 1) % P.names.count, on = model.engine.legalTargets(gm)
+    let why = !first && gm.verdict?.foul != nil ? "\(Words.nameOf(prev)) fouled: \(gm.verdict!.foul!). " : ""
+    let what = gm.option != nil ? "A choice to make. " : gm.inHand != nil ? "Ball in hand. " : ""
+    let ball = ["9", "rotation"].contains(gm.kind) && !on.isEmpty ? "Ball on: the \(on[0])." : model.engine.callScope(gm) != "none" && !gm.breakShot ? "Call your shot." : ""
+    let sub = (why + what + ball).trimmingCharacters(in: .whitespaces)
+    ZStack {
+      Color(rgb: 9, 9, 10).opacity(0.97).ignoresSafeArea()
+      VStack(spacing: 14) {
+        Text(first ? "\(gm.rules.name.prefix(1).uppercased() + gm.rules.name.dropFirst()), \(P.names.count) players" : "Pass the device").font(.footnote).foregroundStyle(.secondary)
+        Text(first ? "\(Words.nameOf(p)) breaks" : "Pass to \(Words.nameOf(p))").font(.title.weight(.bold)).multilineTextAlignment(.center)
+        if !sub.isEmpty { Text(sub).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+        VStack(spacing: 0) {
+          ForEach(0..<P.names.count, id: \.self) { i in
+            HStack {
+              Text(P.names[i] + (i == p ? " (to shoot)" : "")).fontWeight(i == p ? .bold : .regular)
+              Spacer()
+              Text(model.partyScore(i)).monospacedDigit().fontWeight(.bold)
+            }
+            .padding(.horizontal, 16).frame(minHeight: 44)
+            if i < P.names.count - 1 { Divider().padding(.leading, 16) }
+          }
+        }
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.11)))
+        Button { model.handoff = nil } label: { Text("\(Words.nameOf(p)): ready").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+          .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("handoff-ready")
+      }
+      .padding(24).frame(maxWidth: 400)
+    }
+    .accessibilityElement(children: .contain).accessibilityIdentifier("handoff")
+  }
+}
+
 /* the exhibition's setup (6f): the game and each CPU player's level, then Start */
 struct ExhibitionSetup: View {
   let start: (Home.Exhibit) -> Void
@@ -584,7 +661,13 @@ struct Overlays: View {
       card {
         Text("Paused, \(model.game.rawValue)" + (model.cpuLevel != nil ? " vs \(model.cardName(1).replacingOccurrences(of: " (CPU)", with: ""))" : "")).font(.footnote).foregroundStyle(.secondary)
         /* gameNow: both players' cards (the shooter's lit), the potted balls in pot order, the latest word */
-        HStack(spacing: 8) { PlayerCard(model: model, p: 0); PlayerCard(model: model, p: 1) }
+        /* a card per player: two side by side, a party's three or four two to a row */
+        let n = model.party?.names.count ?? 2
+        Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+          ForEach(Array(stride(from: 0, to: n, by: 2)), id: \.self) { r in
+            GridRow { PlayerCard(model: model, p: r); if r + 1 < n { PlayerCard(model: model, p: r + 1) } else { Color.clear } }
+          }
+        }
         if model.game != .carom {
           HStack(spacing: 10) {
             Text("POTTED").font(.system(size: 12, weight: .bold)).kerning(1.1).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa))
@@ -606,7 +689,7 @@ struct Overlays: View {
     } else if let g = model.g, g.winner != nil, model.rolling == nil {
       card {
         Text(Words.overLine(g)).font(.headline).multilineTextAlignment(.center)
-        Button { model.rerack() } label: { Text("Play Again").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+        Button { model.party != nil ? model.partyAgain() : model.rerack() } label: { Text("Play Again").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black)
         Button(action: back) { Text("Home").frame(maxWidth: .infinity, minHeight: 44) }
       }
