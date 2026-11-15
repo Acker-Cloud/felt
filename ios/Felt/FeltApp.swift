@@ -51,7 +51,7 @@ struct Home: View {
             }.frame(minHeight: 44, alignment: .leading)
           }
           .accessibilityIdentifier("mode-exhibit")
-          NavigationLink { TourneyView(store: store) { playingTourney = true } } label: {
+          NavigationLink { TourneyView(store: store) { store.markLive(); playingTourney = true } } label: {
             VStack(alignment: .leading, spacing: 2) {
               Text("Quick Tournament").font(.body.weight(.semibold))
               Text(store.tour.map { $0.done ? "Finished: \(TourneyView.placeWords($0.place ?? 0))" : "In progress, \(TourneyView.kindName($0.kind))" } ?? "4, 8 or 16 players, a bracket").font(.footnote).foregroundStyle(.secondary)
@@ -70,7 +70,7 @@ struct Home: View {
         }
       }
       .navigationTitle("felt")
-      .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { playingTourney = true } }
+      .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { store.markLive(); playingTourney = true } }
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
           NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }.accessibilityLabel("Settings").accessibilityIdentifier("settings")
@@ -143,6 +143,13 @@ struct TableScreen: View {
     .overlay { Overlays(model: model, back: { dismiss() }) }
     .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
     .overlay { if let h = model.handoff, !model.paused { Handoff(model: model, p: h.p, first: h.first) } }
+    /* the exhibition's bar: the speed (felt.speed), over the table's top */
+    .overlay(alignment: .top) {
+      if model.exhib != nil && !model.paused {
+        Picker("Speed", selection: Binding(get: { model.speed }, set: { model.speed = $0 })) { Text("1x").tag(1.0); Text("2x").tag(2.0); Text("4x").tag(4.0) }
+          .pickerStyle(.segmented).frame(width: 180).padding(.top, 54).accessibilityIdentifier("exhibit-speed")
+      }
+    }
     .tint(.primary)
     .statusBarHidden()
   }
@@ -409,7 +416,22 @@ struct PowerBar: View {
 /* the quick tournament's state, kept as the page keeps it (felt.tourney.v1, at every change) */
 @MainActor @Observable final class TourneyStore {
   var tour: Tourney?
-  init() { tour = UserDefaults.standard.data(forKey: "felt.tourney.v1").flatMap { try? JSONDecoder().decode(Tourney.self, from: $0) } }
+  init() {
+    tour = UserDefaults.standard.data(forKey: "felt.tourney.v1").flatMap { try? JSONDecoder().decode(Tourney.self, from: $0) }
+    leftover()
+  }
+  /* tourneyLeftover: a match left by closing the app is forfeited (0 against the race), unless it is no longer the player's */
+  private func leftover() {
+    guard var t = tour, let m = t.live else { return }
+    let o = CareerLib.outcome(t.ctx(), m)
+    if o.st != "ready" || (o.a != 0 && o.b != 0) { t.live = nil; tour = t; save(); return }
+    let foe = t.foe(m).name
+    t.report(m, 0, t.race, forfeit: true)
+    t.msg = "Forfeit: the match against \(foe) was left before its end, and counts as a loss."
+    tour = t; save()
+  }
+  /* tourneyPlay: from here, leaving the match is a forfeit, even by closing the app */
+  func markLive() { guard var t = tour, let m = t.mine() else { return }; t.live = m; t.msg = ""; tour = t; save() }
   func save() { if let t = tour, let d = try? JSONEncoder().encode(t) { UserDefaults.standard.set(d, forKey: "felt.tourney.v1") } else { UserDefaults.standard.removeObject(forKey: "felt.tourney.v1") } }
   func start(_ t: Tourney) { tour = t; save() }
   func report(_ m: Int, _ mine: Int, _ theirs: Int, _ forfeit: Bool) {

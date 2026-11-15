@@ -222,7 +222,7 @@ struct TableCanvas: View {
     func dev(_ x: Double, _ y: Double) -> CGPoint { let p = m.pt(x, y); return CGPoint(x: p.x * sc, y: p.y * sc) }
     func circle(_ x: Double, _ y: Double, _ r: Double) -> Path { let c = dev(x, y), d = r * m.k * sc; return Path(ellipseIn: CGRect(x: c.x - d, y: c.y - d, width: 2 * d, height: 2 * d)) }
     for p in model.pots where p.k >= 0 && p.k < s.POCKETS.count {
-      let u = (now - p.t) / TableModel.POT_MS, P = s.POCKETS[p.k], m1 = 1 - pow(1 - min(1, u / 0.5), 2), sink = ease(0.15, 1, u)
+      let u = (now - p.t) / model.potMs, P = s.POCKETS[p.k], m1 = 1 - pow(1 - min(1, u / 0.5), 2), sink = ease(0.15, 1, u)
       let x = p.from.0 + (P[0] - p.from.0) * m1, y = p.from.1 + (P[1] - p.from.1) * m1, at = dev(x, y)
       var g = ctx
       /* drawCupPot: a cup has no cap or rail to go under, only the closing circle */

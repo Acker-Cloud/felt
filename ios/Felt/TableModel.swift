@@ -280,19 +280,19 @@ final class TableModel {
     if paused { lastT = nil; return }
     self.now = now
     if let f = flashDue { banner = (f.0, f.1, now + f.2); flashDue = nil }
-    pots.removeAll { now - $0.t >= TableModel.POT_MS }
+    pots.removeAll { now - $0.t >= potMs }
     if let b = banner, now >= b.until { banner = nil }
     potTrack()
     effects.removeAll { now - $0.t >= $0.d }
     if let st = stroke {
-      if st.t0 == nil { stroke = (st.power, now) } else if now - st.t0! >= TableModel.STROKE_MS { strikeNow(st.power, now) }
+      if st.t0 == nil { stroke = (st.power, now) } else if now - st.t0! >= TableModel.STROKE_MS / speed { strikeNow(st.power, now) }
     }
     if cpuTurn && rolling == nil && stroke == nil && !cpuBusy { cpuStep() }
     guard let tab = rolling else { lastT = nil; return }
     /* as frameBody: never backwards, at most 50 ms a frame */
     let dt = min(0.05, max(0, lastT.map { now - $0 } ?? 1.0 / 60))
     lastT = now
-    let want = dt / SIM_DT + carry
+    let want = dt / SIM_DT * speed + carry
     var n = Int(want)
     carry = want - Double(n)
     let before = tab.balls.map { ($0.x, $0.y, $0.on) }
@@ -449,7 +449,7 @@ final class TableModel {
     if gm.kind == "bumper", let b = shot.ball { g0.striker = b }
     g0.call = shot.call; g = g0; syncBalls()
     aim = shot.angle; spin = shot.spin
-    let think = cpuThinkMs(gm, shot, seed) / 1000, wait = max(0, think - (now - t0))
+    let think = cpuThinkMs(gm, shot, seed) / 1000 / speed, wait = max(0, think - (now - t0))
     Task { @MainActor in
       try? await Task.sleep(for: .milliseconds(Int(wait * 1000)))
       cpuThinking = false
@@ -498,6 +498,9 @@ final class TableModel {
 
   /* 4c: a pot runs on into its drop over POT_MS, shrinking and darkening under the rim */
   static let POT_MS = 0.420
+  /* felt.speed: an exhibition runs at 1x, 2x or 4x (the physics' steps a frame, the stroke, the drops, the think) */
+  var speed = 1.0
+  var potMs: Double { TableModel.POT_MS / speed }
   struct Pot { let n: Int, k: Int, from: (Double, Double), t: TimeInterval }
   @ObservationIgnored private(set) var pots: [Pot] = []
   func onPot(_ n: Int, _ k: Int, _ from: (Double, Double), _ t: TimeInterval) {
