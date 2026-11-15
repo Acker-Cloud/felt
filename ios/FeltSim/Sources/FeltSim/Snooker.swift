@@ -202,6 +202,17 @@ extension RulesEngine {
     n.verdict = v
     return n
   }
+  /* concedeSnooker: player p concedes the frame (Concede Frame in the pause menu): the frame ends, the other wins it */
+  public func concedeSnooker(_ g: Game, _ p: Int) -> Game {
+    var n = g
+    n.snk!.brk = 0
+    var v = Verdict(foul: nil, keep: false, win: nil, why: "", potted: [], scratch: false, grouped: false, twoFouls: false,
+                    call: CallOut(ball: nil, pocket: nil, auto: false, need: false, made: nil, safety: false, push: false, missing: nil, extra: [], why: ""),
+                    push: false, option: nil, scored: 0, rerack: nil, threeFouls: false, illegalBreak: false)
+    v.snk = SnkVerdict(pen: 0, pts: 0, nom: nil, back: [], brk: 0, ended: g.snk!.brk, frameOver: nil, reblack: false, miss: nil, misses: nil, warn: nil, freeBall: nil)
+    n.verdict = v
+    return snookerEnd(n, v, p, 1 - p)
+  }
   func snookerEnd(_ n0: Game, _ v0: Verdict, _ ender: Int, _ winner: Int?, how: String? = nil) -> Game {
     var n = n0, v = v0
     n.option = nil; n.snk!.prev = nil; n.snk!.free = nil; n.snk!.missRun = nil; n.snk!.replaced = false

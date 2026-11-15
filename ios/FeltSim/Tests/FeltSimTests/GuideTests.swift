@@ -32,5 +32,13 @@ private func hx(_ v: Double) -> String { let s = String(v.bitPattern, radix: 16)
     #expect(P.cuePot == w["cuePot"] as! Int && P.objPot == w["objPot"] as! Int && P.objHit == w["objHit"] as! Bool && P.cueStop == w["cueStop"] as! Bool, "\(name): ends")
     #expect(pts(P.air) == w["air"] as? [[String]], "\(name): jump arc")
     #expect(pts(P.bounces) == w["bounces"] as? [[String]], "\(name): carom bounces")
+    /* the app's shotPreview runs it in slices (PV_BUDGET ms a frame): stopped at every other 32-step check, it ends the
+       same, every point */
+    let Q = sim.previewStart(balls, cueN: cue, ang, d(g["pw"]), Spin(x: d(sp["x"]), y: d(sp["y"]), e: d(sp["e"])), h, lens, caromNeed: g["carom"] as! Int)
+    var flip = false, slices = 0
+    while !Q.done { slices += 1; sim.previewRun(Q) { flip.toggle(); return flip } }
+    #expect(slices > 1 || P.s <= 32, "\(name): run in slices")
+    #expect(Q.s == P.s && pts(Q.cue) == pts(P.cue) && pts(Q.obj) == pts(P.obj) && Q.first == P.first && Q.cuePot == P.cuePot && Q.objPot == P.objPot
+            && Q.crossed == P.crossed && pts(Q.air) == pts(P.air) && pts(Q.bounces) == pts(P.bounces) && Q.cueStop == P.cueStop && Q.objHit == P.objHit, "\(name): sliced = whole")
   }
 }

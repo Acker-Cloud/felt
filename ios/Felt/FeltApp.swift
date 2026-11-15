@@ -44,53 +44,64 @@ struct Home: View {
   }
   /* Solo: Learn to Play (the lesson), Practice (#pracSheet, 5s), Trick Shots, Daily Shot, Drills */
   private var soloSection: some View {
-    Section {
-      Button { lessoning = true } label: {
-        VStack(alignment: .leading, spacing: 2) {
-          Text("Learn to Play").font(.body.weight(.semibold)).foregroundStyle(.primary)
-          Text("A 30 second lesson").font(.footnote).foregroundStyle(.secondary)
-        }.frame(minHeight: 44, alignment: .leading)
+    let day = Rec.today(), st = DailyStore.streak(day), done = DailyStore.done(day), dt = dailyTrick(day)
+    return VStack(spacing: 0) {
+      Button { lessoning = true } label: { SoloRow(icon: "graduationcap", name: "Learn to Play", line: "A 30 second lesson") }
+        .accessibilityIdentifier("solo-lesson")
+      NavigationLink { PracticePicker { practicing = PracticeGo(layout: $0) } } label: { SoloRow(icon: "scope", name: "Practice", line: "Free play on any rack") }
+        .accessibilityIdentifier("solo-practice")
+      NavigationLink { DrillsList { drilling = PracticeGo(layout: $0) } } label: {
+        SoloRow(icon: "chart.bar.fill", name: "Drills", line: "\(DRILL_LIB.count) drills, scored", acc: "\(DrillStore.medals) of \(DRILL_LIB.count * 3)", accIcon: "medal.fill", accTint: Color(rgb: 0xf2, 0xc9, 0x4c))
       }
-      .accessibilityIdentifier("solo-lesson")
-      NavigationLink { PracticePicker { practicing = PracticeGo(layout: $0) } } label: {
-        VStack(alignment: .leading, spacing: 2) {
-          Text("Practice").font(.body.weight(.semibold))
-          Text("No opponent, no fouls, undo any shot").font(.footnote).foregroundStyle(.secondary)
-        }.frame(minHeight: 44, alignment: .leading)
-      }
-      .accessibilityIdentifier("solo-practice")
+      .accessibilityIdentifier("solo-drills")
       NavigationLink { TricksList { tricking = PracticeGo(layout: $0) } } label: {
-        VStack(alignment: .leading, spacing: 2) {
-          Text("Trick Shots").font(.body.weight(.semibold))
-          Text("\(programTotal(TrickStore.score.pts)) of \(programMax()) points").font(.footnote).foregroundStyle(.secondary)
-        }.frame(minHeight: 44, alignment: .leading)
+        SoloRow(icon: "sparkles", name: "Trick Shots", line: "\(TRICKS.count) challenges", acc: "\(programTotal(TrickStore.score.pts)) of \(programMax())", accIcon: "star.fill")
       }
       .accessibilityIdentifier("solo-tricks")
-      /* #dailyBtn: the day's number on a calendar, today's shot, the streak (or Done today) */
-      let day = Rec.today(), st = DailyStore.streak(day), done = DailyStore.done(day), dt = dailyTrick(day)
+      /* #dailyBtn: the day's number on a calendar leaf, today's shot, the streak (or Done today) */
       Button { tricking = PracticeGo(layout: "daily") } label: {
-        HStack(spacing: 12) {
-          Text("\(Int(day.suffix(2)) ?? 1)").font(.system(size: 13, weight: .bold)).monospacedDigit().frame(width: 30, height: 30)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color(white: 0.24))).foregroundStyle(.white).accessibilityHidden(true)
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Daily Shot").font(.body.weight(.semibold)).foregroundStyle(.primary)
-            Text(dt.title).font(.footnote).foregroundStyle(.secondary)
-          }
-          Spacer()
-          if done { Label("Done today", systemImage: "checkmark").labelStyle(.titleAndIcon).font(.footnote.weight(.semibold)).foregroundStyle(.secondary) }
-          else if st > 0 { Label("\(st)", systemImage: "flame.fill").font(.footnote.weight(.semibold)).foregroundStyle(.secondary) }
-        }.frame(minHeight: 44)
+        SoloRow(icon: nil, day: Int(day.suffix(2)) ?? 1, name: "Daily Shot", line: dt.title, acc: done ? "Done today" : st > 0 ? "\(st)" : nil, accIcon: done ? "checkmark" : st > 0 ? "flame.fill" : nil)
       }
       .accessibilityLabel("Daily Shot, \(DrillStore.dayWords(day)): \(dt.title). " + (done ? "Played today, day streak \(st)." : st > 0 ? "Day streak \(st): play today to keep it." : "A new shot every day."))
       .accessibilityIdentifier("solo-daily")
-      NavigationLink { DrillsList { drilling = PracticeGo(layout: $0) } } label: {
-        VStack(alignment: .leading, spacing: 2) {
-          Text("Drills").font(.body.weight(.semibold))
-          Text("\(DrillStore.medals) of \(DRILL_LIB.count * 3) medals").font(.footnote).foregroundStyle(.secondary)
-        }.frame(minHeight: 44, alignment: .leading)
-      }
-      .accessibilityIdentifier("solo-drills")
-    } header: { Text("Solo") }
+    }
+    .buttonStyle(RowPress())
+    .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color(rgb: 0x1c, 0x1c, 0x1f)))
+    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
+    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+  }
+  @State private var art = HomeArtStore()
+  /* a .tile: the game's rack art under its name and line (bottom left); a tap opens its setup */
+  private func gameCard(_ g: TableGame) -> some View {
+    NavigationLink { GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) }) } label: {
+      Color.clear.aspectRatio(1.7, contentMode: .fit)
+        .frame(maxWidth: .infinity)
+        .overlay {
+          GeometryReader { geo in
+            let w = geo.size.width, h = geo.size.height, narrow = w <= 184, low: Double = narrow ? 48 : 52
+            ZStack(alignment: .bottomLeading) {
+              Color(rgb: 0x12, 0x12, 0x14)
+              if let img = art.img[g.rawValue] { Image(decorative: img, scale: art.scale).resizable().transition(.opacity) }
+              VStack(alignment: .leading, spacing: 2) {
+                Text(g.rawValue).font(.system(size: narrow ? 16 : 17, weight: .semibold)).kerning(-0.2)
+                Text(HomeArt.line(g)).font(.system(size: narrow ? 12 : 13)).foregroundStyle(.white.opacity(0.74))
+              }
+              .lineLimit(1).foregroundStyle(.white)
+              .padding(.horizontal, narrow ? 12 : 14).padding(.bottom, narrow ? 12 : 13)
+            }
+            .onAppear { art.want(g, w, h, low) }
+            .onChange(of: geo.size) { _, n in art.want(g, n.width, n.height, low) }
+          }
+        }
+        .frame(height: g == .heyball ? art.rowH : nil)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.13), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.5), radius: 14, y: 8)
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+    .buttonStyle(Press())
+    .accessibilityLabel("\(g.rawValue), \(HomeArt.line(g))")
+    .accessibilityIdentifier("game-\(g.rawValue)")
   }
   /* #leftNote: a game left by closing the app counted as a loss, once, until OK or LEFT_MS */
   @State private var leftNote = false
@@ -99,66 +110,76 @@ struct Home: View {
   struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var archs: [String] = ["allround", "allround"]; var id: String { game.rawValue + levels.joined() + archs.joined() } }
   var body: some View {
     NavigationStack {
-      List {
-        /* the wordmark (.brand h1), where the opening (6o) glides home */
-        Section {} header: {
-          Wordmark().textCase(nil).opacity(intro.state == .done ? 1 : 0)
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { r in
-              titleRect = r
-              if intro.state == .off, r.width > 0, let w = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first {
-                let i = w.safeAreaInsets
-                intro.boot(size: w.bounds.size, title: r, insets: EdgeInsets(top: i.top, leading: i.left, bottom: i.bottom, trailing: i.right), scale: w.screen.scale)
+      ScrollViewReader { sv in
+      ScrollView {
+        VStack(alignment: .leading, spacing: 0) {
+          /* .brand: the wordmark, where the opening (6o) glides home, and three round glass buttons (.nav) */
+          HStack(spacing: 12) {
+            Wordmark().opacity(intro.state == .done ? 1 : 0)
+              .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { r in
+                titleRect = r
+                if intro.state == .off, r.width > 0, let w = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first {
+                  let i = w.safeAreaInsets
+                  intro.boot(size: w.bounds.size, title: r, insets: EdgeInsets(top: i.top, leading: i.left, bottom: i.bottom, trailing: i.right), scale: w.screen.scale)
+                }
+              }
+              .accessibilityAddTraits(.isHeader).accessibilityLabel("felt")
+            Spacer(minLength: 0)
+            HStack(spacing: 10) {
+              NavigationLink { StatsView() } label: { NavDot(icon: "chart.bar") }.accessibilityLabel("Stats").accessibilityIdentifier("stats")
+              NavigationLink { SettingsView() } label: { NavDot(icon: "slider.horizontal.3") }.accessibilityLabel("Settings").accessibilityIdentifier("settings")
+              NavigationLink { HelpView(acts: helpActs) } label: { NavDot(icon: "questionmark.circle") }.accessibilityLabel("How to Play").accessibilityIdentifier("help")
+            }
+            .buttonStyle(Press())
+          }
+          .frame(minHeight: 44)
+          HomeSect(title: "Games", top: 18)
+          /* #playRow: the nine games as cards with their rack art, two to a row, the ninth a row wide */
+          let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+          LazyVGrid(columns: cols, spacing: 12) {
+            ForEach(HomeArt.ORDER.filter { $0 != .heyball }) { g in gameCard(g) }
+          }
+          gameCard(.heyball).padding(.top, 12)
+          HomeSect(title: "Modes", top: 26)
+          LazyVGrid(columns: cols, spacing: 12) {
+            NavigationLink { CareerView(store: career) } label: {
+              ModeCard(name: "Career", line: career.loaded ? "\(career.E.S["profile"]?["name"]?.str ?? "Career"), season \(career.E.season)" : "Your player, 300 rivals", glow: (242, 201, 76)) {
+                Image(systemName: "person.crop.circle.fill").font(.system(size: 22)).foregroundStyle(Color(rgb: 0xf2, 0xc9, 0x4c))
               }
             }
-            .accessibilityAddTraits(.isHeader).accessibilityLabel("felt")
-        }
-        Section {
-          ForEach(TableGame.allCases) { g in
-            NavigationLink { GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) }) } label: {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(g.rawValue).font(.body.weight(.semibold)).foregroundStyle(.primary)
-                Text(g.line).font(.footnote).foregroundStyle(.secondary)
-              }.frame(minHeight: 44, alignment: .leading)
+            .accessibilityIdentifier("mode-career")
+            NavigationLink { TourneyView(store: store) { store.markLive(); playingTourney = true } } label: {
+              ModeCard(name: "Quick Tournament", line: store.tour.map { $0.done ? "Finished: \(TourneyView.placeWords($0.place ?? 0))" : "In progress, \(TourneyView.kindName($0.kind))" } ?? "Bracket of 4, 8 or 16", glow: (242, 201, 76)) {
+                Image(systemName: "trophy.fill").font(.system(size: 19)).foregroundStyle(Color(rgb: 0xf2, 0xc9, 0x4c))
+              }
             }
-            .accessibilityIdentifier("game-\(g.rawValue)")
+            .accessibilityIdentifier("mode-tourney")
+            NavigationLink { ExhibitionSetup { exhibit = $0 } } label: {
+              ModeCard(name: "AI Exhibition", line: "Watch two CPUs play", glow: (246, 244, 236)) {
+                ZStack { Circle().fill(Color(white: 0.96)).frame(width: 11, height: 11).offset(x: -4, y: 3); Circle().fill(Color(rgb: 0xf2, 0xc9, 0x4c)).frame(width: 9, height: 9).offset(x: 5, y: -4) }
+              }
+            }
+            .accessibilityIdentifier("mode-exhibit")
+            NavigationLink { PartySetup { party = $0 } } label: {
+              ModeCard(name: "Party", line: "2 to 4 players", glow: (38, 150, 104)) {
+                Image(systemName: "person.2.fill").font(.system(size: 16)).foregroundStyle(.white)
+              }
+            }
+            .accessibilityIdentifier("mode-party")
           }
-        } header: { Text("Games") } footer: {
-          Text("The web build's physics, rules and CPU, bit for bit.")
+          .buttonStyle(Press())
+          HomeSect(title: "Solo", top: 26)
+          soloSection.id("homeEnd")
         }
-        Section {
-          NavigationLink { CareerView(store: career) } label: {
-            VStack(alignment: .leading, spacing: 2) {
-              Text("Career").font(.body.weight(.semibold))
-              Text(career.loaded ? "\(career.E.S["profile"]?["name"]?.str ?? "Career"), season \(career.E.season)" : "From local amateur to the world tour").font(.footnote).foregroundStyle(.secondary)
-            }.frame(minHeight: 44, alignment: .leading)
-          }
-          .accessibilityIdentifier("mode-career")
-          NavigationLink { ExhibitionSetup { exhibit = $0 } } label: {
-            VStack(alignment: .leading, spacing: 2) {
-              Text("Exhibition").font(.body.weight(.semibold))
-              Text("Two CPU players, any game").font(.footnote).foregroundStyle(.secondary)
-            }.frame(minHeight: 44, alignment: .leading)
-          }
-          .accessibilityIdentifier("mode-exhibit")
-          NavigationLink { TourneyView(store: store) { store.markLive(); playingTourney = true } } label: {
-            VStack(alignment: .leading, spacing: 2) {
-              Text("Quick Tournament").font(.body.weight(.semibold))
-              Text(store.tour.map { $0.done ? "Finished: \(TourneyView.placeWords($0.place ?? 0))" : "In progress, \(TourneyView.kindName($0.kind))" } ?? "4, 8 or 16 players, a bracket").font(.footnote).foregroundStyle(.secondary)
-            }.frame(minHeight: 44, alignment: .leading)
-          }
-          .accessibilityIdentifier("mode-tourney")
-          NavigationLink { PartySetup { party = $0 } } label: {
-            VStack(alignment: .leading, spacing: 2) {
-              Text("Party").font(.body.weight(.semibold))
-              Text("2 to 4 players, one device").font(.footnote).foregroundStyle(.secondary)
-            }.frame(minHeight: 44, alignment: .leading)
-          }
-          .accessibilityIdentifier("mode-party")
-        } header: { Text("Modes") } footer: {
-          Text("Watch the CPU play itself, each player at its own level.")
-        }
-        soloSection
+        .padding(.horizontal, 20).padding(.bottom, 24)
+        .frame(maxWidth: 560).frame(maxWidth: .infinity)
       }
+      .background(Color(rgb: 0x09, 0x09, 0x0a))
+      .scrollIndicators(.hidden)
+      /* `-felt-homeend`: the home scrolled to its end (a test hook) */
+      .task { if ProcessInfo.processInfo.arguments.contains("-felt-homeend") { try? await Task.sleep(for: .milliseconds(300)); sv.scrollTo("homeEnd", anchor: .bottom) } }
+      }
+      .toolbar(.hidden, for: .navigationBar)
       .navigationTitle("").navigationBarTitleDisplayMode(.inline)
       .navigationDestination(isPresented: $showCareer) { CareerView(store: career) }
       .navigationDestination(item: $helpPath) { p in
@@ -169,19 +190,6 @@ struct Home: View {
       .navigationDestination(item: $statsPath) { k in if k == "all" { StatsView() } else { StatsKindPage(kind: k, rec: Rec.load()) } }
       .navigationDestination(item: $setupGame) { g in GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) }) }
       .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { store.markLive(); playingTourney = true } }
-      .toolbar {
-        /* #helpBtn: How to play (6) */
-        ToolbarItem(placement: .topBarTrailing) {
-          NavigationLink { HelpView(acts: helpActs) } label: { Image(systemName: "questionmark.circle") }.accessibilityLabel("How to Play").accessibilityIdentifier("help")
-        }
-        /* #statsBtn: Stats and records (6s) */
-        ToolbarItem(placement: .topBarTrailing) {
-          NavigationLink { StatsView() } label: { Image(systemName: "chart.bar") }.accessibilityLabel("Stats").accessibilityIdentifier("stats")
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-          NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }.accessibilityLabel("Settings").accessibilityIdentifier("settings")
-        }
-      }
       .tint(.primary)
     }
     /* a test hook, like the page's window.felt: `-felt-game "9-Ball"` opens that table */
@@ -378,7 +386,7 @@ struct TableScreen: View {
           model.v3Dist = min(V3.DIST[1], max(V3.DIST[0], pinch0! / Double(v.magnification)))
         }.onEnded { _ in pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist") })
         .gesture(DragGesture(minimumDistance: 0).onChanged { v in model.touching = true; if pinch0 == nil { touch(v, tg.size, began: v.translation == .zero) } }
-          .onEnded { v in if eating { eating = false } else { touchEnd(v, tg.size) }; placing = false; picking = false; gest = nil; model.touching = false })
+          .onEnded { v in if eating { eating = false } else { touchEnd(v, tg.size) }; placing = false; picking = false; gest = nil; model.touching = false; model.placeEnd() })
         .accessibilityElement()
         .accessibilityLabel("Table")
         .accessibilityIdentifier("table")
@@ -1191,10 +1199,14 @@ struct FlashBanner: View {
 struct Overlays: View {
   let model: TableModel
   let back: () -> Void
+  /* the pause menu's Settings and How to Play (#pPrefsBtn, #pHelpBtn), and Concede Frame's arming (armOrAct, ARM_MS 4 s) */
+  @State private var sheet: String? = nil
+  @State private var armed = false
   var body: some View {
     if model.paused {
       /* the pause menu (6): what game this is, the latest word (#menuMsg), Resume, Restart, Quit to Home */
       card {
+        if let solo = soloNow { soloPanel(solo) } else {
         Text("Paused, \(model.game.rawValue)" + (model.cpuLevel != nil ? " vs \(model.cardName(1).replacingOccurrences(of: " (CPU)", with: ""))" : "")).font(.footnote).foregroundStyle(.secondary)
         /* gameNow: both players' cards (the shooter's lit), the potted balls in pot order, the latest word */
         /* a card per player: two side by side, a party's three or four two to a row */
@@ -1215,12 +1227,33 @@ struct Overlays: View {
           .frame(minHeight: 30)
         }
         if !model.msg.isEmpty { Text(model.msg).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("msg") }
+        }
         Button { model.paused = false } label: { Label("Resume", systemImage: "play.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("resume")
         Button { model.paused = false; model.rerack() } label: { Label("Restart", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity, minHeight: 44) }
           .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
         Button { model.paused = false; model.tourneyAbandon(); back() } label: { Text(model.tmatch != nil ? "Forfeit Match" : "Quit to Home").frame(maxWidth: .infinity, minHeight: 44) }
           .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
+        HStack(spacing: 8) {
+          Button { sheet = "prefs" } label: { Text("Settings").frame(maxWidth: .infinity, minHeight: 44) }.background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2))).accessibilityIdentifier("pPrefsBtn")
+          Button { sheet = "help" } label: { Text("How to Play").frame(maxWidth: .infinity, minHeight: 44) }.background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2))).accessibilityIdentifier("pHelpBtn")
+        }
+        /* #concedeBtn: snooker's Concede Frame, two taps (armOrAct) */
+        if let g = model.g, g.kind == "snooker", g.mode == nil, model.tut == nil, g.winner == nil {
+          Button {
+            if armed { armed = false; model.paused = false; model.concedeFrame() }
+            else { armed = true; Task { try? await Task.sleep(for: .seconds(4)); armed = false } }
+          } label: { Text(armed ? "Tap again to concede" : "Concede Frame").frame(maxWidth: .infinity, minHeight: 44) }
+            .foregroundStyle(armed ? Color.white : Color(rgb: 0xff, 0x6b, 0x5e))
+            .background(RoundedRectangle(cornerRadius: 12).fill(armed ? Color(rgb: 0xd7, 0x3b, 0x2f) : Color(white: 0.2)))
+            .accessibilityIdentifier("concedeBtn")
+        }
+      }
+      .sheet(item: Binding(get: { sheet.map { SheetID(id: $0) } }, set: { sheet = $0?.id })) { s in
+        NavigationStack {
+          Group { if s.id == "prefs" { SettingsView() } else { HelpView(acts: HelpActions(lesson: {}, tutorial: { _ in }, modes: {}, drills: {}, career: {})) } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { sheet = nil }.foregroundStyle(.primary) } }
+        }
       }
     } else if let g = model.g, g.winner != nil, model.rolling == nil, model.tut == nil {
       card {
@@ -1255,6 +1288,44 @@ struct Overlays: View {
         } }
       }
     }
+  }
+  struct SheetID: Identifiable { let id: String }
+  /* soloNow: the session in play when it is solo: its kicker, title, goal and numbers */
+  var soloNow: (kind: String, title: String, goal: String, cells: [(String, String)])? {
+    let m = model
+    if let L = m.lesson { return ("Lesson, step \(L.step) of 3", "Learn to Play", TableModel.LESSON_STEPS[L.step - 1].1, []) }
+    if let T = m.tut, let t = tutById(T.id) { let st = t.steps[T.step]; return ("\(t.name) tutorial, step \(T.step + 1) of \(t.steps.count)", titleCaseWords(st.head), st.text(T.ctx ?? "solids"), []) }
+    if let P = m.prac {
+      return ("Practice", TableModel.PRACTICE_NAMES[P.layout] ?? "", P.edit ? "Editing: tap the cloth to drop a ball, tap a ball to take it off." : "",
+              [("Shots", "\(P.shots)"), ("Pots", "\(P.pots)"), ("Pot %", P.shots > 0 ? "\(Int((100 * Double(P.potting) / Double(P.shots)).rounded()))%" : "-")])
+    }
+    if let D = m.drill, let d = drillById(D.id) {
+      let best = DrillStore.all[d.id]
+      return ("Drill, shot \(min(D.i + 1, d.shots)) of \(d.shots)", d.name, D.S?.say ?? d.goal, [("Shots", "\(D.js.count)/\(d.shots)"), ("Points", "\(D.js.reduce(0) { $0 + $1.s })"), ("Best", best.map { "\($0.best)" } ?? "-")])
+    }
+    if let T = m.trick, let c = trickById(T.id) {
+      let i = TRICKS.firstIndex { $0.id == c.id } ?? 0, val = T.daily == nil ? trickVal(c.id) : 0, sc = TrickStore.score
+      let cells: [(String, String)] = val > 0 ? [("Attempt", "\((sc.run[c.id] ?? 0) + 1) of \(TRICK_RUN)"), ("Best", "\(sc.pts[c.id] ?? 0) of \(val)"), ("Program", "\(programTotal(sc.pts))/\(programMax())")]
+        : [("Tries", "\(T.attempts)"), ("Best", "\(TrickStore.best[c.id] ?? 0) of 3"), ("All Stars", "\(TrickStore.best.values.reduce(0, +))/\(TRICKS.count * 3)")]
+      return (T.daily.map { "Daily shot, \(DrillStore.dayWords($0.day))" } ?? "Trick shot \(i + 1) of \(TRICKS.count)", c.title, c.goal + (trickHint(c).isEmpty ? "" : " " + trickHint(c)), cells)
+    }
+    return nil
+  }
+  @ViewBuilder private func soloPanel(_ s: (kind: String, title: String, goal: String, cells: [(String, String)])) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(s.kind).font(.footnote).foregroundStyle(.secondary)
+      Text(s.title).font(.title3.bold())
+      if !s.goal.isEmpty { Text(s.goal).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+      if !s.cells.isEmpty {
+        HStack(spacing: 0) {
+          ForEach(Array(s.cells.enumerated()), id: \.offset) { _, c in
+            VStack(spacing: 2) { Text(c.0).font(.caption).foregroundStyle(.secondary); Text(c.1).font(.headline).monospacedDigit() }.frame(maxWidth: .infinity)
+          }
+        }
+        .padding(.top, 4)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
   private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
     VStack(spacing: 12, content: c)
@@ -1975,5 +2046,128 @@ struct OverHead: View {
       return l.isEmpty ? "None" : l.map(String.init).joined(separator: " ")
     }
     return [("Potted", down), ("Best run", P.map { String(st.best[$0]) })] + (model.party.map { pt in [("Racks won", pt.wins.map(String.init))] } ?? []) + [accuracy, fouls] + (P.count > 2 ? [] : [("Shots of note", notes)])
+  }
+}
+
+/* the home's art: each card's picture made off the main thread for its size, once (HomeArt) */
+@MainActor @Observable final class HomeArtStore {
+  var img: [String: CGImage] = [:]
+  var scale: CGFloat = 3
+  /* the cards' height: the ninth card is a row wide and as tall as the row */
+  var rowH: CGFloat? = nil
+  @ObservationIgnored private var keys: [String: String] = [:]
+  func want(_ g: TableGame, _ w: CGFloat, _ h: CGFloat, _ low: Double) {
+    guard w > 1, h > 1 else { return }
+    if g != .heyball, rowH != h { rowH = h }
+    let d = Double(UIScreen.main.scale), dress = Prefs.dress(g.table.2), spec = TableModel.spec(for: g)
+    let key = "\(w)x\(h) \(low) \(d) \(dress) \(spec)"
+    guard keys[g.rawValue] != key else { return }
+    keys[g.rawValue] = key; scale = CGFloat(d)
+    Task.detached(priority: .userInitiated) {
+      let im = HomeArt.paint(g, Double(w), Double(h), low: low, d: d)
+      await MainActor.run { if self.keys[g.rawValue] == key, let im { withAnimation(.easeOut(duration: 0.2)) { self.img[g.rawValue] = im } } }
+    }
+  }
+}
+/* a section's title on the home (.newgame .sect) */
+struct HomeSect: View {
+  let title: String, top: CGFloat
+  var body: some View { Text(title).font(.system(size: 22, weight: .bold)).kerning(-0.35).foregroundStyle(.white).padding(.top, top).padding(.bottom, 10).accessibilityAddTraits(.isHeader) }
+}
+/* .nav: a 44 pt round glass button */
+struct NavDot: View {
+  let icon: String
+  var body: some View {
+    Image(systemName: icon).font(.system(size: 19, weight: .regular)).foregroundStyle(.white).frame(width: 44, height: 44)
+      .background(Circle().fill(Color(rgb: 0x1c, 0x1c, 0x1f))).overlay(Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+  }
+}
+/* press: a small give and a spring back (.tile:active) */
+struct Press: ButtonStyle {
+  func makeBody(configuration c: Configuration) -> some View {
+    c.label.scaleEffect(c.isPressed ? 0.97 : 1).animation(c.isPressed ? .easeOut(duration: 0.12) : .spring(response: 0.3, dampingFraction: 0.55), value: c.isPressed)
+  }
+}
+struct RowPress: ButtonStyle {
+  func makeBody(configuration c: Configuration) -> some View { c.label.background(Color.white.opacity(c.isPressed ? 0.09 : 0)) }
+}
+/* .mode: a quiet dark card, a glow of its own colour in the corner, its mark top left, the name and line at the foot */
+struct ModeCard<Mark: View>: View {
+  let name: String, line: String, glow: (Double, Double, Double)
+  @ViewBuilder let mark: () -> Mark
+  var body: some View {
+    let c = Color(red: glow.0 / 255, green: glow.1 / 255, blue: glow.2 / 255)
+    VStack(alignment: .leading, spacing: 0) {
+      mark().frame(width: 36, height: 36).background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color.white.opacity(0.08)))
+        .padding(.top, 10).padding(.leading, 12).accessibilityHidden(true)
+      Spacer(minLength: 4)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(name).font(.system(size: 17, weight: .semibold)).kerning(-0.2)
+        Text(line).font(.system(size: 13)).foregroundStyle(.white.opacity(0.74))
+      }
+      .lineLimit(1).padding(.horizontal, 14).padding(.bottom, 12)
+    }
+    .foregroundStyle(.white)
+    .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+    .aspectRatio(1.7, contentMode: .fit)
+    .background {
+      GeometryReader { g in
+        ZStack {
+          Color(rgb: 0x17, 0x17, 0x1a)
+          EllipticalGradient(colors: [c.opacity(0.15), c.opacity(0)], center: UnitPoint(x: 0.85, y: 0), startRadiusFraction: 0, endRadiusFraction: 0.6)
+            .frame(width: g.size.width * 1.2 * 2, height: g.size.height * 0.9 * 2).position(x: g.size.width * 0.85, y: 0)
+        }
+      }
+    }
+    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.13), lineWidth: 0.5))
+    .shadow(color: .black.opacity(0.5), radius: 14, y: 8)
+    .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    .accessibilityElement(children: .combine)
+  }
+}
+/* .solo: a row of the Solo list: its icon (or the daily's calendar leaf), name and line, a count, a chevron; hairlines
+   inset to the words */
+struct SoloRow: View {
+  var icon: String?, day: Int? = nil
+  let name: String, line: String
+  var acc: String? = nil, accIcon: String? = nil, accTint = Color(rgb: 0x3d, 0xdc, 0x84)
+  init(icon: String?, day: Int? = nil, name: String, line: String, acc: String? = nil, accIcon: String? = nil, accTint: Color = Color(rgb: 0x3d, 0xdc, 0x84)) {
+    self.icon = icon; self.day = day; self.name = name; self.line = line; self.acc = acc; self.accIcon = accIcon; self.accTint = accTint
+  }
+  var body: some View {
+    HStack(spacing: 14) {
+      Group {
+        if let day {
+          VStack(spacing: 0) {
+            Color(rgb: 0x3d, 0xdc, 0x84).frame(height: 8)
+            Text("\(day)").font(.system(size: 14, weight: .bold)).monospacedDigit().foregroundStyle(.white).frame(maxHeight: .infinity)
+          }
+          .background(Color(white: 0.17)).clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        } else if let icon {
+          Image(systemName: icon).font(.system(size: 17)).foregroundStyle(Color(rgb: 0x3d, 0xdc, 0x84))
+            .frame(width: 32, height: 32).background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.08)))
+        }
+      }
+      .frame(width: 32, height: 32).accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 1) {
+        Text(name).font(.system(size: 17, weight: .medium)).foregroundStyle(.white)
+        Text(line).font(.system(size: 13)).foregroundStyle(Color(white: 0.92).opacity(0.66))
+      }
+      .lineLimit(1)
+      Spacer(minLength: 4)
+      if let acc {
+        HStack(spacing: 5) {
+          if let accIcon { Image(systemName: accIcon).font(.system(size: 13)).foregroundStyle(accTint) }
+          Text(acc).monospacedDigit()
+        }
+        .font(.system(size: 15)).foregroundStyle(Color(white: 0.92).opacity(0.66))
+      }
+      Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(white: 0.92).opacity(0.3))
+    }
+    .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 8)
+    .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+    .contentShape(Rectangle())
+    .overlay(alignment: .top) { Color.white.opacity(0.16).frame(height: 0.5).padding(.leading, 62) }
   }
 }

@@ -236,7 +236,8 @@ func encode(_ g: Game) -> [String: Any] {
     let fresh = kind == "carom" ? E.caromGame(race: int(G["race"])!, cushions: int(G["need"])!, side: int(G["side"])!) : kind == "snooker" ? E.snookerGame(frames: int((G["g0"] as! [String: Any])["frames"])!, first: int((G["g0"] as! [String: Any])["breaker"])!) : E.newGame(kind, rules: rules)
     let d0 = diffGame(G["g0"] as! [String: Any], fresh)
     #expect(d0.isEmpty, "\(name): newGame: \(d0.prefix(5))")
-    var prev = G["g0"] as! [String: Any]
+    var prev = G["g0"] as! [String: Any], conceded = 0
+    defer { if kind == "snooker" { #expect(conceded > 0, "\(name): concedes checked") } }
     for (k, s) in (G["steps"] as! [[String: Any]]).enumerated() {
       var g = decodeGame(prev, rules: rules)
       let out: Game
@@ -248,6 +249,12 @@ func encode(_ g: Game) -> [String: Any] {
           g.balls[i].x = p[0].doubleValue; g.balls[i].y = p[1].doubleValue; g.balls[i].vx = 0; g.balls[i].vy = 0; g.balls[i].on = true
         }
         g.call = decodeCall(s["call"])
+        /* Concede Frame (concedeSnooker) from the game as it stood */
+        if let c = s["concede"] as? [String: Any] {
+          let d = diffGame(c, E.concedeSnooker(g, g.turn))
+          if !d.isEmpty { Issue.record("\(name) step \(k): concede: \(d.prefix(6))") }
+          conceded += 1
+        }
         out = E.judge(g, decodeShot(s["r"] as! [String: Any]))
       }
       let want = s["out"] as! [String: Any]

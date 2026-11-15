@@ -107,6 +107,7 @@ struct TableCanvas: View {
         }
       }
       ctx.scaleBy(x: sc, y: sc)
+      drawHandZone(&ctx, m)
       drawGuide(&ctx, m)
       drawSolo(&ctx, m)
       defer { drawLoupe(&ctx, m, bp) }
@@ -118,6 +119,7 @@ struct TableCanvas: View {
         ctx.draw(Image(decorative: img, scale: 1), in: CGRect(x: x, y: y, width: Double(img.width), height: Double(img.height)))
       }
       ctx.scaleBy(x: sc, y: sc)
+      drawPlace(&ctx, m, bp, sc)
       drawFx(&ctx, m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       ctx.scaleBy(x: sc, y: sc)
@@ -206,12 +208,63 @@ struct TableCanvas: View {
     }
   }
   private func drawGuide(_ ctx: inout GraphicsContext, _ m: Mapper) { drawGuide(Sink2D(ctx: ctx, m: m), m) }
+  /* the player's ball in hand: the turn is human, the shot not yet played, no replay */
+  private var handOn: Bool { model.inHand && model.rolling == nil && model.stroke == nil && !model.cpuTurn && model.rp == nil }
+  /* draw()'s kitchen (ball in hand behind the head string: a faint tint on the bed and the string) and drawD (the D) */
+  private func drawHandZone(_ ctx: inout GraphicsContext, _ m: Mapper) {
+    guard handOn, let gm = model.g else { return }
+    let s = model.sim, w = Color.white.opacity(max(0.3, look.ovMin))
+    if gm.inHand == "kitchen" {
+      var bed = Path(); bed.move(to: m.pt(0, 0)); bed.addLine(to: m.pt(s.HEAD_X, 0)); bed.addLine(to: m.pt(s.HEAD_X, s.TW)); bed.addLine(to: m.pt(0, s.TW)); bed.closeSubpath()
+      ctx.fill(bed, with: .color(Color(red: 1, green: 1, blue: 240 / 255).opacity(0.045)))
+      var p = Path(); p.move(to: m.pt(s.HEAD_X, 0)); p.addLine(to: m.pt(s.HEAD_X, s.TW))
+      ctx.stroke(p, with: .color(w), lineWidth: 1.5)
+    } else if gm.inHand == "D" {
+      var p = Path()
+      for i in 0...32 { let a = Double.pi / 2 + Double(i) / 32 * Double.pi, q = m.pt(s.HEAD_X + s.D_R * cos(a), s.TW / 2 + s.D_R * sin(a)); i == 0 ? p.move(to: q) : p.addLine(to: q) }
+      p.closeSubpath()
+      ctx.fill(p, with: .color(Color(red: 1, green: 1, blue: 240 / 255).opacity(0.06)))
+      ctx.stroke(p, with: .color(w), lineWidth: 1.5)
+    }
+  }
+  /* drawPlace: ball in hand, the whole turn: four chevrons that say the ball can be moved; while it is carried, the ghost
+     where the finger has it and a ring that says whether it may stay there (white) or not (the illegal colour) */
+  private func drawPlace(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter, _ sc: Double) {
+    guard handOn, let c = model.cue else { return }
+    let s = model.sim, placing = model.placeAt != nil, at = model.placeAt ?? (c.x, c.y)
+    let ok = !placing || model.g.map { model.engine.canPlace($0, at.0, at.1) } ?? true, p = m.pt(at.0, at.1), rp = s.BALL_R * m.k
+    if placing && !ok {
+      /* the ghost over an illegal spot, faint: the ball itself stays on its last legal spot */
+      var g = ctx; g.opacity = 0.5; g.scaleBy(x: 1 / sc, y: 1 / sc)
+      let (img, x, y) = bp.ballImage(0, Double(p.x) * sc, Double(p.y) * sc, rp * sc, bp.axesOf(model.orient[0] ?? IDENT))
+      g.draw(Image(decorative: img, scale: 1), in: CGRect(x: x, y: y, width: Double(img.width), height: Double(img.height)))
+    }
+    if placing {
+      let r = rp * 1.4
+      ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(ok ? Color.white.opacity(0.75) : look.illegal), lineWidth: 1.5)
+    }
+    let a = (placing ? 0.8 : 0.5) * (0.75 + 0.25 * sin(model.now * 1000 / 280)), d = rp * 2.1 + 3, w = 4.0
+    for (ux, uy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+      let x = Double(p.x) + ux * d, y = Double(p.y) + uy * d
+      var q = Path(); q.move(to: CGPoint(x: x - ux * w + uy * w, y: y - uy * w - ux * w)); q.addLine(to: CGPoint(x: x, y: y)); q.addLine(to: CGPoint(x: x - ux * w - uy * w, y: y - uy * w + ux * w))
+      ctx.stroke(q, with: .color(Color.white.opacity(max(a, look.ovMin))), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+    }
+  }
   func drawGuide(_ sink: GuideSink, _ m: Mapper) {
     if Prefs.guide == "off" || model.rp != nil { return }
-    guard let c = model.cue, let (h, P) = model.guide() else { return }
+    guard let c = model.cue else { return }
+    let gi = model.guide()
+    guard let h = gi?.0 ?? (model.rolling == nil ? model.aimHit : nil) else { return }
     let s = model.sim, R = s.BALL_R, rp = R * m.k, dx = JSMath.cos(model.aim), dy = JSMath.sin(model.aim)
     let gx = c.x + dx * h.t, gy = c.y + dy * h.t, ov = look.ovMin
     let wa = { (a: Double) in Color.white.opacity(max(a, ov)) }, white = { (a: Double) in Color.white.opacity(a) }
+    /* with no complete preview of this layout yet, the line and the ghost on the last verdict (the ring never flips on
+       half-known data) */
+    guard let P = gi?.1 else {
+      if h.t > 2 * R { sink.line([[c.x + dx * R, c.y + dy * R], [gx - dx * R, gy - dy * R]], wa(0.5), 1.25, []) }
+      sink.ring(gx, gy, rp, model.guideLegal ? white(0.9) : look.illegal, 1.5, fill: white(0.08), ghost: true)
+      return
+    }
     func strokeLine(_ pts: [[Double]], _ col: Color, _ w: Double, _ dash: [CGFloat] = []) { sink.line(pts, col, w, dash) }
     func ring(_ x: Double, _ y: Double, _ r: Double, _ col: Color, _ w: Double, fill: Color? = nil, ghost: Bool = false) { sink.ring(x, y, r, col, w, fill: fill, ghost: ghost) }
     func trimStart(_ pts: [[Double]], _ d0: Double) -> [[Double]] {
@@ -245,13 +298,15 @@ struct TableCanvas: View {
       else if P.objHit { ring(end[0], end[1], rp, wa(0.35), 1.25) }
     }
     let cueCol = P.cuePot < 0 ? white(0.9) : look.illegal
-    if P.cue.count > 1 {
-      strokeLine(P.cue, wa(0.55), 1.5, [5, 5])
-      let end = P.cue[P.cue.count - 1]
+    /* a preview a frame or two behind the aim, on the same ball or cushion: its cue path moves with the ghost ball */
+    let (ox, oy) = model.pvShift, pcue = ox != 0 || oy != 0 ? P.cue.map { [$0[0] + ox, $0[1] + oy] } : P.cue
+    if pcue.count > 1 {
+      strokeLine(pcue, wa(0.55), 1.5, [5, 5])
+      let end = pcue[pcue.count - 1]
       if P.cueStop { ring(end[0], end[1], rp, wa(0.3), 1.25) }
-      for q in P.bounces ?? [] { ring(q[0], q[1], 2.5, wa(0.85), 1, fill: wa(0.85)) }
+      for q in P.bounces ?? [] { ring(q[0] + ox, q[1] + oy, 2.5, wa(0.85), 1, fill: wa(0.85)) }
       if P.cuePot >= 0 {
-        var tail = Array(P.cue.reversed()), len = 0.0
+        var tail = Array(pcue.reversed()), len = 0.0
         for i in 1..<tail.count { len += JSMath.hypot(tail[i][0] - tail[i - 1][0], tail[i][1] - tail[i - 1][1]) }
         var cut = [tail[0]], left = min(len, 0.1)
         for i in 1..<tail.count where left > 0 {

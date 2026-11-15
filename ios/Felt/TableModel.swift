@@ -530,6 +530,17 @@ final class TableModel {
     aim = sol.angle; spin = sol.spin; power = sol.power
     shoot()
   }
+  /* concedeFrame: the player to shoot (you, against the CPU) concedes snooker's frame; the frame's end as any other */
+  func concedeFrame() {
+    guard let gm = g, gm.kind == "snooker", gm.winner == nil, rolling == nil else { return }
+    let p = cpuLevel != nil ? 0 : gm.turn, next = engine.concedeSnooker(gm, p)
+    stroke = nil; power = 0
+    if exhib == nil { Rec.frame(next, cpu: cpuLevel != nil) }
+    g = next; syncBalls()
+    words(next, p)
+    if next.winner != nil, exhib == nil { Rec.game(next, level: cpuLevel) }
+    aimAtNearest()
+  }
   /* settleSolo's practice: practiceJudge, the session's numbers, its words and cues */
   private func settlePractice(_ before: Game, _ shot: RuleShot) {
     if prac != nil { pushUndo(before) }
@@ -909,6 +920,8 @@ final class TableModel {
   }
 
   static let fpsOn = ProcessInfo.processInfo.arguments.contains("-felt-fps")
+
+
   @ObservationIgnored var fps: (t0: Double?, prev: Double?, n: Int, sim: Double, dtMax: Double) = (nil, nil, 0, 0, 0)
   /* the pause menu is up: the table stands still (frameBody does not run under it) */
   var paused = false
@@ -1157,15 +1170,19 @@ final class TableModel {
     return (max(R + 0.001, px), y)
   }
 
-  /* ball in hand: put the cue ball at (x, y) if it fits there */
+  /* placeAt: while the cue ball in hand is carried, where the finger has it (drawPlace's ghost and ring); on a legal
+     spot the ball is there too, on an illegal one it stays on its last legal spot, where the let-go puts it back */
+  var placeAt: (Double, Double)? = nil
+  func placeEnd() { if placeAt != nil { placeAt = nil; frame &+= 1 } }
+  /* ball in hand: carry the cue ball to (x, y), and put it there if it fits */
   func place(_ x: Double, _ y: Double) {
     guard inHand, rolling == nil, !cpuTurn, let c = balls.first(where: { $0.n == cueN }) else { return }
     if let gm = g {
       let R = sim.BALL_R, lo = R + 0.001
       let px = min(max(x, lo), sim.TL - lo), py = min(max(y, lo), sim.TW - lo)
+      placeAt = (px, py); frame &+= 1
       guard engine.canPlace(gm, px, py) else { return }
       g = engine.placeCue(gm, px, py); c.x = px; c.y = py
-      frame &+= 1
       return
     }
     let R = sim.BALL_R, lo = R + 0.001
@@ -1505,19 +1522,59 @@ final class TableModel {
      the power the shot will have (the live pull, else the last shot's: markPower), cached on aim,
      power, spin and layout as shotPreview keys it */
   var markPower = 0.5
-  @ObservationIgnored private var pvKey: [Double] = []
-  @ObservationIgnored private var pvVal: (AimHit, Preview)?
+  /* shotPreview: the preview for this aim, power, spin and layout, double-buffered so the guide never shows a path half
+     grown: pvDone is the last complete one, the one drawn; pvWork the next, run for at most PV_BUDGET ms a frame and
+     swapped in only when done. A change of aim, power or spin restarts the work unless it has already run PV_STALE
+     frames: then it finishes first (a sweep that never rests still updates the paths every couple of frames) and the
+     newest aim starts after it. The key snaps the aim to PV_SNAP rad and the power and spin to fine steps; the layout
+     (every ball but the cue ball, and the guide length) is the hard part: a preview of another layout is never drawn,
+     and with none of this layout yet the work runs up to PV_SYNC ms at once, so a turn's first frame has its paths.
+     The ghost ball and the aim line come from aimTrace every frame. pvShift: a preview a frame or two behind a moving
+     aim that still meets the same ball or cushion moves its cue ball path with the ghost ball (guideLines' same). */
+  static let PV_BUDGET = 3.0, PV_SYNC = 12.0, PV_STALE = 2, PV_SNAP = 2e-5
+  final class PvWork {
+    let P: Preview, key: [Double], lay: [Double], ang: Double, gx: Double, gy: Double, hk: String, hb: Int
+    var frames = 0
+    init(P: Preview, key: [Double], lay: [Double], ang: Double, gx: Double, gy: Double, hk: String, hb: Int) { self.P = P; self.key = key; self.lay = lay; self.ang = ang; self.gx = gx; self.gy = gy; self.hk = hk; self.hb = hb }
+  }
+  @ObservationIgnored private var pvDone: PvWork?
+  @ObservationIgnored private var pvWork: PvWork?
+  @ObservationIgnored private var pvFrame = -1
+  @ObservationIgnored private var pvLast: (AimHit, Preview)?
+  @ObservationIgnored private(set) var pvShift = (0.0, 0.0)
+  /* this frame's aimTrace: the line and the ghost follow the aim even while no complete preview of the layout exists */
+  @ObservationIgnored private(set) var aimHit: AimHit?
   func guide() -> (AimHit, Preview)? {
     guard rolling == nil, let c = cue else { return nil }
+    /* once a frame: the loupe asks again in the same frame */
+    if pvFrame == frame { return pvLast }
+    pvFrame = frame
     let pw = power > 0 ? power : markPower, q = { (v: Double, s: Double) in (v / s).rounded() }
-    var key = [q(aim, 2e-5), q(pw, 0.001), q(spin.x, 0.005), q(spin.y, 0.005), q(spin.e, 0.002), c.x, c.y]
-    for b in balls where b.n != cueN { key += b.on ? [b.x, b.y] : [-1] }
-    if key == pvKey, let v = pvVal { return v }
+    let lens = game == .carom ? PV_CAROM : Prefs.guide == "short" ? PV_SHORT : PV_FULL
+    var lay = [lens[0]]
+    for b in balls where b.n != cueN { lay += b.on ? [b.x, b.y] : [-1] }
+    let key = [q(aim, TableModel.PV_SNAP), q(pw, 0.001), q(spin.x, 0.005), q(spin.y, 0.005), q(spin.e, 0.002), c.x, c.y]
     let dx = JSMath.cos(aim), dy = JSMath.sin(aim)
     let h = sim.aimTrace(balls, c.x, c.y, dx, dy, skip: [cueN], far: 6)
-    let P = sim.previewStart(balls, cueN: cueN, aim, pw, spin, h, game == .carom ? PV_CAROM : Prefs.guide == "short" ? PV_SHORT : PV_FULL, caromNeed: game == .carom ? (g?.need ?? 3) : 0)
-    sim.previewRun(P)
-    pvKey = key; pvVal = (h, P)
-    return (h, P)
+    let have = pvDone.map { $0.lay == lay } ?? false
+    if have, pvDone!.key == key { pvWork = nil }
+    else {
+      let t0 = CACurrentMediaTime()
+      if pvWork == nil || pvWork!.lay != lay || (pvWork!.key != key && (!have || pvWork!.frames < TableModel.PV_STALE)) {
+        let P = sim.previewStart(balls, cueN: cueN, aim, pw, spin, h, lens, caromNeed: game == .carom ? (g?.need ?? 3) : 0)
+        pvWork = PvWork(P: P, key: key, lay: lay, ang: aim, gx: c.x + dx * h.t, gy: c.y + dy * h.t, hk: h.kind, hb: h.ball?.n ?? -1)
+      }
+      let W = pvWork!, ms = have ? TableModel.PV_BUDGET : TableModel.PV_SYNC
+      W.frames += 1
+      sim.previewRun(W.P) { (CACurrentMediaTime() - t0) * 1000 > ms }
+      if W.P.done { pvDone = W; pvWork = nil }
+    }
+    aimHit = h
+    guard let D = pvDone, D.lay == lay else { pvLast = nil; pvShift = (0, 0); return nil }
+    let gx = c.x + dx * h.t, gy = c.y + dy * h.t
+    let same = D.hb == (h.ball?.n ?? -1) && D.hk == h.kind && (h.kind == "ball" || h.kind == "rail") && D.P.cuePot < 0 && abs(D.ang - aim) < 0.03
+    pvShift = same ? (gx - D.gx, gy - D.gy) : (0, 0)
+    pvLast = (h, D.P)
+    return pvLast
   }
 }

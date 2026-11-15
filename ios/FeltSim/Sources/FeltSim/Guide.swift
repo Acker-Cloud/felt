@@ -97,10 +97,13 @@ extension Sim {
     return S
   }
 
-  public func previewRun(_ S: Preview) {
+  /* stop: the page's time budget (performance.now() - t0 > ms), asked every 32 steps; the steps themselves never
+     depend on it, so a preview run in slices ends exactly as one run whole */
+  public func previewRun(_ S: Preview, stop: (() -> Bool)? = nil) {
     let R = BALL_R, lens = S.lens
     func add(_ p: inout [[Double]], _ x: Double, _ y: Double, _ gap: Double) { let q = p[p.count - 1]; if M.hypot(x - q[0], y - q[1]) >= gap { p.append([x, y]) } }
     while !S.done {
+      if let stop, (S.s & 31) == 0, stop() { return }
       var cue = S.ball
       if S.tab === S.solo && cue.on {
         if S.safe <= 0 {
