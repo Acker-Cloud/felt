@@ -12,7 +12,7 @@ let package = Package(
     .target(name: "FeltSim"),
     /* section 4 of index.html on CoreGraphics (empty where there is none, as on Linux) */
     .target(name: "FeltRender", dependencies: ["FeltSim"]),
-    .testTarget(name: "FeltSimTests", dependencies: ["FeltSim"], resources: [.copy("Fixtures")]),
+    .testTarget(name: "FeltSimTests", dependencies: ["FeltSim", "FeltRender"], resources: [.copy("Fixtures")]),
     .testTarget(name: "FeltRenderTests", dependencies: ["FeltRender", "FeltSim"], resources: [.copy("Fixtures")]),
   ]
 )

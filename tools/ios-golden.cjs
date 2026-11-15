@@ -31,6 +31,13 @@ function v3Source() {
     cut('const v3Sub = (a, b)', 'function v3Layout()') + cut('function v3Mats(', '/* the overview for this box') + cut('/* the camera\'s pose:', '/* a move to the overview') +
     cut('function v3Proj(', '/* once a frame (frameBody)');
 }
+/* 4m's recorded roll (heroRunStart, heroSample) with 4b's rotate and artTilt, the page's own source */
+function heroSource() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const cut = (a, b) => { const i = html.indexOf(a), j = html.indexOf(b, i); if (i < 0 || j < 0) throw new Error('ios-golden: 4m moved: ' + a); return html.slice(i, j); };
+  const line = a => { const i = html.indexOf('\n' + a); if (i < 0) throw new Error('ios-golden: 4m moved: ' + a); return html.slice(i + 1, html.indexOf('\n', i + 1)) + '\n'; };
+  return 'const IDENT = [1, 0, 0, 0, 1, 0, 0, 0, 1];\n' + cut('function rotate(m, axis, ang) {', '\n}\n') + '\n}\n' + line('const artTilt = ') + cut('function heroRunStart(', 'function heroRunOn(');
+}
 function guideSource() {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const cut = (a, b) => { const i = html.indexOf(a), j = html.indexOf(b, i); if (i < 0 || j < 0) throw new Error('ios-golden: 4d moved: ' + a); return html.slice(i, j); };
@@ -43,7 +50,7 @@ function tourneySource() {
   return html.slice(i, j);
 }
 function loadFd() {
-  let src = regionSource() + '\n;let game = null; const cueBall = () => game.balls.find(b => b.n === game.cue); const performance = { now: () => 0 };\n' + guideSource() + '\n' + tourneySource() + '\n' + v3Source();
+  let src = regionSource() + '\n;let game = null; const cueBall = () => game.balls.find(b => b.n === game.cue); const performance = { now: () => 0 };\n' + guideSource() + '\n' + tourneySource() + '\n' + v3Source() + '\n' + heroSource();
   const pw = [['clamp(power, 0, 1) ** POWER_EXP', 'Math.pow(clamp(power, 0, 1), POWER_EXP)'],
     ['clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1) ** (1 / POWER_EXP)', 'Math.pow(clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1), 1 / POWER_EXP)']];
   for (const [a, b] of pw) { if (!src.includes(a)) throw new Error('ios-golden: sim changed, update the pow rewrite: ' + a); src = src.replace(a, b); }
@@ -66,7 +73,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -663,7 +670,25 @@ ${D.NAT.map(n => `    (${q(n.id)}, ${q(n.name)}, ${q(n.first)}, ${q(n.last)}, ${
       }
     }
   }
-  return { math, career, careerData, jv, v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
+  /* 4m: the hero's shot on every table it has one for (and the ones it breaks straight on), the roll recorded to rest:
+     the samples, the pots (when, where, from), the last motion, the final positions and turns, a sample midway */
+  const heroes = [];
+  {
+    const bits = v => hx(v), arr = a => Array.from(a, bits);
+    for (const [kind, args] of [['8', ['7', null, 'regulation']], ['8', ['7', null, 'generous']], ['8', ['9', null, 'regulation']], ['9', ['9', null, 'regulation']], ['9', ['7', null, 'generous']],
+      ['10', ['9', null, 'generous']], ['straight', ['7', null, 'regulation']], ['rotation', ['9', null, 'generous']], ['heyball', ['heyball', null, 'regulation']],
+      ['snooker', ['snooker', 'compact', 'regulation']], ['snooker', ['snooker', 'full', 'regulation']], ['bumper', ['bumper', 'octagon', 'regulation']], ['bumper', ['bumper', 'rect', 'regulation']],
+      ['carom', ['carom', null, 'regulation']]]) {
+      S.setPockets(args[2]); S.setTable(args[0], args[1]);
+      const d = S.heroSetup(kind), run = S.heroRunStart(d);
+      for (;;) { let go = true; for (let k = 0; k < 6 && go; k++) go = S.stepTable(run.tab); S.heroSample(run); if (!go) { run.done = true; run.S = Math.max(0.4, run.moveT); break; } }
+      const mid = run.pos[Math.floor(run.pos.length / 2)], last = run.pos[run.pos.length - 1];
+      heroes.push({ kind, args, key: S.heroKey(kind), shot: [d.shot.ball, bits(d.shot.angle), bits(d.shot.power)], samples: run.pos.length, mid: arr(mid), last: arr(last),
+        on: Array.from(run.on[run.on.length - 1]), pots: Object.entries(run.pots).map(([i, p]) => [+i, bits(p.t), p.k, arr(p.at)]), moveT: bits(run.moveT), S: bits(run.S),
+        m: run.m.map(arr), rot: Array.from(run.rot[run.rot.length - 1]) });
+    }
+  }
+  return { math, career, careerData, jv, hero: JSON.stringify({ heroes }), v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
 }
 /* tests/ios-check.cjs rebuilds both in memory and requires the committed files to match */
 module.exports = { build, OUT, loadFd };
@@ -677,6 +702,7 @@ if (require.main === module) {
   fs.writeFileSync(path.join(OUT, 'career.json'), b.career);
   fs.writeFileSync(path.join(OUT, 'jv.json'), b.jv);
   fs.writeFileSync(path.join(OUT, 'v3.json'), b.v3);
+  fs.writeFileSync(path.join(OUT, 'hero.json'), b.hero);
   fs.writeFileSync(path.join(__dirname, '..', 'ios', 'FeltSim', 'Sources', 'FeltSim', 'CareerData.swift'), b.careerData);
   const steps = b.cases.reduce((a, c) => a + c.result.steps, 0);
   console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${b.games.length} games (${b.games.reduce((a, g) => a + g.steps.length, 0)} judgements), ${b.cpuCases.length} CPU decisions, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);
