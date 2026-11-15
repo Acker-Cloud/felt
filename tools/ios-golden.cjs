@@ -33,7 +33,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R'];
+    'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -243,10 +243,48 @@ function build() {
       games.push({ name: `${ruleset}/${mode} game ${gi}`, kind, ruleset, mode, race: kind === 'straight' ? 12 : kind === 'rotation' ? 40 : null, table: kind === 'heyball' ? 'heyball' : gi === 2 ? '9' : '7', g0, steps });
     }
   }
+  /* snooker: whole frames (one, and the best of three) by the page's judgeSnooker and chooseSnooker:
+     ball in hand in the D, free balls nominated, put-backs after a miss, every choice at random */
+  for (let gi = 0; gi < 6; gi++) {
+    setT(['snooker', gi % 2 ? 'full' : 'compact', 'regulation']);
+    let g = S.snookerGame(gi < 3 ? 1 : 3, gi % 2);
+    const steps = [], bare = x => JSON.parse(JSON.stringify(x)), g0 = bare(g);
+    for (let k = 0; k < 220 && g.winner === null; k++) {
+      if (g.option) {
+        let choice = g.option.choices[Math.floor(rnd() * g.option.choices.length)];
+        if (choice === 'free') { const f = S.snkFreeBalls(g); choice = f.length ? 'free:' + f[Math.floor(rnd() * f.length)] : 'play'; }
+        const out = S.chooseOption(g, choice);
+        if (!out) break;
+        steps.push({ choice, out: bare(out) }); g = out; continue;
+      }
+      const step = {};
+      if (g.inHand) {
+        for (let t = 0; t < 400; t++) {
+          const x = S.HEAD_X - rnd() * S.D_R, y = S.TW / 2 + (rnd() * 2 - 1) * S.D_R;
+          if (S.canPlace(g, x, y)) { g = S.placeCue(g, x, y); step.place = [x, y]; break; }
+        }
+      }
+      const c = g.balls.find(b => b.n === 0), tg = S.legalTargets(g), on = g.balls.filter(b => b.on && b.n > 0);
+      if (!on.length || !c.on) break;
+      const pool = tg.length && rnd() < 0.85 ? tg : on.map(b => b.n), pick = pool[Math.floor(rnd() * pool.length)], t = g.balls.find(b => b.n === pick);
+      const ang = Math.atan2(t.y - c.y, t.x - c.x) + (rnd() - 0.5) * 0.08, power = g.breakShot ? 0.45 + rnd() * 0.3 : 0.15 + rnd() * 0.55;
+      const shotIn = { angle: ang, power, spin: S.spinOf(rnd() < 0.5 ? 0 : { x: rnd() - 0.5, y: rnd() - 0.5 }) };
+      step.shot = { angle: hx(ang), power: hx(power), spin: { x: hx(shotIn.spin.x), y: hx(shotIn.spin.y) } };
+      const res = S.simulateShot(g.balls, shotIn);
+      step.r = JSON.parse(JSON.stringify({ balls: res.balls, first: res.first, railAfter: res.railAfter, crossed: res.crossed, potted: res.potted, pocketOf: res.pocketOf, rails: res.rails, kick: res.kick, seq: res.seq, over: res.over }));
+      const out = S.judge(g, res);
+      step.out = bare(out);
+      steps.push(step);
+      g = out;
+    }
+    games.push({ name: `snooker/${gi % 2 ? 'full' : 'compact'} ${gi < 3 ? 'frame' : 'best of three'} ${gi}`, kind: 'snooker', ruleset: 'snooker', mode: 'official', race: null,
+      table: 'snooker', shape: gi % 2 ? 'full' : 'compact', g0, steps });
+  }
   /* the CPU: from positions of those games, the page's cpuShot at each level (fixed seeds) and its
      cpuOption wherever a choice is pending; the state is game gi after step k (k -1: its opening) */
   const cpu = [];
   games.forEach((G, gi) => {
+    if (G.kind === 'snooker') return;
     setT([G.table, null, 'regulation']);
     const R0 = S.newGame(G.kind, { rules: { ruleset: G.ruleset, call: { mode: G.mode }, race: G.race === null ? undefined : G.race } }).rules;
     const at = k => Object.assign(JSON.parse(JSON.stringify(k < 0 ? G.g0 : G.steps[k].out)), { rules: R0 });

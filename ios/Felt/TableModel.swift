@@ -58,7 +58,7 @@ final class TableModel {
   /* the status line (the page's say()) and the banner over the table (flash()) */
   private(set) var msg = ""
   private(set) var banner: (title: String, sub: String, until: TimeInterval)?
-  var rulesKind: String? { ["8": "8", "9": "9", "10": "10", "heyball": "heyball"][game.table.2] }
+  var rulesKind: String? { ["8": "8", "9": "9", "10": "10", "heyball": "heyball", "snooker": "snooker"][game.table.2] }
 
   /* the baked table (FeltRender: index.html's paintTable and vignette) for one screen size */
   struct Baked { let image: CGImage; let size: CGSize; let scale: CGFloat }
@@ -136,7 +136,7 @@ final class TableModel {
     if let k = rulesKind {
       g = engine.newGame(k)
       syncBalls()
-      msg = "\(Words.nameOf(0)) to break."
+      msg = k == "snooker" ? "\(Words.dWords(0)). On a red." : "\(Words.nameOf(0)) to break."
       randomOrient(); aimAtNearest()
       return
     }
@@ -260,6 +260,12 @@ final class TableModel {
   private func words(_ gm: Game, _ shooter: Int, chose: (who: Int, kind: String, choice: String)? = nil) {
     guard let v = gm.verdict else { return }
     if gm.winner != nil { msg = Words.overLine(gm); banner = nil; return }
+    if gm.kind == "snooker" {
+      let w = Words.snooker(v, gm, shooter, gm.option?.who ?? gm.turn)
+      msg = gm.option != nil ? "\(w.msg) \(Words.OPT[gm.option!.kind]?["head"] ?? ""): \(Words.nameOf(gm.option!.who)) to choose." : w.msg
+      if let b = w.banner, gm.option == nil { banner = (b.0, b.1, now + b.2) }
+      return
+    }
     let who = gm.turn, lt = engine.legalTargets(gm)
     let ballOn = ["9", "10"].contains(gm.kind) && !lt.isEmpty ? " Ball on: the \(lt[0])." : ""
     let group = v.grouped ? "\(Words.isOf(shooter)) \(gm.groups[shooter] ?? "")." : ""
@@ -292,7 +298,8 @@ final class TableModel {
   func choose(_ choice: String) {
     guard let gm = g, let o = gm.option, let next = engine.chooseOption(gm, choice) else { return }
     g = next; syncBalls()
-    msg = "\(Words.nameOf(o.who)): \(Words.optLabel(o.kind, choice).lowercased()). \(Words.turnOf(next.turn))."
+    let said = choice.hasPrefix("free:") ? "free ball, the \(snkName(Int(choice.dropFirst(5)) ?? 0))" : Words.optLabel(o.kind, choice).lowercased()
+    msg = "\(Words.nameOf(o.who)): \(said). \(Words.turnOf(next.turn))."
     if next.option != nil { words(next, gm.turn, chose: (o.who, o.kind, choice)) }
     randomOrientIfRacked(gm, next)
     aimAtNearest()

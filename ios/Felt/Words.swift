@@ -26,7 +26,39 @@ enum Words {
     "threeBall": ["head": "Three-ball rule", "sub": "Fewer than three balls dropped or stopped past the head string. Shoot from here, or hand it back.", "take": "Shoot it", "pass": "Hand it back"],
     "breakMiss": ["head": "No ball hit on the break", "sub": "The balls are racked again: break yourself, or they break again.", "rebreak": "They break again", "break": "I break"],
     "kitchenSpot": ["head": "Your balls are behind the head string", "sub": "Have the nearest spotted on the foot spot, or play it from here.", "spot": "Spot the nearest", "play": "Play it"],
+    "snkFoul": ["head": "Foul", "sub": "Play from where the balls lie, or make them play again.", "play": "Play it", "again": "Make them play again from here"],
+    "snkMiss": ["head": "Foul and a miss", "sub": "Play from here, or have the balls put back for them to play again.", "play": "Play it", "replace": "Put it back and they play again",
+                "again": "Make them play again from here", "free": "Free ball: nominate"],
+    "snkFree": ["head": "Free ball", "sub": "Snookered after a foul: nominate any colour as the ball on, or play on.", "play": "Play it", "again": "Make them play again from here", "free": "Free ball: nominate"],
+    "snkBlack": ["head": "Re-spotted black", "sub": "Level on points. You won the draw: play the black from the D, or have them play it.", "play": "Play it", "pass": "They play it"],
   ]
+  /* snooker's (page 5k): onWords, ptsWord, dWords, frameHead */
+  static func onWords(_ g: Game) -> String {
+    let S = g.snk!
+    if let f = S.free { return "the free \(snkName(f))" }
+    switch S.on { case .red: return "a red"; case .colour: return "a colour"; case .ball(let b): return "the \(snkName(b))"; case .none: return "nothing" }
+  }
+  static func ptsWord(_ n: Int) -> String { "\(n) point\(n == 1 ? "" : "s")" }
+  static func dWords(_ p: Int) -> String { cpuMode ? "Ball in hand in the D for \(p == 0 ? "you" : "the CPU")" : "\(nameOf(p)): ball in hand in the D" }
+  static func frameHead(_ w: Int) -> String { cpuMode ? (w == 0 ? "You win the frame" : "The CPU wins the frame") : "\(nameOf(w)) wins the frame" }
+  /* snookerWords: the banner and the status line after a shot at snooker */
+  static func snooker(_ v: Verdict, _ g: Game, _ shooter: Int, _ who: Int) -> (msg: String, banner: (String, String, Double)?) {
+    guard let sv = v.snk else { return ("", nil) }
+    if let fo = sv.frameOver {
+      let sc = fo.score, line = fo.forfeit != nil ? "Three misses" : fo.conceded ? "Conceded" : "\(max(sc[0], sc[1]))-\(min(sc[0], sc[1]))"
+      let brk = cpuMode ? (who == 0 ? "You break" : "The CPU breaks") : "\(nameOf(who)) breaks"
+      return ("\(frameHead(fo.winner)), \(line). Frames \(fo.won[0])-\(fo.won[1]). \(brk) frame \(g.snk!.frame).", (frameHead(fo.winner), "\(line), frames \(fo.won[0])-\(fo.won[1])\n\(brk) frame \(g.snk!.frame)", 2.6))
+    }
+    if sv.reblack { return ("Level at \(g.score![0]): the black is re-spotted. \(dWords(who)).", ("Re-spotted black", "Level at \(g.score![0])\n\(dWords(who))", 2.2)) }
+    if let f = v.foul {
+      let head = sv.miss == true ? "Foul and a miss" : "Foul: \(f)", warn = sv.warn == true ? "A third miss loses the frame" : ""
+      let lines = ["\(ptsWord(sv.pen)) to \(nameOf(1 - shooter))", warn, g.inHand != nil ? dWords(who) : ""].filter { !$0.isEmpty }
+      return ("\(head)\(sv.miss == true ? ": \(f)" : ""). \(ptsWord(sv.pen)) to \(nameOf(1 - shooter)). \(warn.isEmpty ? "" : warn + ". ")\(turnOf(who)), on \(onWords(g)).",
+              (head, lines.joined(separator: "\n"), warn.isEmpty ? 1.7 : 2.4))
+    }
+    if who == shooter { return ("\(nameOf(who)): \(ptsWord(sv.pts)), break \(sv.brk). On \(onWords(g)).", nil) }
+    return ("\(sv.ended > 0 ? "Break of \(sv.ended). " : "")\(turnOf(who)), on \(onWords(g)).", (turnOf(who), sv.ended > 0 ? "Break of \(sv.ended)" : "On \(onWords(g))", 1.0))
+  }
   static func optLabel(_ kind: String, _ choice: String) -> String { OPT[kind]?[choice] ?? choice }
 
   static func callWords(_ v: Verdict, _ kind: String, _ shooter: Int, chose: (who: Int, kind: String, choice: String)? = nil) -> String {
@@ -49,6 +81,12 @@ enum Words {
   static func overLine(_ g: Game) -> String {
     guard let w = g.winner, let v = g.verdict, !v.why.isEmpty, v.why != "forced" else { return "Game over." }
     let l = 1 - w, why = v.why, who = { (p: Int) in cpuMode ? (p == 0 ? "You" : "The CPU") : nameOf(p) }
+    if g.kind == "snooker", let S = g.snk {
+      let fo = v.snk?.frameOver, sc = fo?.score ?? g.score!, won = S.won
+      if fo?.conceded == true { return "\(who(l)) conceded\(S.frames > 1 ? ": \(won[w])-\(won[l]) in frames" : "")." }
+      if fo?.forfeit != nil { return "\(who(l)) missed three times with a ball on in full view\(S.frames > 1 ? ": \(won[w])-\(won[l]) in frames" : "")." }
+      return S.frames > 1 ? "\(who(w)) won the match \(won[w])-\(won[l]) in frames." : "\(who(w)) won the frame \(sc[w])-\(sc[l])."
+    }
     func has(_ re: String) -> Bool { why.range(of: re, options: .regularExpression) != nil }
     if has("three fouls") { return "\(who(l)) fouled three times in a row." }
     if has("\\b8\\b") {

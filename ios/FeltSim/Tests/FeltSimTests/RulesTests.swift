@@ -30,8 +30,8 @@ func decodeGame(_ o: [String: Any], rules: RuleSet) -> Game {
   g.inHand = str(o["inHand"]); g.winner = int(o["winner"]); g.shots = int(o["shots"])!; g.dry = int(o["dry"])!
   g.call = decodeCall(o["call"])
   if let op = o["option"] as? [String: Any] { g.option = GOption(kind: op["kind"] as! String, who: int(op["who"])!, choices: op["choices"] as! [String]) }
-  g.pushAvail = o["pushAvail"] as! Bool; g.breaker = int(o["breaker"])!
-  g.calls = (o["calls"] as! [[String: Any]]).map { c in
+  g.pushAvail = o["pushAvail"] as? Bool ?? false; g.breaker = int(o["breaker"])!
+  g.calls = ((o["calls"] as? [[String: Any]]) ?? []).map { c in
     CallRec(p: int(c["p"])!, ball: int(c["ball"]), pocket: int(c["pocket"]), safety: c["safety"] as! Bool, push: c["push"] as! Bool, made: c["made"] as? Bool, auto: c["auto"] as! Bool)
   }
   if let s = o["score"] as? [NSNumber] { g.score = s.map { $0.intValue } }
@@ -39,9 +39,35 @@ func decodeGame(_ o: [String: Any], rules: RuleSet) -> Game {
   if let h = o["high"] as? [NSNumber] { g.high = h.map { $0.intValue } }
   if let r = o["run"] { g.run = int(r) }
   if let v = o["verdict"] as? [String: Any] { g.verdict = decodeVerdict(v) }
+  if g.kind == "snooker" {
+    func on(_ a: Any?) -> SnkOn { if let s = a as? String { return s == "red" ? .red : .colour }; if let n = int(a) { return .ball(n) }; return .none }
+    var S = SnkState()
+    S.on = on(o["on"]); S.brk = int(o["brk"])!; S.frames = int(o["frames"])!; S.won = (o["won"] as! [NSNumber]).map { $0.intValue }; S.frame = int(o["frame"])!
+    S.reblack = o["reblack"] as! Bool; S.free = int(o["free"]); S.replaced = o["replaced"] as! Bool
+    if let m = o["missRun"] as? [String: Any] { S.missRun = (int(m["p"])!, int(m["n"])!) }
+    if let p = o["prev"] as? [String: Any] { S.prev = SnkPrev(balls: (p["balls"] as! [[String: Any]]).map(decodeBall), on: on(p["on"]), free: int(p["free"]), inHand: str(p["inHand"])) }
+    g.snk = S
+    if let op = o["option"] as? [String: Any] { g.option = GOption(kind: op["kind"] as! String, who: int(op["who"])!, choices: op["choices"] as! [String], free: op["free"] as? Bool, miss: op["miss"] as? Bool) }
+  }
   return g
 }
 func decodeVerdict(_ v: [String: Any]) -> Verdict {
+  if v["pen"] != nil {
+    var o = Verdict(foul: str(v["foul"]), keep: v["keep"] as! Bool, win: int(v["win"]), why: v["why"] as! String, potted: (v["potted"] as! [NSNumber]).map { $0.intValue },
+                    scratch: v["scratch"] as! Bool, grouped: false, twoFouls: false,
+                    call: CallOut(ball: nil, pocket: nil, auto: false, need: false, made: nil, safety: false, push: false, missing: nil, extra: [], why: ""),
+                    push: false, option: str(v["option"]), scored: 0, rerack: nil, threeFouls: false, illegalBreak: false)
+    var fo: FrameOver? = nil
+    if let f = v["frameOver"] as? [String: Any] {
+      fo = FrameOver(winner: int(f["winner"])!, score: (f["score"] as! [NSNumber]).map { $0.intValue }, frame: int(f["frame"])!, won: (f["won"] as! [NSNumber]).map { $0.intValue },
+                     conceded: f["conceded"] as! Bool, forfeit: str(f["forfeit"]))
+    }
+    o.snk = SnkVerdict(pen: int(v["pen"])!, pts: int(v["pts"])!, nom: int(v["nom"]), back: (v["back"] as! [NSNumber]).map { $0.intValue }, brk: int(v["brk"])!, ended: int(v["ended"])!,
+                       frameOver: fo, reblack: v["reblack"] as! Bool, miss: v["miss"] as? Bool, misses: int(v["misses"]), warn: v["warn"] as? Bool,
+                       freeBall: v.keys.contains("freeBall") ? .some(int(v["freeBall"])) : nil, nominated: v.keys.contains("nominated") ? .some(int(v["nominated"])) : nil)
+    o.chose = str(v["chose"]); o.chooser = int(v["chooser"])
+    return o
+  }
   let c = v["call"] as! [String: Any]
   let call = CallOut(ball: int(c["ball"]), pocket: int(c["pocket"]), auto: c["auto"] as! Bool, need: c["need"] as! Bool, made: c["made"] as? Bool,
                      safety: c["safety"] as! Bool, push: c["push"] as! Bool, missing: c["missing"] as? Bool, extra: (c["extra"] as! [NSNumber]).map { $0.intValue }, why: c["why"] as! String)
@@ -54,7 +80,8 @@ func decodeVerdict(_ v: [String: Any]) -> Verdict {
 func decodeShot(_ o: [String: Any]) -> RuleShot {
   let im = { (a: Any?) -> [Int: Int] in var m: [Int: Int] = [:]; for (k, v) in (a as? [String: Any]) ?? [:] { m[Int(k)!] = int(v) }; return m }
   return RuleShot(balls: (o["balls"] as! [[String: Any]]).map(decodeBall), first: int(o["first"]), railAfter: o["railAfter"] as! Bool, crossed: o["crossed"] as? Bool,
-                  potted: (o["potted"] as! [NSNumber]).map { $0.intValue }, pocketOf: im(o["pocketOf"]), rails: o["rails"] == nil ? nil : im(o["rails"]), kick: int(o["kick"]))
+                  potted: (o["potted"] as! [NSNumber]).map { $0.intValue }, pocketOf: im(o["pocketOf"]), rails: o["rails"] == nil ? nil : im(o["rails"]), kick: int(o["kick"]),
+                  seq: (o["seq"] as? [NSNumber])?.map { $0.intValue } ?? [], over: (o["over"] as? [NSNumber])?.map { $0.intValue })
 }
 
 /* the differences between the page's game and ours, as paths */
@@ -76,11 +103,41 @@ func diffGame(_ want: [String: Any], _ got: Game) -> [String] {
     default: out.append("\(path): \(String(describing: an)) vs \(String(describing: bn))")
     }
   }
-  eq("g", want, encode(got))
+  var w = want
+  if got.kind == "snooker" { w.removeValue(forKey: "call") }
+  eq("g", w, encode(got))
   return out
 }
+func encodeBall(_ b: GBall) -> [String: Any] { ["n": b.n, "x": b.x, "y": b.y, "vx": b.vx, "vy": b.vy, "on": b.on, "wx": b.wx, "wy": b.wy, "wz": b.wz] }
+func encodeSnooker(_ g: Game) -> [String: Any] {
+  func opt(_ a: Any?) -> Any { a ?? NSNull() }
+  func on(_ o: SnkOn) -> Any { switch o { case .red: return "red"; case .colour: return "colour"; case .ball(let n): return n; case .none: return NSNull() } }
+  let S = g.snk!
+  var o: [String: Any] = ["kind": g.kind, "balls": g.balls.map(encodeBall), "turn": g.turn, "groups": [NSNull(), NSNull()], "open": g.open, "breakShot": g.breakShot,
+    "inHand": opt(g.inHand), "fouls": g.fouls, "winner": opt(g.winner), "shots": g.shots, "dry": g.dry, "on": on(S.on), "score": g.score!, "brk": S.brk, "high": g.high!,
+    "frames": S.frames, "won": S.won, "frame": S.frame, "breaker": g.breaker, "reblack": S.reblack, "free": opt(S.free), "replaced": S.replaced, "option": NSNull(), "verdict": NSNull(),
+    "prev": NSNull(), "missRun": NSNull()]
+  if let p = S.prev { o["prev"] = ["balls": p.balls.map(encodeBall), "on": on(p.on), "free": opt(p.free), "inHand": opt(p.inHand)] as [String: Any] }
+  if let m = S.missRun { o["missRun"] = ["p": m.p, "n": m.n] }
+  if let op = g.option {
+    var d: [String: Any] = ["kind": op.kind, "who": op.who, "choices": op.choices]
+    if let f = op.free { d["free"] = f }; if let m = op.miss { d["miss"] = m }
+    o["option"] = d
+  }
+  if let v = g.verdict, let sv = v.snk {
+    var d: [String: Any] = ["foul": opt(v.foul), "pen": sv.pen, "pts": sv.pts, "keep": v.keep, "nom": opt(sv.nom), "win": opt(v.win), "why": v.why, "potted": v.potted, "back": sv.back,
+      "scratch": v.scratch, "grouped": false, "twoFouls": false, "brk": sv.brk, "ended": sv.ended, "frameOver": NSNull(), "reblack": sv.reblack, "option": opt(v.option)]
+    if let m = sv.miss { d["miss"] = m }; if let m = sv.misses { d["misses"] = m }; if let w = sv.warn { d["warn"] = w }
+    if let f = sv.freeBall { d["freeBall"] = opt(f) }; if let nm = sv.nominated { d["nominated"] = opt(nm) }
+    if let c = v.chose { d["chose"] = c }; if let c = v.chooser { d["chooser"] = c }
+    if let f = sv.frameOver { d["frameOver"] = ["winner": f.winner, "score": f.score, "frame": f.frame, "won": f.won, "conceded": f.conceded, "forfeit": opt(f.forfeit)] as [String: Any] }
+    o["verdict"] = d
+  }
+  return o
+}
 func encode(_ g: Game) -> [String: Any] {
-  func ball(_ b: GBall) -> [String: Any] { ["n": b.n, "x": b.x, "y": b.y, "vx": b.vx, "vy": b.vy, "on": b.on, "wx": b.wx, "wy": b.wy, "wz": b.wz] }
+  if g.kind == "snooker" { return encodeSnooker(g) }
+  func ball(_ b: GBall) -> [String: Any] { encodeBall(b) }
   func opt(_ a: Any?) -> Any { a ?? NSNull() }
   var o: [String: Any] = ["kind": g.kind, "balls": g.balls.map(ball), "turn": g.turn, "groups": g.groups.map { opt($0) }, "open": g.open, "breakShot": g.breakShot,
     "inHand": opt(g.inHand), "fouls": g.fouls, "winner": opt(g.winner), "shots": g.shots, "dry": g.dry, "pushAvail": g.pushAvail, "breaker": g.breaker,
@@ -116,12 +173,12 @@ func encode(_ g: Game) -> [String: Any] {
   func game(_ i: Int) {
     let G = Self.games[i], name = G["name"] as! String, kind = G["kind"] as! String
     let sim = Sim()
-    sim.setPockets("regulation"); sim.setTable(G["table"] as! String)
+    sim.setPockets("regulation"); sim.setTable(G["table"] as! String, G["shape"] as? String)
     let E = RulesEngine(sim: sim)
     var cfg = CallConfig(); cfg.mode = G["mode"] as! String
     let rules = makeRules(kind, ruleset: G["ruleset"] as? String, call: cfg, race: int(G["race"]))
     /* the opening game: the page's newGame, ours made the same way */
-    let fresh = E.newGame(kind, rules: rules)
+    let fresh = kind == "snooker" ? E.snookerGame(frames: int((G["g0"] as! [String: Any])["frames"])!, first: int((G["g0"] as! [String: Any])["breaker"])!) : E.newGame(kind, rules: rules)
     let d0 = diffGame(G["g0"] as! [String: Any], fresh)
     #expect(d0.isEmpty, "\(name): newGame: \(d0.prefix(5))")
     var prev = G["g0"] as! [String: Any]
@@ -148,7 +205,8 @@ func encode(_ g: Game) -> [String: Any] {
 /* the comparison itself: a game out with one field changed must differ, so a pass above means something */
 @Suite struct RulesCompareTests {
   @Test func diffCatchesChanges() {
-    let G = RulesTests.games.max { ($0["steps"] as! [Any]).count < ($1["steps"] as! [Any]).count }!, kind = G["kind"] as! String
+    let pool = RulesTests.games.filter { $0["kind"] as! String != "snooker" }
+    let G = pool.max { ($0["steps"] as! [Any]).count < ($1["steps"] as! [Any]).count }!, kind = G["kind"] as! String
     let sim = Sim(); sim.setTable(G["table"] as! String)
     var cfg = CallConfig(); cfg.mode = G["mode"] as! String
     let rules = makeRules(kind, ruleset: G["ruleset"] as? String, call: cfg)
@@ -164,6 +222,13 @@ func encode(_ g: Game) -> [String: Any] {
     for (label, x) in [("turn", a), ("one ulp of x", b), ("why", c), ("missing absent vs present", d), ("inHand", e)] {
       #expect(!diffGame(want, x).isEmpty, "\(label) must show as a difference")
     }
+    /* and snooker's own parts */
+    let S = RulesTests.games.first { $0["kind"] as! String == "snooker" }!, ss = S["steps"] as! [[String: Any]]
+    let sw = ss[ss.count / 2]["out"] as! [String: Any], sg = decodeGame(sw, rules: makeRules("snooker"))
+    #expect(diffGame(sw, sg).isEmpty, "a decoded snooker game re-encodes to itself")
+    var f = sg; f.snk!.brk += 1
+    var h = sg; h.snk!.on = h.snk!.on == .red ? .colour : .red
+    for (label, x) in [("the break", f), ("the ball on", h)] { #expect(!diffGame(sw, x).isEmpty, "snooker \(label) must show as a difference") }
   }
 }
 
@@ -173,7 +238,7 @@ func encode(_ g: Game) -> [String: Any] {
   @Test func fromResult() {
     var checked = 0
     for G in RulesTests.games {
-      let sim = Sim(); sim.setPockets("regulation"); sim.setTable(G["table"] as! String)
+      let sim = Sim(); sim.setPockets("regulation"); sim.setTable(G["table"] as! String, G["shape"] as? String)
       var prev = G["g0"] as! [String: Any]
       for s in (G["steps"] as! [[String: Any]]).prefix(6) {
         defer { prev = s["out"] as! [String: Any] }

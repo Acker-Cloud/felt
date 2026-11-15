@@ -22,7 +22,7 @@ struct Home: View {
           }
           .pickerStyle(.segmented)
           .accessibilityIdentifier("opponent")
-        } header: { Text("Opponent") } footer: { Text("The CPU plays 8-ball, 9-ball, 10-ball and Chinese 8-ball. Snooker and three-cushion are practice for now.") }
+        } header: { Text("Opponent") } footer: { Text("The CPU plays 8-ball, 9-ball, 10-ball and Chinese 8-ball. Snooker is two players for now, three-cushion practice.") }
         Section {
           ForEach(TableGame.allCases) { g in
             Button { playing = g } label: {
@@ -217,8 +217,10 @@ struct Overlays: View {
         Text(Words.OPT[o.kind]?["head"] ?? o.kind).font(.headline)
         Text("\(Words.nameOf(o.who)): \(Words.OPT[o.kind]?["sub"] ?? "")").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
         if model.cpuTurn { Text("CPU choosing").font(.footnote).foregroundStyle(.secondary) }
-        else { ForEach(o.choices, id: \.self) { c in
-          Button { model.choose(c) } label: { Text(Words.optLabel(o.kind, c)).font(.body.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44) }
+        else { ForEach(o.choices.flatMap { c in c == "free" ? model.engine.snkFreeBalls(g).map { "free:\($0)" } : [c] }, id: \.self) { c in
+          Button { model.choose(c) } label: {
+            Text(c.hasPrefix("free:") ? "Free ball: \(snkName(Int(c.dropFirst(5))!))" : Words.optLabel(o.kind, c)).font(.body.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+          }
             .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
             .accessibilityIdentifier("choice-\(c)")
         } }

@@ -84,7 +84,12 @@ public struct ShotCall: Equatable, Sendable {
   public var ball: Int? = nil, pocket: Int? = nil, safety = false, push = false, bank = false, kick = false, combo = false, auto = false
   public init() {}
 }
-public struct GOption: Equatable, Sendable { public var kind: String, who: Int, choices: [String] }
+public struct GOption: Equatable, Sendable {
+  public var kind: String, who: Int, choices: [String]
+  /* snooker's foul options carry whether a free ball and a put-back are on */
+  public var free: Bool? = nil, miss: Bool? = nil
+  public init(kind: String, who: Int, choices: [String], free: Bool? = nil, miss: Bool? = nil) { self.kind = kind; self.who = who; self.choices = choices; self.free = free; self.miss = miss }
+}
 public struct CallRec: Equatable, Sendable { public var p: Int, ball: Int?, pocket: Int?, safety: Bool, push: Bool, made: Bool?, auto: Bool }
 public struct CallOut: Equatable, Sendable {
   public var ball: Int?, pocket: Int?, auto: Bool, need: Bool, made: Bool?, safety: Bool, push: Bool, missing: Bool?, extra: [Int], why: String
@@ -97,12 +102,32 @@ public struct Verdict: Equatable, Sendable {
   public var foul: String?, keep: Bool, win: Int?, why: String, potted: [Int], scratch: Bool, grouped: Bool, twoFouls: Bool
   public var call: CallOut, push: Bool, option: String?, scored: Int, rerack: String?, threeFouls: Bool, illegalBreak: Bool
   public var off: [Int]? = nil, chose: String? = nil, chooser: Int? = nil
+  /* snooker's (sim 1j); nil on the pocket games */
+  public var snk: SnkVerdict? = nil
+}
+public struct SnkVerdict: Equatable, Sendable {
+  public var pen: Int, pts: Int, nom: Int?, back: [Int], brk: Int, ended: Int, frameOver: FrameOver?, reblack: Bool
+  public var miss: Bool?, misses: Int?, warn: Bool?, freeBall: Int??, nominated: Int?? = nil
+}
+public struct FrameOver: Equatable, Sendable { public var winner: Int, score: [Int], frame: Int, won: [Int], conceded: Bool, forfeit: String? }
+/* snooker's ball on: 'red', 'colour', a colour's number, or none */
+public enum SnkOn: Equatable, Sendable { case red, colour, ball(Int), none }
+public struct SnkPrev: Equatable, Sendable { public var balls: [GBall], on: SnkOn, free: Int?, inHand: String? }
+public struct SnkState: Equatable, Sendable {
+  public var on: SnkOn = .red, brk = 0, frames = 1, won = [0, 0], frame = 1, reblack = false, free: Int? = nil, prev: SnkPrev? = nil
+  public var missRun: (p: Int, n: Int)? = nil, replaced = false
+  public static func == (a: SnkState, b: SnkState) -> Bool {
+    a.on == b.on && a.brk == b.brk && a.frames == b.frames && a.won == b.won && a.frame == b.frame && a.reblack == b.reblack && a.free == b.free && a.prev == b.prev
+      && a.missRun?.p == b.missRun?.p && a.missRun?.n == b.missRun?.n && a.replaced == b.replaced
+  }
 }
 /* the shot's facts the rules read (resultOf) */
 public struct RuleShot: Sendable {
   public var balls: [GBall], first: Int?, railAfter: Bool, crossed: Bool?, potted: [Int], pocketOf: [Int: Int], rails: [Int: Int]?, kick: Int?
-  public init(balls: [GBall], first: Int?, railAfter: Bool, crossed: Bool?, potted: [Int], pocketOf: [Int: Int], rails: [Int: Int]?, kick: Int?) {
+  public var seq: [Int] = [], over: [Int]? = nil
+  public init(balls: [GBall], first: Int?, railAfter: Bool, crossed: Bool?, potted: [Int], pocketOf: [Int: Int], rails: [Int: Int]?, kick: Int?, seq: [Int] = [], over: [Int]? = nil) {
     self.balls = balls; self.first = first; self.railAfter = railAfter; self.crossed = crossed; self.potted = potted; self.pocketOf = pocketOf; self.rails = rails; self.kick = kick
+    self.seq = seq; self.over = over
   }
 }
 
@@ -110,7 +135,7 @@ extension RuleShot {
   /* the rules' view of a finished shot (resultOf's fields the judge reads) */
   public init(_ r: ShotResult) {
     self.init(balls: r.balls.map { b in var g = GBall(n: b.n, x: b.x, y: b.y); g.vx = b.vx; g.vy = b.vy; g.on = b.on; g.wx = b.wx; g.wy = b.wy; g.wz = b.wz; return g },
-              first: r.first, railAfter: r.railAfter, crossed: r.crossed, potted: r.potted, pocketOf: r.pocketOf, rails: r.rails, kick: r.kick)
+              first: r.first, railAfter: r.railAfter, crossed: r.crossed, potted: r.potted, pocketOf: r.pocketOf, rails: r.rails, kick: r.kick, seq: r.seq, over: r.over)
   }
 }
 
@@ -120,6 +145,8 @@ public struct Game: Sendable {
   public var pushAvail = false, breaker = 0, calls: [CallRec] = []
   public var score: [Int]? = nil, race: Int? = nil, high: [Int]? = nil, run: Int? = nil
   public var mode: String? = nil
+  /* snooker's frame (sim 1j): nil on the pocket games */
+  public var snk: SnkState? = nil
   func ball(_ n: Int) -> GBall? { balls.first { $0.n == n } }
 }
 
@@ -129,6 +156,7 @@ public final class RulesEngine {
   public init(sim: Sim) { self.sim = sim }
 
   public func newGame(_ kind: String, rules: RuleSet? = nil) -> Game {
+    if kind == "snooker" { return snookerGame() }
     let R = rules.flatMap { $0.made && $0.game == kind ? $0 : nil } ?? makeRules(kind)
     let np = R.players
     let balls = sim.rack(kind).map { b -> GBall in GBall(n: b.n, x: b.x, y: b.y) }
@@ -187,6 +215,7 @@ public final class RulesEngine {
   func breakLegal(_ R: RuleSet, _ r: RuleShot, _ pot: [Int]) -> Bool { R.breakRails == 0 || !pot.isEmpty || railBalls(r) >= Double(R.breakRails) }
 
   public func legalTargets(_ g: Game) -> [Int] {
+    if g.kind == "snooker" { return snookerOn(g) }
     let on = onTable(g)
     if g.mode != nil || g.kind == "straight" { return on }
     if !is8(g.kind) { return Array(on.prefix(1)) }
@@ -215,6 +244,7 @@ public final class RulesEngine {
     let R = sim.BALL_R
     if !(x >= R && x <= sim.TL - R && y >= R && y <= sim.TW - R) { return false }
     if g.inHand == "kitchen" && x > sim.HEAD_X { return false }
+    if g.inHand == "D" && !inD(x, y) { return false }
     if sim.CUSH.contains(where: { sim.segGap($0[0], $0[1], $0[2], $0[3], x, y) < R - 1e-9 }) { return false }
     if sim.POCKET_AIM.contains(where: { M.hypot($0[0] - x, $0[1] - y) < 2 * R }) { return false }
     return g.balls.allSatisfy { $0.n == 0 || !$0.on || M.hypot($0.x - x, $0.y - y) >= 2 * R }
@@ -310,6 +340,7 @@ public final class RulesEngine {
 
   public func judge(_ g: Game, _ r: RuleShot) -> Game {
     switch g.kind {
+    case "snooker": return judgeSnooker(g, r)
     case "9", "10": return judgeLowest(g, r)
     case "rotation": return judgeRotation(g, r)
     case "straight": return judgeStraight(g, r)
@@ -496,6 +527,7 @@ public final class RulesEngine {
 
   /* a pending choice made: a new game, or nil when it is not on offer */
   public func chooseOption(_ g: Game, _ choice: String) -> Game? {
+    if g.kind == "snooker" { return chooseSnooker(g, choice) }
     guard let o = g.option, o.choices.contains(choice) else { return nil }
     var n = g
     n.option = nil; n.call = nil
