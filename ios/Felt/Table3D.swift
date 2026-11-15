@@ -138,7 +138,11 @@ struct BallU {
   var texP: MTLRenderPipelineState!, meshP: MTLRenderPipelineState!, shadowP: MTLRenderPipelineState!, ballP: MTLRenderPipelineState!
   var depthOn: MTLDepthStencilState!, depthRead: MTLDepthStencilState!
   var sampler: MTLSamplerState!
-  var geo: (key: String, tex: MTLTexture, planes: MTLBuffer, nBed: Int, nTop: Int, mesh: MTLBuffer, nFaces: Int, nPosts: Int, bounce: [Double])?
+  var geo: (key: String, tex: MTLTexture, planes: MTLBuffer, nBed: Int, nTop: Int, mesh: MTLBuffer, nFaces: Int, nPosts: Int, bounce: [Double], outline: [[Double]])?
+  /* the room (v3RoomTex, v3RoomGeo, v3FloorTex): painted off the main thread once, the floor's pools per table */
+  var room: (key: String, wall: MTLTexture, floor: MTLTexture, wallB: MTLBuffer, floorB: MTLBuffer, lampB: MTLBuffer, G: V3Room.Geo)?
+  var roomBusy = false
+  var wrapSampler: MTLSamplerState!
   var numTex: MTLTexture!
   let quad: [SIMD2<Float>] = [[-1, -1], [1, -1], [-1, 1], [1, 1]]
   /* V3's seat and moves (v3Update, v3Go): the pivot and yaw, what the seat was set for, the overview and a move */
@@ -235,18 +239,40 @@ struct BallU {
     depthRead = device.makeDepthStencilState(descriptor: dd)
     let sd = MTLSamplerDescriptor(); sd.minFilter = .linear; sd.magFilter = .linear; sd.mipFilter = .linear; sd.sAddressMode = .clampToEdge; sd.tAddressMode = .clampToEdge; sd.maxAnisotropy = 8
     sampler = device.makeSamplerState(descriptor: sd)
+    sd.sAddressMode = .repeat
+    wrapSampler = device.makeSamplerState(descriptor: sd)
     numTex = texture(V3Art.numbers())
   }
   func texture(_ img: CGImage) -> MTLTexture? {
     let l = MTKTextureLoader(device: device)
     return try? l.newTexture(cgImage: img, options: [.generateMipmaps: true, .SRGB: false, .textureUsage: MTLTextureUsage.shaderRead.rawValue, .textureStorageMode: MTLStorageMode.private.rawValue])
   }
-  func geometry() -> (key: String, tex: MTLTexture, planes: MTLBuffer, nBed: Int, nTop: Int, mesh: MTLBuffer, nFaces: Int, nPosts: Int, bounce: [Double])? {
+  func roomFor(_ G: (key: String, tex: MTLTexture, planes: MTLBuffer, nBed: Int, nTop: Int, mesh: MTLBuffer, nFaces: Int, nPosts: Int, bounce: [Double], outline: [[Double]])) {
+    if room?.key == G.key || roomBusy { return }
+    roomBusy = true
+    let outline = G.outline, key = G.key, spec = model.spec
+    Task.detached(priority: .userInitiated) {
+      let sim = Sim(); TableModel.setUp(sim, spec)
+      let geo = V3Room.geo(sim, outline: outline, lampH: BallPainter.LAMP_H)
+      let wall = V3Room.paintWall(1024, 224), floor = V3Room.floorTex(V3Room.paintFloor(1024), sim, geo)
+      /* the wall is all blur: kept small (11 cm a texel at the wall, always magnified on screen) */
+      let small = Canvas2D(width: 512, height: 112); small.drawImage(wall, 0, 0, 512, 112)
+      let smallImg = small.image()
+      await MainActor.run {
+        self.roomBusy = false
+        guard let wt = self.texture(smallImg), let ft = self.texture(floor),
+              let wb = self.device.makeBuffer(bytes: geo.wall, length: geo.wall.count * 4), let fb = self.device.makeBuffer(bytes: geo.floor, length: geo.floor.count * 4),
+              let lb = self.device.makeBuffer(bytes: geo.lamp, length: geo.lamp.count * 4) else { return }
+        self.room = (key, wt, ft, wb, fb, lb, geo)
+      }
+    }
+  }
+  func geometry() -> (key: String, tex: MTLTexture, planes: MTLBuffer, nBed: Int, nTop: Int, mesh: MTLBuffer, nFaces: Int, nPosts: Int, bounce: [Double], outline: [[Double]])? {
     let s = model.sim, d = model.dress, key = "\(s.TL)|\(s.TW)|\(s.POCKET_R)|\(s.BALL_R)|\(d)"
     if let g = geo, g.key == key { return g }
     let G = V3Geo.build(s, look: TableLook.of(d))
     guard let tex = texture(G.image), let pb = device.makeBuffer(bytes: G.planes, length: G.planes.count * 4), let mb = device.makeBuffer(bytes: G.mesh.isEmpty ? [0] : G.mesh, length: max(4, G.mesh.count * 4)) else { return nil }
-    geo = (key, tex, pb, G.nBed, G.nTop, mb, G.nFaces, G.nPosts, G.bounce)
+    geo = (key, tex, pb, G.nBed, G.nTop, mb, G.nFaces, G.nPosts, G.bounce, G.outline)
     return geo
   }
 
@@ -316,6 +342,19 @@ struct BallU {
       var u = MeshU(L: f3(lamp), E: f3(C.Er), lit: 0, alpha: 1)
       e.setFragmentBytes(&u, length: MemoryLayout<MeshU>.stride, index: 0); e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: G.nFaces)
       if G.nPosts > 0 { u.lit = 1; e.setFragmentBytes(&u, length: MemoryLayout<MeshU>.stride, index: 0); e.drawPrimitives(type: .triangle, vertexStart: G.nFaces, vertexCount: G.nPosts) }
+    }
+    /* the room round it: the wall and the floor, opaque, after the table's solid parts, no depth writes */
+    roomFor(G)
+    if let Rm = room, Rm.key == G.key {
+      e.setDepthStencilState(depthRead)
+      e.setRenderPipelineState(texP)
+      var r0: Float = 0
+      e.setFragmentBytes(&r0, length: 4, index: 0); e.setVertexBytes(&Mv, length: 64, index: 1)
+      e.setVertexBuffer(Rm.wallB, offset: 0, index: 0); e.setFragmentTexture(Rm.wall, index: 0); e.setFragmentSamplerState(wrapSampler, index: 0)
+      e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: Rm.G.nWall)
+      e.setVertexBuffer(Rm.floorB, offset: 0, index: 0); e.setFragmentTexture(Rm.floor, index: 0); e.setFragmentSamplerState(sampler, index: 0)
+      e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: Rm.G.nFloor)
+      e.setDepthStencilState(depthOn)
     }
     /* the balls on the table, far to near */
     let balls = (model.rolling?.balls ?? model.balls).filter { $0.on }
@@ -408,6 +447,17 @@ struct BallU {
       e.setVertexBuffer(cb.b, offset: 0, index: 0); e.setVertexBytes(&mv, length: MemoryLayout<MeshV>.stride, index: 1)
       e.setFragmentBytes(&u, length: MemoryLayout<MeshU>.stride, index: 0)
       e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: cb.n)
+    }
+    /* this table's lamp, faded out as the camera rises to it (so it never hangs between the camera and the bed) */
+    if let Rm = room, Rm.key == G.key {
+      let u = min(1, max(0, (C.E[2] - (Rm.G.lampZ - 0.3)) / 0.28)), a = 1 - u * u * (3 - 2 * u)
+      if a > 0.01 {
+        e.setRenderPipelineState(meshP)
+        var mv = MeshV(M: M, W: matrix_identity_float4x4), lu = MeshU(L: f3(lamp), E: f3(C.Er), lit: 0, alpha: Float(a))
+        e.setVertexBuffer(Rm.lampB, offset: 0, index: 0); e.setVertexBytes(&mv, length: MemoryLayout<MeshV>.stride, index: 1)
+        e.setFragmentBytes(&lu, length: MemoryLayout<MeshU>.stride, index: 0)
+        e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: Rm.G.nLamp)
+      }
     }
     e.endEncoding()
     cb.present(drawable)

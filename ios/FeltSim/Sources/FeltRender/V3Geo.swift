@@ -9,6 +9,7 @@ import Foundation
 import FeltSim
 
 public struct V3Geo {
+  public let outline: [[Double]]
   public let image: CGImage, planes: [Float], nBed: Int, nTop: Int, mesh: [Float], nFaces: Int, nPosts: Int, h: Double, co: Double, bounce: [Double]
   public static let FLOOR = 0.76
 
@@ -119,7 +120,7 @@ public struct V3Geo {
       }
     }
     let b = look.cloth.bounce.split(separator: ",").map { (Double($0.trimmingCharacters(in: .whitespaces)) ?? 0) / 255 }
-    return V3Geo(image: image, planes: bed + ring, nBed: bed.count / 5, nTop: ring.count / 5, mesh: faces + posts, nFaces: faces.count / 10, nPosts: posts.count / 10, h: h, co: co, bounce: b)
+    return V3Geo(outline: out, image: image, planes: bed + ring, nBed: bed.count / 5, nTop: ring.count / 5, mesh: faces + posts, nFaces: faces.count / 10, nPosts: posts.count / 10, h: h, co: co, bounce: b)
   }
 }
 #endif
