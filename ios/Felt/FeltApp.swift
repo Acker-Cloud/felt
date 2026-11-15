@@ -174,7 +174,7 @@ struct TableScreen: View {
     layout {
       GeometryReader { tg in
         TimelineView(.animation(paused: model.paused)) { tl in
-          TableCanvas(model: model, look: Look.of(model.dress, game: model.game))
+          Group { if model.view3d { Table3DView(model: model) } else { TableCanvas(model: model, look: Look.of(model.dress, game: model.game)) } }
             .onChange(of: tl.date) { _, d in model.tick(d.timeIntervalSinceReferenceDate) }
         }
         .overlay { FlashBanner(model: model, size: tg.size) }
@@ -234,6 +234,7 @@ struct TableScreen: View {
       }
     }
     guard var g = gest else { return }
+    if model.view3d && !placing { drag3d(&g, b, t); gest = g; return }
     g.far = max(g.far, JSMath.hypot(Double(b.x - g.p0.x), Double(b.y - g.p0.y)))
     if placing, let o = g.grab {
       if !g.moving && g.far > AimFeel.GRAB_SLOP { g.moving = true }
@@ -251,6 +252,25 @@ struct TableScreen: View {
     if g.sweep && !g.maybeTap(t) { g.shown = true; turnTo(&g, b, t, m, c) }
     gest = g
   }
+  /* v3Drag: across turns the aim (rate by finger speed, 0.02 to 0.3 deg a point), up and down tilts (0.25 deg a point) */
+  private func drag3d(_ g: inout AimGesture, _ b: CGPoint, _ t: Double) {
+    g.far = max(g.far, JSMath.hypot(Double(b.x - g.p0.x), Double(b.y - g.p0.y)))
+    let dv = JSMath.hypot(Double(b.x - g.last.x), Double(b.y - g.last.y))
+    if dv > 0 { g.v = AimFeel.fingerSpeed(g.v, dv, t - g.tLast); g.last = b; g.tLast = t }
+    if !g.sweep && !g.held {
+      if g.far <= AimFeel.TAP_SLOP { return }
+      if abs(b.x - g.p0.x) >= abs(b.y - g.p0.y) { g.sweep = true } else { g.held = true }
+      g.shown = true
+    }
+    if g.sweep, model.rolling == nil {
+      let slow = 0.02 * Double.pi / 180, fast = 0.3 * Double.pi / 180
+      model.aim += Double(b.x - g.at.x) * (slow + (fast - slow) * AimFeel.smooth01(((g.v ?? 0) - AimFeel.V_SLOW) / (AimFeel.V_FAST - AimFeel.V_SLOW)))
+    } else if g.held {
+      model.v3Pitch = min(V3.PITCH[1], max(V3.PITCH[0], model.v3Pitch + Double(b.y - g.at.y) * 0.25))
+      UserDefaults.standard.set(model.v3Pitch, forKey: "felt.settings.viewPitch")
+    }
+    g.at = b
+  }
   /* the sweep from where it was last applied to b */
   private func turnTo(_ g: inout AimGesture, _ b: CGPoint, _ t: Double, _ m: Mapper, _ c: Ball) {
     if b != g.at {
@@ -264,6 +284,13 @@ struct TableScreen: View {
   private func touchEnd(_ v: DragGesture.Value, _ size: CGSize) {
     guard var g = gest, !placing, !picking, model.rolling == nil, let c = model.cue else { return }
     let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW), t = v.time.timeIntervalSinceReferenceDate * 1000
+    /* in 3D a tap aims at the table point under it (v3Table) */
+    if model.view3d {
+      if !g.sweep && !g.held, let (C, box) = model.v3Cam, let p = V3.unproj(C, box, Double(g.p0.x), Double(g.p0.y), s.BALL_R), JSMath.hypot(p[0] - c.x, p[1] - c.y) > s.BALL_R {
+        model.aim = atan2(p[1] - c.y, p[0] - c.x)
+      }
+      return
+    }
     if !g.sweep || g.maybeTap(t) {
       let p = g.p0, (x, y) = m.table(p), reach = max(14, 1.3 * s.BALL_R * m.k)
       var best: Ball? = nil, bd = reach

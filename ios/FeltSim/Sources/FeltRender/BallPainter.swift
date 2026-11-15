@@ -59,6 +59,10 @@ public final class BallPainter {
   public let set: BallSet, bounce: String, dpr: Double, portrait: Bool
   public let lowRim: Bool, rimAll: Bool, clothBase: [Double]
   struct Paint { let base: String; let caps: [(Int, Double, String)] }
+  /* a ball's paint (PAINT[n]: its base and caps), for the 3D view's ball shader */
+  public func paintOf(_ n: Int) -> (base: String, caps: [(Int, Double, String)]) { let p = paint[n] ?? paint[0]!; return (p.base, p.caps) }
+  /* the 3D view's light rim: the 8 (snooker's black) on a rimmed cloth, or a ball close to the cloth's colour */
+  public func rim3(_ n: Int) -> Bool { ((n == 8 || n == 62) && rimAll) || lowBall(n) }
   private var paint: [Int: Paint] = [:]
   struct Sprites { let r: Double, shade: CGImage, c: Double, cast: CGImage, ao: CGImage, sc: Double, castW: Double, shadeW: Double }
   private var sprites: [Int: Sprites] = [:]

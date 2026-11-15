@@ -21,8 +21,8 @@ public enum V3 {
   public struct Orbit: Sendable { public var T: [Double], yaw, pitch, dist: Double
     public init(T: [Double], yaw: Double, pitch: Double, dist: Double) { self.T = T; self.yaw = yaw; self.pitch = pitch; self.dist = dist } }
 
-  static func sub(_ a: [Double], _ b: [Double]) -> [Double] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
-  static func dot(_ a: [Double], _ b: [Double]) -> Double { a[0] * b[0] + a[1] * b[1] + a[2] * b[2] }
+  public static func sub(_ a: [Double], _ b: [Double]) -> [Double] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
+  public static func dot(_ a: [Double], _ b: [Double]) -> Double { a[0] * b[0] + a[1] * b[1] + a[2] * b[2] }
   static func cross(_ a: [Double], _ b: [Double]) -> [Double] { [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] }
   static func norm(_ a: [Double]) -> [Double] { var l = M.hypot(a[0], a[1], a[2]); if l == 0 { l = 1 }; return [a[0] / l, a[1] / l, a[2] / l] }
   static func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { Swift.max(lo, Swift.min(hi, v)) }

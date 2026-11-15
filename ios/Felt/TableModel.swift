@@ -147,6 +147,11 @@ final class TableModel {
   private(set) var tmatch: TMatch?
   /* what the table, the cue and the balls wear (4l) */
   @ObservationIgnored var dress: Dress = .standard
+  /* the 3D view (4o): on, its pitch and distance (the player's, kept in the settings), the camera last drawn */
+  var view3d = Prefs.view == "3d"
+  @ObservationIgnored var v3Pitch = Prefs.viewPitch
+  @ObservationIgnored var v3Dist = Prefs.viewDist
+  @ObservationIgnored var v3Cam: (V3.Cam, V3.Box)? = nil
   @ObservationIgnored var onReport: ((Int, Int, Int, Bool) -> Void)?
   /* the handoff: the player the device is passed to (the breaker at a rack's start), until they are ready */
   var handoff: (p: Int, first: Bool)? = nil

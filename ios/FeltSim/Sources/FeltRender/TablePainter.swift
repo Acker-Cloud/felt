@@ -138,6 +138,8 @@ public final class TablePainter {
   var TL: Double { s.TL }
   var TW: Double { s.TW }
 
+  /* heroNoPosts: bumper pool's posts left out (the 3D view and the hero stand their own) */
+  public var noPosts = false
   public init(sim: Sim, view: TableView2D, dpr: Double, rail: Double, look: TableLook, pageColor: String = "rgb(15, 15, 16)") {
     s = sim; self.view = view; self.dpr = dpr; RAIL = rail; self.look = look; self.pageColor = pageColor
   }
@@ -686,6 +688,7 @@ public final class TablePainter {
       sh.addColorStop(0, "rgba(255,240,220,0)"); sh.addColorStop(0.6, "rgba(255,240,220,0)"); sh.addColorStop(1, "rgba(255,240,220,0.18)")
       g.strokeStyle = .gradient(sh); g.lineWidth = max(px, 0.0012); circle(g, P[0], P[1], r - g.lineWidth / 2); g.stroke()
     }
+    if noPosts { return }
     if s.BED_LINES != nil { paintMushrooms(g, L, px) } else { paintPosts(g, L, px) }
   }
   /* the rubbers' lit noses: shaded by how squarely each faces the lamp, a crease, the bed line, the mitres, the seam */
