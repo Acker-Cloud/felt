@@ -274,3 +274,32 @@ extension CareerEngine {
             "prize": a["prize"]!, "rk": a["rk"]!, "tier": Self.c("TIERS")[t]!["name"]!, "moneyRank": a["ml"]!.truthy ? a["ml"]! : 0, "fr": me("fr"), "targets": .arr(targets)]
   }
 }
+
+/* Career.bracket(id) and Career.standings(id): an event's draw, every match (its round, day and outcome), the final
+   placings once it is done; and the round robin's or the groups' tables */
+extension CareerEngine {
+  public struct BracketMatch: Sendable { public let m: Int, round: String, day: Int, o: CareerLib.Outcome }
+  public struct BracketView: Sendable { public let drawn: Bool, week: Int, field: [Int], matches: [BracketMatch], placings: [[Int]]? }
+  public func bracket(_ id: String) -> BracketView? {
+    guard let ev = evById(id) else { return nil }
+    guard let e = S["es"]![id], e["f"] != nil else { return BracketView(drawn: false, week: weekOf(ev["start"]!.i), field: [], matches: [], placings: nil) }
+    let T = tplOf(ev, e), c = ctxOf(T, e)
+    let f = e["f"]!.a.map { $0.i }
+    return BracketView(drawn: true, week: weekOf(ev["start"]!.i), field: f,
+                       matches: T.M.indices.map { BracketMatch(m: $0, round: roundName(ev, T, $0), day: dayOfMatch(ev, T, $0), o: CareerLib.outcome(c, $0)) },
+                       placings: truthy(e["done"]) ? CareerLib.placings(T, f, resOf(e)) : nil)
+  }
+  public func standings(_ id: String) -> [(group: String?, rows: [CareerLib.Row])]? {
+    guard let ev = evById(id), let e = S["es"]![id], e["f"] != nil else { return nil }
+    let T = tplOf(ev, e), c = ctxOf(T, e), f = e["f"]!.a.map { $0.i }
+    let done = { (ms: [Int]) in ms.map { CareerLib.outcome(c, $0) }.filter { $0.st == "done" } }
+    let ix = { (p: Int) in f.firstIndex(of: p) ?? -1 }
+    if let G = T.groups, let gm = T.gm {
+      let L = Array("ABCDEFGH")
+      return G.enumerated().map { gi, g in (String(L[gi]), CareerLib.standings(g.filter { $0 < f.count }.map { f[$0] }, done(gm[gi]), ix)) }
+    }
+    if T.fmt == "rr" || T.fmt == "league" { return [(nil, CareerLib.standings(f, done(Array(T.M.indices)), ix))] }
+    return nil
+  }
+  public func weekOfDay(_ day: Int) -> Int { weekOf(day) }
+}

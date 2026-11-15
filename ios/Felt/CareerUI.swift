@@ -336,6 +336,110 @@ struct CareerOffersSection: View {
 /* PAGES.hub's groups: Season (Calendar, Rankings, Tour Card), You (Stats and Records, Sponsors and Offers, Shop, Practice
    Drills, News), Career (Switch Career, Retire), each row its name and the page's line. The page's Bracket and
    Standings, Rivals and Options rows are not here: those pages are not ported yet. */
+/* PAGES.bracket: with no event, the season's entered events (newest first: the week and format, Under way, Over or
+   Not drawn); with one, Final Placings (the top eight, and you after them), the standings (each group, or the round
+   robin's table: W-L), Your Matches, then every round (each side, the winner bold, you in the accent; the score or the
+   week) */
+struct CareerBracket: View {
+  @Bindable var store: CareerStore
+  var id: String? = nil
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, S = E.S, H = CareerEngine.HUMAN
+    if let id {
+      let ev = S["cal"]!.a.first { $0["id"]!.s == id }, b = E.bracket(id)
+      List {
+        if let ev {
+          Section {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(CareerStore.T("FORMATS")[ev["fmt"]!.s]?.str ?? "").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+              /* a non-breaking hyphen keeps "9-Ball" on one line */
+              Text(ev["name"]!.s.replacingOccurrences(of: "-", with: "\u{2011}")).font(.system(size: 28, weight: .bold)).accessibilityLabel(ev["name"]!.s).accessibilityAddTraits(.isHeader)
+            }
+            .padding(.top, 6).listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)).listRowBackground(Color.clear)
+          }
+        }
+        if ev == nil || b == nil { Section { Text("This event is no longer on the calendar.").foregroundStyle(.secondary) } }
+        else if let b, !b.drawn { Section { Text("The draw is made when the event starts, in week \(b.week).").foregroundStyle(.secondary) } }
+        else if let b {
+          let name = { (p: Int?) -> String in p.map { b.field.contains($0) ? E.cardOf($0)["name"]!.s : "To come" } ?? "To come" }
+          if let pl = b.placings {
+            let me: [Int]? = pl.first { $0[0] == H }
+            let tail: [[Int]] = me.map { $0[1] > 8 ? [$0] : [] } ?? []
+            let rows: [[Int]] = Array(pl.prefix(8)) + tail
+            Section { ForEach(Array(rows.enumerated()), id: \.offset) { _, p in rankRow(p[1], name(p[0]), me: p[0] == H) } } header: { head("Final Placings") }
+          }
+          if let tables = E.standings(id) {
+            ForEach(Array(tables.enumerated()), id: \.offset) { _, g in
+              let title: String = g.group.map { "Group \($0)" } ?? "Standings"
+              Section { ForEach(Array(g.rows.enumerated()), id: \.offset) { i, r in standRow(i + 1, r, name) } } header: { head(title) }
+            }
+          }
+          let mine = b.matches.filter { $0.o.a == H || $0.o.b == H }
+          if !mine.isEmpty { Section { ForEach(mine, id: \.m) { bm($0, name) } } header: { head("Your Matches") }.listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)) }
+          let rounds = b.matches.reduce(into: [String]()) { if !$0.contains($1.round) { $0.append($1.round) } }
+          ForEach(rounds, id: \.self) { r in Section { ForEach(b.matches.filter { $0.round == r }, id: \.m) { bm($0, name) } }
+            header: { head(titleCaseWords(r)) }.listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)) }
+        }
+      }
+      .environment(\.defaultMinListRowHeight, 44)
+      .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+    } else {
+      let es = S["es"]!, fm = CareerStore.T("FORMATS")
+      let evs = S["cal"]!.a.filter { truthy(es[$0["id"]!.s]?["en"]) }.reversed()
+      List {
+        if evs.isEmpty { Section { Text("Enter an event from the calendar; its draw shows here when it starts.").foregroundStyle(.secondary) } }
+        else {
+          Section {
+            ForEach(Array(evs.enumerated()), id: \.offset) { _, ev in
+              let e = es[ev["id"]!.s]!, st = truthy(e["x"]) ? "" : truthy(e["done"]) ? "Over" : e["f"] != nil ? "Under way" : "Not drawn"
+              NavigationLink { CareerBracket(store: store, id: ev["id"]!.s) } label: {
+                HStack {
+                  VStack(alignment: .leading, spacing: 1) {
+                    Text(ev["name"]!.s).font(.system(size: 17))
+                    Text("Week \(E.weekOfDay(ev["start"]!.i)), \(fm[ev["fmt"]!.s]?.str ?? "")").font(.system(size: 15)).foregroundStyle(.secondary).lineLimit(1)
+                  }
+                  Spacer()
+                  Text(st).font(.system(size: 15)).foregroundStyle(.secondary)
+                }
+              }
+            }
+          }
+          .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+        }
+      }
+      .navigationTitle("Brackets").navigationBarTitleDisplayMode(.inline)
+    }
+  }
+  private func head(_ t: String) -> some View { Text(t).font(.system(size: 13)).foregroundStyle(.secondary).textCase(nil) }
+  private func rankRow(_ rk: Int, _ t: String, me: Bool, val: String? = nil) -> some View {
+    HStack(spacing: 12) {
+      Text("\(rk)").font(.system(size: 15, weight: .bold)).monospacedDigit().frame(width: 28)
+      Text(t).font(.system(size: 17, weight: me ? .bold : .regular))
+      Spacer()
+      if let val { Text(val).font(.system(size: 15)).foregroundStyle(.secondary).monospacedDigit() }
+    }
+  }
+  private func standRow(_ i: Int, _ r: CareerLib.Row, _ name: (Int?) -> String) -> some View {
+    rankRow(i, name(r.p), me: r.p == CareerEngine.HUMAN, val: "\(r.w)-\(r.l)")
+  }
+  /* bm: a match's two sides about its score, or the week it is played */
+  private func bm(_ m: CareerEngine.BracketMatch, _ name: @escaping (Int?) -> String) -> some View {
+    let H = CareerEngine.HUMAN, o = m.o
+    let side = { (p: Int?, trail: Bool) -> AnyView in
+      let win = o.w != nil && o.w == p
+      return AnyView(Text(p == nil ? "To come" : name(p)).font(.system(size: 15, weight: win ? .bold : .regular))
+        .foregroundStyle(p == H ? Color(rgb: 0x3d, 0xdc, 0x84) : win ? Color.white : Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.75))
+        .lineLimit(1).frame(maxWidth: .infinity, alignment: trail ? .trailing : .leading))
+    }
+    return HStack(spacing: 8) {
+      side(o.a, false)
+      Text(o.s.map { "\($0[0])-\($0[1])" } ?? "wk \(store.E.weekOfDay(m.day))").font(.system(size: 15, weight: .bold)).monospacedDigit().fixedSize()
+      side(o.b, true)
+    }
+  }
+}
+
 struct CareerHubGroups: View {
   @Bindable var store: CareerStore
   var onPractice: () -> Void
@@ -349,9 +453,13 @@ struct CareerHubGroups: View {
     let circ = CareerStore.T("TIERS")[tier]!["circ"]!.i, circs = CareerStore.T("CIRCUITS").a.map { $0.s }, circNames = CareerStore.T("CIRC_NAMES").a.map { $0.s }
     let rk = E.rankings(circs[circ], top: 400).a.first { $0["human"] == true }
     let st = E.stats()["all"] ?? .null, offers = S["off"]!.a.count, sponsors = S["spons"]!.a.filter { !truthy($0["end"]) }.count
+    /* the page's cur: the event under way, else the first entered */
+    let sched = S["cal"]!.a.filter { ev in es[ev["id"]!.s].map { truthy($0["en"]) && !truthy($0["done"]) } ?? false }
+    let cur = sched.first { es[$0["id"]!.s]?["f"] != nil && !truthy(es[$0["id"]!.s]?["x"]) } ?? sched.first
     let news = S["news"]!.a.last.map { $0[1]?.str ?? "Nothing yet" } ?? "Nothing yet"
     Section {
       NavigationLink { CareerCalendar(store: store) } label: { row("Calendar", "\(open) event\(open == 1 ? "" : "s") open to you, \(entered) entered") }
+      NavigationLink { CareerBracket(store: store, id: cur?["id"]?.str) } label: { row("Bracket and Standings", cur?["name"]?.str ?? "Your events, once drawn") }
       NavigationLink { CareerRankings(store: store) } label: { row("Rankings", rk.map { "\(circNames[circ]): number \($0["rank"]!.i), \($0["pts"]!.i) points" } ?? "Unranked so far") }
       row("Tour Card", tier >= 8 && tier < 12 ? (E.moneyRank() > 0 ? "Money list: number \(E.moneyRank())" : "Earn on the money list") : "Not needed yet")
     } header: { head("Season") }
@@ -441,6 +549,10 @@ struct CareerHub: View {
     let _ = store.rev
     let E = store.E, S = E.S, me = S["me"]!, tier = me["tier"]!.i, day = S["day"]!.i
     let nm = E.nextMatch()
+    /* `-felt-career-bracket`: the next match's event's bracket in place of the hub (a test hook) */
+    if ProcessInfo.processInfo.arguments.contains("-felt-career-bracket"), let id = nm["event"]?.str {
+      CareerBracket(store: store, id: id)
+    } else {
     List {
       Section {
         /* `-felt-career-groups`: the hub without its top, to see the groups (a test hook) */
@@ -456,7 +568,7 @@ struct CareerHub: View {
         }
       }
       CareerHubGroups(store: store, onPractice: onPractice)
-
+    }
     }
   }
   func row(_ k: String, _ v: String) -> some View { HStack { Text(k); Spacer(); Text(v).foregroundStyle(.secondary) } }

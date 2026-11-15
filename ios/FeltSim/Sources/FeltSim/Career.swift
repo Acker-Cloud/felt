@@ -21,7 +21,8 @@ public final class CareerEngine {
   static func c(_ k: String) -> JV { C[k]! }
   /* the page's Career constants (TIERS, DISCS, STYLES, ...) for the screens */
   public static func const(_ k: String) -> JV { C[k]! }
-  static let POP = CareerData.POP, YEAR = Int(c("YEAR").d), HUMAN = Int(c("HUMAN").d)
+  static let POP = CareerData.POP, YEAR = Int(c("YEAR").d)
+  public static let HUMAN = Int(c("HUMAN").d)
 
   /* the population cache (PC): generated players by id, the names taken so far */
   var PC: (seed: Int, list: [CareerLib.Player?], names: Set<String>)? = nil
