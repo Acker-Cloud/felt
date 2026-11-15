@@ -109,6 +109,7 @@ struct TableScreen: View {
   @State private var aimDrag: Double?
   @State private var placing = false
   @State private var picking = false
+  @State private var gest: AimGesture? = nil
   @Environment(\.displayScale) private var scale
   /* the window's interface orientation, read as the size changes (a turn) */
   private var interface: UIInterfaceOrientation { (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.effectiveGeometry.interfaceOrientation ?? .portrait }
@@ -169,7 +170,7 @@ struct TableScreen: View {
         .onChange(of: tg.size) { _, s in model.bake(s, scale: scale) }
         .contentShape(Rectangle())
         .gesture(DragGesture(minimumDistance: 0).onChanged { v in touch(v, tg.size, began: v.translation == .zero) }
-          .onEnded { _ in placing = false; picking = false })
+          .onEnded { v in touchEnd(v, tg.size); placing = false; picking = false; gest = nil })
         .accessibilityElement()
         .accessibilityLabel("Table")
         .accessibilityIdentifier("table")
@@ -211,10 +212,59 @@ struct TableScreen: View {
       if best >= 0 { model.pickPocket(best); picking = true; return }
       if let b = model.balls.first(where: { $0.on && $0.n != model.cueN && JSMath.hypot($0.x - x, $0.y - y) < s.BALL_R * 1.4 }) { model.pickCallBall(b.n) }
     }
-    if began, model.inHand, let c = model.cue, JSMath.hypot(c.x - x, c.y - y) < s.BALL_R * 3 { placing = true }
-    if placing { model.place(x, y); return }
-    guard model.rolling == nil, let c = model.cue else { return }
-    if JSMath.hypot(x - c.x, y - c.y) > s.BALL_R { model.aim = atan2(y - c.y, x - c.x) }
+    let t = v.time.timeIntervalSinceReferenceDate * 1000, b = v.location
+    if began {
+      gest = AimGesture(t0: t, p0: b, last: b, tLast: t, at: b, trail: [(t, model.aim, Double(b.x), Double(b.y))])
+      /* ball in hand: a press within grabR (30 pt or 2.5 ball radii) moves it, relative to where it was */
+      if model.inHand, let c = model.cue {
+        let q = m.pt(c.x, c.y)
+        if JSMath.hypot(Double(q.x - b.x), Double(q.y - b.y)) < max(30, 2.5 * s.BALL_R * m.k) { placing = true; gest?.grab = (c.x - x, c.y - y) }
+      }
+    }
+    guard var g = gest else { return }
+    g.far = max(g.far, JSMath.hypot(Double(b.x - g.p0.x), Double(b.y - g.p0.y)))
+    if placing, let o = g.grab {
+      if !g.moving && g.far > AimFeel.GRAB_SLOP { g.moving = true }
+      if g.moving { model.place(x + o.dx, y + o.dy) }
+      gest = g; return
+    }
+    guard model.rolling == nil, let c = model.cue else { gest = g; return }
+    let dv = JSMath.hypot(Double(b.x - g.last.x), Double(b.y - g.last.y))
+    if dv > 0 { g.v = AimFeel.fingerSpeed(g.v, dv, t - g.tLast); g.last = b; g.tLast = t }
+    if !g.sweep {
+      if g.far > AimFeel.TAP_SLOP { g.sweep = true }
+      else if t - g.t0 >= AimFeel.HOLD_MS && g.far > AimFeel.HOLD_SLOP { g.sweep = true; g.held = true }
+    }
+    /* while a let-go would still be a tap the line waits, then catches up with the finger in one step */
+    if g.sweep && !g.maybeTap(t) { g.shown = true; turnTo(&g, b, t, m, c) }
+    gest = g
+  }
+  /* the sweep from where it was last applied to b */
+  private func turnTo(_ g: inout AimGesture, _ b: CGPoint, _ t: Double, _ m: Mapper, _ c: Ball) {
+    if b != g.at {
+      let R = max(60, AimFeel.SWEEP_R * min(model.sim.TL, model.sim.TW) * m.k)
+      model.aim = AimFeel.wrap(model.aim + AimFeel.sweepTurn(m.pt(c.x, c.y), g.at, b, R: R, ballPx: model.sim.BALL_R * m.k) * AimFeel.sweepGain(g.v ?? 0))
+      g.at = b
+    }
+    AimFeel.push(&g.trail, t, model.aim, b)
+  }
+  /* the let-go: a tap aims at the spot (an object ball's centre within tapReach), a sweep may restore its lift jitter */
+  private func touchEnd(_ v: DragGesture.Value, _ size: CGSize) {
+    guard var g = gest, !placing, !picking, model.rolling == nil, let c = model.cue else { return }
+    let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW), t = v.time.timeIntervalSinceReferenceDate * 1000
+    if !g.sweep || g.maybeTap(t) {
+      let p = g.p0, (x, y) = m.table(p), reach = max(14, 1.3 * s.BALL_R * m.k)
+      var best: Ball? = nil, bd = reach
+      for o in model.balls where o.on && o.n != model.cueN {
+        let q = m.pt(o.x, o.y), d = JSMath.hypot(Double(q.x - p.x), Double(q.y - p.y))
+        if d < bd { bd = d; best = o }
+      }
+      if let o = best { model.aim = atan2(o.y - c.y, o.x - c.x) }
+      else if JSMath.hypot(x - c.x, y - c.y) > s.BALL_R { model.aim = atan2(y - c.y, x - c.x) }
+      return
+    }
+    turnTo(&g, v.location, t, m, c)
+    if let r = AimFeel.liftAim(g.trail, t) { model.aim = r }
   }
 }
 
@@ -269,6 +319,9 @@ struct FineWheel: View {
   @State private var last: CGFloat = 0
   @State private var roll: CGFloat = 0
   @State private var live = false
+  @State private var wv: Double? = nil
+  @State private var wt = 0.0
+  @State private var trail: AimFeel.Trail = []
   var body: some View {
     let stops: [Gradient.Stop] = [.init(color: Color(rgb: 0x14, 0x14, 0x16), location: 0), .init(color: Color(rgb: 0x50, 0x50, 0x5a), location: 0.24),
       .init(color: Color(rgb: 0x6e, 0x6e, 0x78), location: 0.5), .init(color: Color(rgb: 0x50, 0x50, 0x5a), location: 0.76), .init(color: Color(rgb: 0x14, 0x14, 0x16), location: 1)]
@@ -293,11 +346,21 @@ struct FineWheel: View {
       .layoutPriority(upright ? 0 : 1)
       .contentShape(Rectangle())
       .gesture(DragGesture(minimumDistance: 0).onChanged { v in
-        live = true
-        let d = v.translation.height
-        if model.rolling == nil { model.aim += Double(d - last) * 0.15 * .pi / 180; roll += d - last }
-        last = d
-      }.onEnded { _ in last = 0; live = false })
+        let t = v.time.timeIntervalSinceReferenceDate * 1000
+        if !live { live = true; wv = nil; wt = t; trail = [(t, model.aim, Double(v.location.x), Double(v.location.y))] }
+        let d = v.translation.height, dy = Double(d - last)
+        guard dy != 0 else { return }
+        /* wheelRate by the finger's smoothed speed; down turns the cue clockwise on screen */
+        if model.rolling == nil {
+          wv = AimFeel.fingerSpeed(wv, abs(dy), t - wt)
+          model.aim += dy * AimFeel.wheelRate(wv ?? 0); roll += d - last
+          AimFeel.push(&trail, t, model.aim, v.location)
+        }
+        last = d; wt = t
+      }.onEnded { v in
+        if model.rolling == nil, let r = AimFeel.liftAim(trail, v.time.timeIntervalSinceReferenceDate * 1000) { model.aim = r }
+        last = 0; live = false; trail = []
+      })
       .accessibilityLabel("Fine aim")
   }
 }
