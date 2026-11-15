@@ -569,8 +569,6 @@ public final class CareerEngine {
     if S["me"]!["cardAt"] == nil { let sea = season; S["me"]?["cardAt"] = .n(sea) }
   }
 
-  /* the season's end (rollSeason): not ported yet, the golden stays in season 1 */
-  func rollSeason() { fatalError("Career: rollSeason is not ported yet") }
 
   public func digest() -> String { String(CareerLib.hashStr(S.stringify()), radix: 36) }
 }

@@ -57,7 +57,7 @@ extension CareerEngine {
     if ev["fmt"]!.s == "league" { return s + 7 * (dep - 1) }
     return s + (T.maxDep <= 1 ? 0 : Int((Double((dep - 1) * (ev["end"]!.i - s)) / Double(T.maxDep - 1)).rounded(.down)))
   }
-  func pointsMap(_ key: RankKey) -> [Int: Double] { Dictionary(points(key).map { ($0.0, $0.1) }, uniquingKeysWith: { a, _ in a }) }
+  func pointsMap(_ key: RankKey, _ gw: Int? = nil) -> [Int: Double] { Dictionary(points(key, gw).map { ($0.0, $0.1) }, uniquingKeysWith: { a, _ in a }) }
 
   /* the field, at the event's start: the player if entered, any qualifiers, then AI players of the right tiers not busy
      elsewhere (invitations and finals: the circuit's top by points), seeded by circuit points, then rating */
@@ -491,13 +491,13 @@ extension CareerEngine {
     let sh = MatchReport.Shots(att: sum(\.att), pot: sum(\.pot), calls: calls, callsOk: calls != 0 ? sum(\.pot) : 0, safe: sum(\.sf), safeOk: sum(\.ss), fouls: sum(\.fo), scratches: sum(\.sc))
     return reportMatch(MatchReport(score: r.s, racks: r.racks, shots: sh))
   }
-  /* time moves only here: days ahead, or "week". It stops early on a match of the player's that is due (unless forfeit).
+  /* time moves only here: days ahead, "week", or the next season's first day. It stops early on a match of the player's that is due (unless forfeit).
      The stop: "match", "season" or nil */
-  @discardableResult public func advance(days: Int? = nil, week: Bool = false, forfeit: Bool = false, stopAtSeason: Bool = false) -> String? {
+  @discardableResult public func advance(days: Int? = nil, week: Bool = false, toSeason: Bool = false, forfeit: Bool = false, stopAtSeason: Bool = false) -> String? {
     if live() != nil { return nil }
     bounds = []
     let day = S["day"]!.i
-    let target = week ? (day / 7 + 1) * 7 : day + Swift.max(0, days ?? 1)
+    let target = toSeason ? season * Self.YEAR : week ? (day / 7 + 1) * 7 : day + Swift.max(0, days ?? 1)
     while true {
       if myPending() != nil { if forfeit { while forfeitPending() { resolveAll() }; continue }; return "match" }
       if S["day"]!.i >= target { break }

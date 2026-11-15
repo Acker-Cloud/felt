@@ -111,12 +111,15 @@ import Testing
       /* a season played: enter the first event open, a week ahead, a match due settled by the model */
       let name = c["profile"]!["name"]!.s
       for (k, step) in (c["play"]?.a ?? []).enumerated() {
-        let day = E.S["day"]!.i
-        let ev = E.S["cal"]!.a.first { $0["start"]!.i > day && E.eligibility($0).isEmpty }
-        #expect(ev?["id"]?.str == step["enter"]?.str, "\(name) step \(k): entered \(String(describing: ev?["id"])) vs \(String(describing: step["enter"]))")
-        if let ev { E.enter(ev["id"]!.s) }
-        let stop = E.advance(week: true)
-        if stop == "match" { E.simMatch() }
+        let day = E.S["day"]!.i, to = step["to"]?.str
+        var stop: String?
+        if to == "season" { stop = E.advance(toSeason: true) } else if to == "day" { stop = E.advance(days: 1) } else {
+          let ev = E.S["cal"]!.a.first { $0["start"]!.i > day && E.eligibility($0).isEmpty }
+          #expect(ev?["id"]?.str == step["enter"]?.str, "\(name) step \(k): entered \(String(describing: ev?["id"])) vs \(String(describing: step["enter"]))")
+          if let ev { E.enter(ev["id"]!.s) }
+          stop = E.advance(week: true)
+        }
+        if stop == "match" && to != "day" { E.simMatch() }
         #expect(stop == step["stop"]?.str && E.S["day"]!.i == step["day"]!.i, "\(name) step \(k): stopped \(String(describing: stop)) on day \(E.S["day"]!.i)")
         if let want = step["state"]?.str { let got = E.S.stringify(); if got != want {
           let w = Array(want.utf8), g = Array(got.utf8), i = (0..<Swift.min(w.count, g.count)).first { w[$0] != g[$0] } ?? Swift.min(w.count, g.count)

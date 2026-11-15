@@ -518,6 +518,20 @@ function build() {
       if (a.stopped === 'match') { S.Career.simMatch(); sims++; }
       play.push({ enter: ev ? ev.id : null, stop: a.stopped, sims, day: JSON.parse(S.Career.__state()).day, digest: S.Career.digest(), state: k % 10 === 9 ? S.Career.__state() : null });
     }
+    /* then to the season's end and over it (rollSeason), every match due settled; then ten weeks of the next season */
+    for (let k = 0; k < 400 && JSON.parse(S.Career.__state()).day < S.Career.YEAR; k++) {
+      const a = S.Career.advance('season');
+      if (a.stopped === 'match') S.Career.simMatch();
+      play.push({ to: 'season', stop: a.stopped, day: JSON.parse(S.Career.__state()).day, digest: S.Career.digest(), state: null });
+    }
+    { const a = S.Career.advance(1); play.push({ to: 'day', stop: a.stopped, day: JSON.parse(S.Career.__state()).day, digest: S.Career.digest(), state: S.Career.__state() }); }
+    for (let k = 0; k < 10; k++) {
+      const st = JSON.parse(S.Career.__state()), ev = st.cal.find(e => e.start > st.day && S.Career.__elig(e.id));
+      if (ev) S.Career.enter(ev.id);
+      const a = S.Career.advance('week');
+      if (a.stopped === 'match') S.Career.simMatch();
+      play.push({ enter: ev ? ev.id : null, stop: a.stopped, day: JSON.parse(S.Career.__state()).day, digest: S.Career.digest(), state: k === 9 ? S.Career.__state() : null });
+    }
     careers.push({ profile, seed, ok: r.ok, id: r.id, trace: S.__trace.slice(), digest: careersDigest0, play });
   }
   const career = JSON.stringify({ seed: 4242, players, models, brackets, tourneys, careers, consts: L.__consts(), hashes: ['', 'a', 'felt', 'Zhao|9|p'].map(x => [x, L.hashStr(x)]) });
