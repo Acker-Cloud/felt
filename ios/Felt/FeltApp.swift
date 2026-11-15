@@ -1234,7 +1234,9 @@ struct Overlays: View {
       /* the pause menu (6): what game this is, the latest word (#menuMsg), Resume, Restart, Quit to Home */
       card {
         if let solo = soloNow { soloPanel(solo) } else {
-        Text("Paused, \(model.game.rawValue)" + (model.cpuLevel != nil ? " vs \(model.cardName(1).replacingOccurrences(of: " (CPU)", with: ""))" : "")).font(.footnote).foregroundStyle(.secondary)
+        /* .kicker: 12 pt bold capitals, tracked, muted, at the card's leading edge */
+        Text(("Paused, \(model.game.rawValue)" + (model.cpuLevel != nil ? " vs \(model.cardName(1).replacingOccurrences(of: " (CPU)", with: ""))" : "")).uppercased())
+          .font(.system(size: 12, weight: .bold)).kerning(1.08).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).frame(maxWidth: .infinity, alignment: .leading)
         /* gameNow: both players' cards (the shooter's lit), the potted balls in pot order, the latest word */
         /* a card per player: two side by side, a party's three or four two to a row */
         let n = model.party?.names.count ?? 2
@@ -1257,23 +1259,24 @@ struct Overlays: View {
         }
         Button { model.paused = false } label: { Label("Resume", systemImage: "play.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("resume")
-        Button { model.paused = false; model.rerack() } label: { Label("Restart", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity, minHeight: 44) }
-          .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
-        Button { model.paused = false; model.tourneyAbandon(); back() } label: { Text(model.tmatch != nil ? "Forfeit Match" : "Quit to Home").frame(maxWidth: .infinity, minHeight: 44) }
-          .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
-        HStack(spacing: 8) {
-          Button { sheet = "prefs" } label: { Text("Settings").frame(maxWidth: .infinity, minHeight: 44) }.background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2))).accessibilityIdentifier("pPrefsBtn")
-          Button { sheet = "help" } label: { Text("How to Play").frame(maxWidth: .infinity, minHeight: 44) }.background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2))).accessibilityIdentifier("pHelpBtn")
-        }
-        /* #concedeBtn: snooker's Concede Frame, two taps (armOrAct) */
-        if let g = model.g, g.kind == "snooker", g.mode == nil, model.tut == nil, g.winner == nil {
-          Button {
-            if armed { armed = false; model.paused = false; model.concedeFrame() }
-            else { armed = true; Task { try? await Task.sleep(for: .seconds(4)); armed = false } }
-          } label: { Text(armed ? "Tap again to concede" : "Concede Frame").frame(maxWidth: .infinity, minHeight: 44) }
-            .foregroundStyle(armed ? Color.white : Color(rgb: 0xff, 0x6b, 0x5e))
-            .background(RoundedRectangle(cornerRadius: 12).fill(armed ? Color(rgb: 0xd7, 0x3b, 0x2f) : Color(white: 0.2)))
-            .accessibilityIdentifier("concedeBtn")
+        /* #pauseActs: two to a row: Restart and Quit to Home, Settings and How to Play; Concede Frame across */
+        Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+          GridRow {
+            act("Restart", "arrow.counterclockwise") { model.paused = false; model.rerack() }
+            act(model.tmatch != nil ? "Forfeit Match" : "Quit to Home", "house") { model.paused = false; model.tourneyAbandon(); back() }
+          }
+          GridRow {
+            act("Settings", "slider.horizontal.3") { sheet = "prefs" }.accessibilityIdentifier("pPrefsBtn")
+            act("How to Play", "questionmark.circle") { sheet = "help" }.accessibilityIdentifier("pHelpBtn")
+          }
+          /* #concedeBtn: snooker's Concede Frame, two taps (armOrAct) */
+          if let g = model.g, g.kind == "snooker", g.mode == nil, model.tut == nil, g.winner == nil {
+            act(armed ? "Tap again to concede" : "Concede Frame", "flag", warn: true, armed: armed) {
+              if armed { armed = false; model.paused = false; model.concedeFrame() }
+              else { armed = true; Task { try? await Task.sleep(for: .seconds(4)); armed = false } }
+            }
+            .gridCellColumns(2).accessibilityIdentifier("concedeBtn")
+          }
         }
       }
       .sheet(item: Binding(get: { sheet.map { SheetID(id: $0) } }, set: { sheet = $0?.id })) { s in
@@ -1354,11 +1357,30 @@ struct Overlays: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
+  /* .overlay .sheet: the panel (#1b1b1d, a #3a3a41 hairline, 22 pt corners, at most 440 wide) over a plain dim
+     (rgba(8,8,9,.74), no blur: the table behind stays sharp) */
   private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
-    VStack(spacing: 12, content: c)
-      .padding(20).frame(maxWidth: 340)
-      .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
-      .padding(24)
+    ZStack {
+      Color(.sRGB, red: 8 / 255, green: 8 / 255, blue: 9 / 255, opacity: 0.74).ignoresSafeArea()
+      VStack(spacing: 12, content: c)
+        .padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 20).frame(maxWidth: 440)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color(rgb: 0x1b, 0x1b, 0x1d)))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
+        .shadow(color: .black.opacity(0.55), radius: 40, y: 24)
+        .padding(16)
+    }
+  }
+  /* .act: a 50 pt capsule on the secondary fill, its icon (19 pt, muted) before 15 pt semibold words */
+  private func act(_ title: String, _ icon: String, warn: Bool = false, armed: Bool = false, _ f: @escaping () -> Void) -> some View {
+    Button(action: f) {
+      HStack(spacing: 8) {
+        Image(systemName: icon).font(.system(size: 15, weight: .semibold)).foregroundStyle(armed ? .white : warn ? Color(rgb: 0xff, 0x8a, 0x7a) : Color(rgb: 0xa3, 0xa3, 0xaa))
+        Text(title).font(.system(size: 15, weight: .semibold)).lineLimit(armed ? 2 : 1).minimumScaleFactor(0.8)
+      }
+      .foregroundStyle(armed ? .white : warn ? Color(rgb: 0xff, 0x8a, 0x7a) : Color(rgb: 0xf5, 0xf5, 0xf7))
+      .padding(.horizontal, 14).frame(maxWidth: .infinity, minHeight: 50)
+      .background(Capsule().fill(armed ? Color(rgb: 0xc0, 0x39, 0x2b) : Color(rgb: 0x2c, 0x2c, 0x30)))
+    }
   }
 }
 
