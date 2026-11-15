@@ -98,7 +98,10 @@ final class TableModel {
   struct Baked { let image: CGImage; let size: CGSize; let scale: CGFloat }
   private(set) var tableImage: Baked?
   @ObservationIgnored private var baking: CGSize?
+  /* the stage's size, for placing the coach card (placeCoach) */
+  var stageSize = CGSize.zero
   func bake(_ size: CGSize, scale: CGFloat) {
+    if stageSize != size { stageSize = size }
     guard size.width > 0, size.height > 0, tableImage?.size != size, baking != size else { return }
     baking = size
     let look = dress, spec = spec
@@ -211,6 +214,60 @@ final class TableModel {
                         kind: T.daily.map { "Daily shot, \(DrillStore.dayWords($0.day)): \(c.title)" } ?? "Trick shot \(i + 1) of \(TRICKS.count): \(c.title)", pts: pts, demo: T.demo, i: i, daily: T.daily != nil)
     msg = why
     sound.cue(j.ok ? "win" : "foul")
+  }
+  /* placeCoach, simplified: the card at the stage's top or foot, whichever is further from the marks it must not hide (the
+     cue ball, the ball and pocket to play, the line between them) */
+  var coachAtTop: Bool {
+    guard stageSize.height > 0, let c = cue else { return true }
+    let m = Mapper(size: stageSize, TL: sim.TL, TW: sim.TW)
+    var pts: [[Double]] = [[c.x, c.y]]
+    if lesson != nil { let P = lessonPoints(); pts += [P.b, sim.POCKETS[TableModel.LESSON_POCKET]] }
+    if let T = tut, let t = tutById(T.id) {
+      let st = t.steps[T.step]
+      if let n = tutNum(t, T.step, T.ctx, st.aim), let b = balls.first(where: { $0.n == n && $0.on }) { pts.append([b.x, b.y]) }
+      if let k = st.pocket, k < sim.POCKETS.count { pts.append(sim.POCKETS[k]) }
+      if let r = tutRing, r.kind == "ball", let b = balls.first(where: { $0.n == r.n && $0.on }) { pts.append([b.x, b.y]) }
+    }
+    var line = pts; for p in pts.dropFirst() { line.append([(c.x + p[0]) / 2, (c.y + p[1]) / 2]) }
+    let ys = line.map { Double(m.pt($0[0], $0[1]).y) }, H = Double(stageSize.height), band = min(220, H * 0.3)
+    let top = ys.filter { $0 < band }.count, foot = ys.filter { $0 > H - band }.count
+    return top <= foot
+  }
+  /* lessonPoints: the 1 six radii in from the pocket's mouth, the cue ball sixteen behind it on the same line */
+  func lessonPoints() -> (b: [Double], c: [Double], line: Double) {
+    let k = TableModel.LESSON_POCKET, n = sim.CPU_MOUTH_N[k], A = sim.POCKET_AIM[k], R = sim.BALL_R
+    let b = [A[0] + n[0] * 6 * R, A[1] + n[1] * 6 * R], c = [b[0] + n[0] * 16 * R, b[1] + n[1] * 16 * R]
+    return (b, c, atan2(b[1] - c[1], b[0] - c[0]))
+  }
+  private func lessonGame() -> Game {
+    let P = lessonPoints()
+    var g = engine.newGame("8")
+    g.mode = "practice"; g.layout = "lesson"; g.seed = 0; g.hand = false; g.breakShot = false; g.inHand = nil
+    g.balls = [GBall(n: 0, x: P.c[0], y: P.c[1]), GBall(n: 1, x: P.b[0], y: P.b[1])]
+    return g
+  }
+  /* the aim a step starts on: well off the line for step 1, on it after that */
+  private func lessonAim() { aim = lessonPoints().line + (lesson?.step == 1 ? 0.6 : 0) }
+  private func lessonStep(_ n: Int) { lesson?.step = n; lesson?.again = false; if n == 2 { lesson?.a0 = aim; lesson?.wheel = false } }
+  /* each frame of the lesson: has the step been done? */
+  private func lessonCheck() {
+    guard let s = lesson, rolling == nil, stroke == nil, !lessonDone else { return }
+    let w = { (a: Double) in atan2(sin(a), cos(a)) }
+    if s.step == 1 && !touching && !fineAim && abs(w(aim - lessonPoints().line)) <= TableModel.LESSON_TOL { lessonStep(2) }
+    else if s.step == 2 && s.wheel && !fineAim && abs(w(aim - s.a0)) > 1e-5 { lessonStep(3) }
+  }
+  func lessonWheel() { if lesson != nil { lesson?.wheel = true } }
+  /* lessonSettle: the 1 down finishes, else the balls go back */
+  private func settleLesson(_ r: ShotResult) {
+    rolling = nil; spin = Spin(); v3Top2d = false
+    if r.potted.contains(1) {
+      var gm = g!; gm.balls = r.balls.map { b -> GBall in var x = GBall(n: b.n, x: b.x, y: b.y); x.on = b.on; return x }; g = gm; syncBalls()
+      LessonStore.rec = (true, true); lessonDone = true; sound.cue("win")
+      return
+    }
+    g = lessonGame(); syncBalls(); lessonAim()
+    lesson?.again = true
+    if lesson?.step == 2 { lesson?.a0 = aim }
   }
   /* tutBegin: step i on the tutorial's table: the layout, a fresh turn, the step's flash, the hint's aim */
   func tutBegin(_ i: Int) {
@@ -506,6 +563,14 @@ final class TableModel {
      where the cue ball began (the ring's "moved"); finished, the done sheet */
   struct TutSession { var id: String, step = 0, ctx: String? = nil, again = false, why = "", then = false, demo = false, cue0: [Double]? = nil }
   var tut: TutSession? = nil
+  /* the lesson (startLesson): three steps on one layout, watched, never shot for: 1 aim within LESSON_TOL of the line,
+     2 the wheel moved the aim, 3 the bar; the 1 down finishes, a miss puts the balls back */
+  struct LessonSession { var step = 1, a0 = 0.0, wheel = false, again = false }
+  var lesson: LessonSession? = nil
+  var lessonDone = false
+  @ObservationIgnored var touching = false
+  static let LESSON_TOL = 2 * Double.pi / 180, LESSON_POCKET = 2
+  static let LESSON_STEPS = [("Aim", "Drag anywhere on the table to swing the cue. Tap a ball to aim straight at it."), ("Fine-tune", "Roll the wheel to nudge the aim."), ("Shoot", "Pull the power bar and let go.")]
   var tutDone = false
   var drillRes: DrillResult? = nil
   static let DRILL_BEAT = 0.9
@@ -516,7 +581,7 @@ final class TableModel {
     return r.compactMapValues { (($0 as? [String: Any])?["shots"] as? [[NSNumber]])?.map { $0.map(\.doubleValue) } }
   }()
 
-  init(game: TableGame, cpu: String? = nil, practice: String? = nil, trick: String? = nil, drill: String? = nil, tutorial: String? = nil, exhib: [String]? = nil, exhibArch: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil, match: TMatch? = nil) {
+  init(game: TableGame, cpu: String? = nil, practice: String? = nil, trick: String? = nil, drill: String? = nil, tutorial: String? = nil, lesson: Bool = false, exhib: [String]? = nil, exhibArch: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil, match: TMatch? = nil) {
     self.game = game
     /* tourneyPlay: the player's next match, the opponent's level, the lag from the tournament's seed */
     var tm: TMatch? = match
@@ -525,7 +590,8 @@ final class TableModel {
       tm = TMatch(m: m, foe: foe.name, level: foe.level ?? "medium", arch: foe.arch, need: pts ? 1 : t.race, points: pts, race: t.race,
                       lag: cpuRng(Double(CareerLib.seedOf([String(t.seed), "lag", String(m)])))() < 0.5 ? 0 : 1, ruleset: t.ruleset)
     }
-    cpuLevel = practice != nil || trick != nil || drill != nil || tutorial != nil ? nil : tm?.level ?? (exhib == nil && party == nil ? cpu : nil)
+    cpuLevel = practice != nil || trick != nil || drill != nil || tutorial != nil || lesson ? nil : tm?.level ?? (exhib == nil && party == nil ? cpu : nil)
+    if lesson { var r = LessonStore.rec; r.seen = true; LessonStore.rec = r; self.lesson = LessonSession() }
     /* startPractice: a fresh seed, editing on for the empty table */
     if let id = drill, drillById(id) != nil { self.drill = DrillSession(id: id) }
     if let id = tutorial, let t = tutById(id) { self.tut = TutSession(id: id, ctx: t.ctx) }
@@ -560,6 +626,15 @@ final class TableModel {
     /* the look: a career match wears the career's equipped items (lookCareer), else the settings' (look()) */
     dress = tm?.dress ?? Prefs.dress(game.table.2)
     rerack()
+    /* a test hook: `-felt-lessonrun` walks the lesson as the controls would: the aim onto the line, the wheel's nudge, the bar */
+    if lesson, ProcessInfo.processInfo.arguments.contains("-felt-lessonrun") {
+      Task { @MainActor [weak self] in
+        try? await Task.sleep(for: .seconds(2.5)); guard let s = self else { return }
+        s.aim = s.lessonPoints().line
+        try? await Task.sleep(for: .seconds(2.5)); s.lessonWheel(); s.aim += 0.0004
+        try? await Task.sleep(for: .seconds(2.5)); s.aim = s.lessonPoints().line; s.power = 0.5; s.shoot()
+      }
+    }
     /* a test hook: `-felt-tutshow` plays each step's Show me, one a beat */
     if tutorial != nil, ProcessInfo.processInfo.arguments.contains("-felt-tutshow") {
       Task { @MainActor [weak self] in
@@ -606,6 +681,7 @@ final class TableModel {
     abandonCpuGame()
     rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], [], [], []]; potCount = 0; banner = nil
     if tut != nil { tutBegin(0); return }
+    if lesson != nil { g = lessonGame(); syncBalls(); randomOrient(); lessonAim(); return }
     if let D = drill, let d = drillById(D.id) {
       drill = DrillSession(id: d.id); drillRes = nil
       drill!.S = engine.drillShot(d, 0, nil); g = engine.drillGame(d, 0, nil)
@@ -727,6 +803,7 @@ final class TableModel {
     defer { frame &+= 1 }
     if paused { lastT = nil; return }
     self.now = now
+    if lesson != nil { lessonCheck() }
     if let f = flashDue { banner = (f.0, f.1, now + f.2); flashDue = nil }
     pots.removeAll { now - $0.t >= potMs }
     if let b = banner, now >= b.until { banner = nil }
@@ -797,6 +874,7 @@ final class TableModel {
     gBefore = g
     guard let before = g else { return }
     let shot = RuleShot(r)
+    if before.mode == "practice" && before.layout == "lesson" { settleLesson(r); return }
     if before.mode == "practice" { settlePractice(before, shot); return }
     if before.mode == "trick" { settleTrick(before, r); return }
     if before.mode == "drill" { settleDrill(before, r); return }

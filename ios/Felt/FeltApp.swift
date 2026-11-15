@@ -29,10 +29,24 @@ struct Home: View {
   @State private var tricking: PracticeGo? = nil
   @State private var drilling: PracticeGo? = nil
   @State private var tutoring: PracticeGo? = nil
+  @State private var lessoning = false
+  @State private var lessonOffer = false
   struct PracticeGo: Identifiable { let layout: String; var id: String { layout } }
-  /* Solo: Practice (#pracSheet, 5s) */
+  /* maybeOfferLesson: once the opening is over, on a first run (no test hook) */
+  private func maybeOfferLesson(_ s: IntroModel.State) {
+    guard s == .done, !LessonStore.rec.seen, !ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-felt-") && $0 != "-felt-intro" && $0 != "-felt-offer" }) else { return }
+    lessonOffer = true
+  }
+  /* Solo: Learn to Play (the lesson), Practice (#pracSheet, 5s), Trick Shots, Daily Shot, Drills */
   private var soloSection: some View {
     Section {
+      Button { lessoning = true } label: {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Learn to Play").font(.body.weight(.semibold)).foregroundStyle(.primary)
+          Text("A 30 second lesson").font(.footnote).foregroundStyle(.secondary)
+        }.frame(minHeight: 44, alignment: .leading)
+      }
+      .accessibilityIdentifier("solo-lesson")
       NavigationLink { PracticePicker { practicing = PracticeGo(layout: $0) } } label: {
         VStack(alignment: .leading, spacing: 2) {
           Text("Practice").font(.body.weight(.semibold))
@@ -167,6 +181,8 @@ struct Home: View {
       if let i = a.firstIndex(of: "-felt-stats") { statsPath = i + 1 < a.count && !a[i + 1].hasPrefix("-") ? a[i + 1] : "all" }
       /* `-felt-practice 8|9|heyball|scatter|empty`: a practice session */
       if let i = a.firstIndex(of: "-felt-practice"), i + 1 < a.count { practicing = PracticeGo(layout: a[i + 1]) }
+      /* `-felt-lesson`: the lesson */
+      if a.contains("-felt-lesson") { lessoning = true }
       /* `-felt-tutorial id`: that tutorial (`-felt-tutshow` plays each step's Show me) */
       if let i = a.firstIndex(of: "-felt-tutorial"), i + 1 < a.count { tutoring = PracticeGo(layout: a[i + 1]) }
       /* `-felt-drill id`: that drill (`-felt-drillshots` plays its solutions) */
@@ -213,6 +229,23 @@ struct Home: View {
         TableScreen(model: { let m = TableModel(game: g, tourney: t); m.onReport = { store.report($0, $1, $2, $3) }; return m }())
       }
     }
+    .fullScreenCover(isPresented: $lessoning) { TableScreen(model: TableModel(game: .eight, lesson: true)) }
+    /* #lessonOffer: New to felt? on the first run, once the opening is over */
+    .sheet(isPresented: $lessonOffer) {
+      VStack(spacing: 14) {
+        BallDot(n: 1).frame(width: 44, height: 44)
+        Text("New to felt?").font(.title2.bold())
+        Text("A 30 second lesson: aim, fine-tune, shoot. Three steps, no rules to learn.").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        HStack(spacing: 10) {
+          Button { lessonOffer = false; lessoning = true } label: { Text("Show Me").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("offerGo")
+          Button { var r = LessonStore.rec; r.seen = true; LessonStore.rec = r; lessonOffer = false } label: { Text("Skip").frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(Color(white: 0.2))).foregroundStyle(.white).accessibilityIdentifier("offerSkip")
+        }
+      }
+      .padding(24).presentationDetents([.height(300)])
+    }
+    .onChange(of: intro.state) { _, s in maybeOfferLesson(s) }
     .fullScreenCover(item: $tutoring) { t in TableScreen(model: TableModel(game: ["9": .nine, "bumper": .bumper, "carom": .carom, "snooker": .snooker, "heyball": .heyball][t.layout] ?? .eight, tutorial: t.layout)) }
     .fullScreenCover(item: $drilling) { d in TableScreen(model: TableModel(game: .nine, drill: d.layout)) }
     .fullScreenCover(item: $tricking) { t in TableScreen(model: TableModel(game: .eight, trick: t.layout)) }
@@ -274,7 +307,9 @@ struct TableScreen: View {
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
     .overlay { if let r = model.trickRes, !model.paused { TrickResult(model: model, res: r, back: { dismiss() }) } }
     .overlay { if let r = model.drillRes, !model.paused { DrillResultView(model: model, res: r, back: { dismiss() }) } }
-    .overlay(alignment: .top) { if model.tut != nil, !model.tutDone, !model.paused { CoachCard(model: model).padding(.horizontal, 12).padding(.top, 8) } }
+    .overlay(alignment: model.coachAtTop ? .top : .bottom) { if model.tut != nil, !model.tutDone, !model.paused { CoachCard(model: model).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
+    .overlay(alignment: model.coachAtTop ? .top : .bottom) { if let L = model.lesson, !model.lessonDone, !model.paused { LessonCard(s: L).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
+    .overlay { if model.lessonDone, !model.paused { LessonDoneView(home: { dismiss() }) } }
     .overlay { if model.tutDone, let t = tutById(model.tut!.id), !model.paused { TutDoneView(t: t, home: { dismiss() }) } }
     .onDisappear { model.abandonCpuGame() }
     .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
@@ -323,8 +358,8 @@ struct TableScreen: View {
           if pinch0 == nil { pinch0 = model.v3Dist; gest = nil }
           model.v3Dist = min(V3.DIST[1], max(V3.DIST[0], pinch0! / Double(v.magnification)))
         }.onEnded { _ in pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist") })
-        .gesture(DragGesture(minimumDistance: 0).onChanged { v in if pinch0 == nil { touch(v, tg.size, began: v.translation == .zero) } }
-          .onEnded { v in touchEnd(v, tg.size); placing = false; picking = false; gest = nil })
+        .gesture(DragGesture(minimumDistance: 0).onChanged { v in model.touching = true; if pinch0 == nil { touch(v, tg.size, began: v.translation == .zero) } }
+          .onEnded { v in touchEnd(v, tg.size); placing = false; picking = false; gest = nil; model.touching = false })
         .accessibilityElement()
         .accessibilityLabel("Table")
         .accessibilityIdentifier("table")
@@ -459,8 +494,8 @@ struct Controls: View {
   var body: some View {
     let items = Group {
       SpinPad(model: model)
-      PowerBar(model: model, upright: upright)
-      FineWheel(model: model, upright: upright)
+      PowerBar(model: model, upright: upright).overlay { LessonRing(on: model.lesson?.step == 3 && !model.lessonDone) }
+      FineWheel(model: model, upright: upright).overlay { LessonRing(on: model.lesson?.step == 2 && !model.lessonDone) }
       pause
     }
     if upright {
@@ -471,8 +506,8 @@ struct Controls: View {
         let wheel = max(44, min(96, 72 + (avail - 72) / 2, avail - minP))
         HStack(spacing: 4) {
           SpinPad(model: model)
-          PowerBar(model: model, upright: true).frame(width: avail - wheel)
-          FineWheel(model: model, upright: true).frame(width: wheel)
+          PowerBar(model: model, upright: true).frame(width: avail - wheel).overlay { LessonRing(on: model.lesson?.step == 3 && !model.lessonDone) }
+          FineWheel(model: model, upright: true).frame(width: wheel).overlay { LessonRing(on: model.lesson?.step == 2 && !model.lessonDone) }
           pause
         }
       }
@@ -530,7 +565,7 @@ struct FineWheel: View {
       .contentShape(Rectangle())
       .gesture(DragGesture(minimumDistance: 0).onChanged { v in
         let t = v.time.timeIntervalSinceReferenceDate * 1000
-        if !live { live = true; model.fineAim = true; wv = nil; wt = t; trail = [(t, model.aim, Double(v.location.x), Double(v.location.y))] }
+        if !live { live = true; model.fineAim = true; model.lessonWheel(); wv = nil; wt = t; trail = [(t, model.aim, Double(v.location.x), Double(v.location.y))] }
         let d = v.translation.height, dy = Double(d - last)
         guard dy != 0 else { return }
         /* wheelRate by the finger's smoothed speed; down turns the cue clockwise on screen */
@@ -1702,5 +1737,55 @@ struct TutDoneView: View {
     .fullScreenCover(isPresented: $play) {
       TableScreen(model: TableModel(game: ["9": .nine, "bumper": .bumper, "carom": .carom, "snooker": .snooker, "heyball": .heyball][t.id] ?? .eight, cpu: UserDefaults.standard.string(forKey: "felt.opponent").flatMap { $0 == "two" ? nil : $0 } ?? "medium"))
     }
+  }
+}
+
+/* the lesson's coach card: "Step 2 of 3: Fine-tune" (or "Close. Try again."), its sentence; no button */
+struct LessonCard: View {
+  let s: TableModel.LessonSession
+  var body: some View {
+    let st = TableModel.LESSON_STEPS[s.step - 1]
+    VStack(alignment: .leading, spacing: 6) {
+      Text(s.again ? "Close. Try again." : "Step \(s.step) of 3: \(st.0)").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+      Text(st.1).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .foregroundStyle(.white)
+    .padding(14)
+    .background(RoundedRectangle(cornerRadius: 18).fill(Color(rgb: 0x1c, 0x1c, 0x1e).opacity(0.94)))
+    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
+    .accessibilityElement(children: .combine)
+  }
+}
+/* the lesson's gold ring round the control to use (#coachRing) */
+struct LessonRing: View {
+  let on: Bool
+  var body: some View {
+    if on { RoundedRectangle(cornerRadius: 14).strokeBorder(Color(rgb: 0xf2, 0xc9, 0x4c), lineWidth: 2.5).padding(-4).allowsHitTesting(false) }
+  }
+}
+/* #lessonDone: Lesson complete, You're ready., Play 8-Ball, Home */
+struct LessonDoneView: View {
+  let home: () -> Void
+  @State private var play = false
+  var body: some View {
+    VStack(spacing: 0) {
+      Spacer()
+      VStack(alignment: .leading, spacing: 10) {
+        Text("Lesson complete").font(.footnote).foregroundStyle(.secondary)
+        Text("You're ready.").font(.title2.bold())
+        Text("That is the whole stroke: aim, fine-tune, pull. The rules of each game are in How to play.").font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: 10) {
+          Button { play = true } label: { Text("Play 8-Ball").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("donePlay")
+          Button("Home", action: home).frame(maxWidth: .infinity, minHeight: 50).background(Capsule().fill(Color(white: 0.2))).foregroundStyle(.white)
+        }
+      }
+      .foregroundStyle(.white)
+      .padding(20)
+      .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
+      .padding(.horizontal, 12).padding(.bottom, 12)
+    }
+    .fullScreenCover(isPresented: $play) { NavigationStack { GameSetup(game: .eight, go: {}) } }
   }
 }

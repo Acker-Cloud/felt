@@ -150,6 +150,11 @@ struct TableCanvas: View {
   /* drawSolo: a trick shot's marks, the cue ball's target ring (filled faintly, a dashed edge) and the pocket the goal names
      (a gold ring) */
   private func drawSolo(_ ctx: inout GraphicsContext, _ m: Mapper) {
+    /* the lesson's step 1: a gold ring round the 1 */
+    if let L = model.lesson, L.step == 1, !model.lessonDone, let b = model.g?.balls.first(where: { $0.n == 1 && $0.on }) {
+      let c = m.pt(b.x, b.y), rad = model.sim.BALL_R * m.k + 10
+      ctx.stroke(Path(ellipseIn: CGRect(x: c.x - rad, y: c.y - rad, width: 2 * rad, height: 2 * rad)), with: .color(Color(rgb: 0xf2, 0xc9, 0x4c)), lineWidth: 2.5)
+    }
     /* #coachRing: what the coach rings (tutMarks): a ball, a pocket, a colour's spot, the rail's mark, the D */
     if let r = model.tutRing, r.kind != "none", let gm = model.g {
       let s = model.sim, k = m.k

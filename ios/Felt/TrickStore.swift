@@ -83,3 +83,13 @@ enum TutStore {
   /* maybeOfferTut: a game whose tutorial is neither done nor turned down */
   static func offer(_ kind: String) -> Bool { let r = rec; return tutById(kind) != nil && !r.done.contains(kind) && !r.skipped.contains(kind) && !r.never }
 }
+
+/* felt.lesson.v1: { v: 1, seen (the first-run offer was shown), done }; anything unreadable is a first run */
+enum LessonStore {
+  static let KEY = "felt.lesson.v1"
+  static var rec: (seen: Bool, done: Bool) {
+    get { guard let o = TrickStore.json(KEY) as? [String: Any], TrickStore.int(o["v"]) == 1 else { return (false, false) }
+          let d = (o["done"] as? Bool) == true; return ((o["seen"] as? Bool) == true || d, d) }
+    set { TrickStore.put(KEY, ["v": 1, "seen": newValue.seen, "done": newValue.done]) }
+  }
+}
