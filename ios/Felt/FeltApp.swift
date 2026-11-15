@@ -1899,7 +1899,12 @@ struct OverHead: View {
     let top = st.lastP == w && g.verdict?.why != "forced" ? st.last : []
     VStack(alignment: .leading, spacing: 10) {
       Text(kind + (foe.map { " vs \($0)" } ?? (model.exhib != nil ? ", exhibition" : "")) + ", \(n) shot\(n == 1 ? "" : "s")").font(.footnote).foregroundStyle(.secondary)
-      Text(model.cpuLevel != nil ? (w == 0 ? "You win" : "The CPU wins") : "\(Words.nameOf(w)) wins").font(.title2.bold())
+      HStack(spacing: 12) {
+        /* overBallOf: the game ball for the celebration (the 8, the 9, the winner's colour at bumper pool, snooker's black,
+           the winner's own cue ball at carom) */
+        ballIcon(overBall(w), 40).frame(width: 40, height: 40).accessibilityHidden(true)
+        Text(model.cpuLevel != nil ? (w == 0 ? "You win" : "The CPU wins") : "\(Words.nameOf(w)) wins").font(.title2.bold())
+      }
       Text(Words.overLine(g)).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
       if !top.isEmpty {
         HStack(spacing: 6) {
@@ -1914,11 +1919,39 @@ struct OverHead: View {
       Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
         GridRow { Text(""); ForEach(P, id: \.self) { p in Text(Words.nameOf(p)).font(.footnote.weight(p == w ? .bold : .semibold)).foregroundStyle(p == w ? .primary : .secondary) } }
         ForEach(rows(st, P), id: \.0) { r in
-          GridRow { Text(r.0).font(.footnote).foregroundStyle(.secondary); ForEach(P, id: \.self) { p in Text(r.1[p]).font(.footnote).monospacedDigit().fixedSize(horizontal: false, vertical: true) } }
+          GridRow {
+            Text(r.0).font(.footnote).foregroundStyle(.secondary)
+            ForEach(P, id: \.self) { p in
+              /* the potted balls as little balls (dotEl), wrapping */
+              if r.0 == "Potted", r.1[p] != "None" {
+                let ns = r.1[p].split(separator: " ").compactMap { Int($0) }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 17), spacing: 3)], alignment: .leading, spacing: 3) {
+                  ForEach(ns, id: \.self) { n in ballIcon(n, 16).frame(width: 16, height: 16) }
+                }
+                .frame(minWidth: 60, maxWidth: 120, alignment: .leading)
+                .accessibilityElement().accessibilityLabel(ns.map(String.init).joined(separator: ", "))
+              } else {
+                Text(r.1[p]).font(.footnote).monospacedDigit().fixedSize(horizontal: false, vertical: true)
+              }
+            }
+          }
         }
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+  func ballIcon(_ n: Int, _ d: Double) -> Image { let (img, sc) = model.ballIcon(n, d); return Image(decorative: img, scale: sc) }
+  func overBall(_ w: Int) -> Int {
+    switch g.kind {
+    case "bumper": w == 1 ? 31 : 21
+    case "snooker": 62
+    case "carom": w == 1 ? 71 : 70
+    case "9": 9
+    case "10": 10
+    case "straight": 14
+    case "rotation": 15
+    default: 8
+    }
   }
   func rows(_ st: TableModel.GStats, _ P: [Int]) -> [(String, [String])] {
     if g.kind == "carom", let sc = g.score, let inn = g.innings, let hi = g.high {
@@ -1930,7 +1963,8 @@ struct OverHead: View {
     for p in P {
       var items = MOMENTS.filter { st.notes[p][$0] != nil }.map { k in ((g.kind == "snooker" ? SNOOKER_WORDS[k] : nil) ?? OverHead.NOTE_WORDS[k] ?? k) + (st.notes[p][k]! > 1 ? " \u{00d7}\(st.notes[p][k]!)" : "") }
       if let b = st.brk, b.p == p, !b.foul, b.down == 1, st.notes[p]["golden"] == nil { items.append("1 on the break") }
-      notes.append(items.isEmpty ? "None" : items.joined(separator: ", "))
+      /* each item whole on its line: "Bank \u{00d7}2" never breaks */
+      notes.append(items.isEmpty ? "None" : items.map { $0.replacingOccurrences(of: " ", with: "\u{00a0}") }.joined(separator: ", "))
     }
     if g.kind == "snooker" {
       let sc = g.verdict?.snk?.frameOver?.score ?? g.score ?? [0, 0]

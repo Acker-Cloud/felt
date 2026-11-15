@@ -128,6 +128,12 @@ final class TableModel {
   @ObservationIgnored private var ballCache: [Int: (key: [Double], img: (CGImage, Double, Double))] = [:]
   /* the screen's device px a point, as the ball painter last made */
   var scaleFactor: Double { Double(painter?.2 ?? 3) }
+  /* dotEl: a little ball for a sheet (the table's own painter, so it is the ball on the cloth), d pt across */
+  func ballIcon(_ n: Int, _ d: Double) -> (CGImage, CGFloat) {
+    let sc = scaleFactor, bp = ballPainter(upright: true, scale: sc), r = d / 2 * sc
+    let (img, _, _) = bp.ballImage(n, r * 1.6, r * 1.6, r, bp.axesOf(IDENT, screen: true))
+    return (img, sc)
+  }
   func ballPainter(upright: Bool, scale: CGFloat) -> BallPainter {
     if let p = painter, p.1 == upright, p.2 == scale { return p.0 }
     let look = TableLook.of(dress), cloth = RGBA(css: look.cloth.base)
