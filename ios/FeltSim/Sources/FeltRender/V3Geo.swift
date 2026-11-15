@@ -127,6 +127,24 @@ public struct V3Geo {
 #if canImport(CoreGraphics)
 /* v3NumArt: the numbers 1 to 15 as drawBall writes them (0.6 of the radius, bold), one 128 px cell each */
 public enum V3Art {
+  /* v3MarkArt: the colour-blind marks (markOf), upright badges, a 64 px cell per distinct [text, dark] in ALL_BALLS'
+     order (V3_MARKS), 32 cells across */
+  public static let ALL_BALLS: [Int] = Array(0...15) + [21, 22, 23, 24, 25, 31, 32, 33, 34, 35] + Array(41...55) + Array(57...62) + [70, 71, 72]
+  public static let MARKS: [(String, Bool)] = ALL_BALLS.reduce(into: []) { acc, n in
+    if let m = BallPainter.markOf(n), !acc.contains(where: { $0.0 == m.0 && $0.1 == m.1 }) { acc.append(m) }
+  }
+  public static func markIdx(_ n: Int) -> Int { BallPainter.markOf(n).flatMap { m in MARKS.firstIndex { $0.0 == m.0 && $0.1 == m.1 } } ?? -1 }
+  public static func marks() -> CGImage {
+    let S = 64.0, g = Canvas2D(width: 32 * 64, height: 64), ivory = "#f7f4ea", ink = "#141414"
+    for (i, m) in MARKS.enumerated() {
+      let x = (Double(i) + 0.5) * S, y = S / 2, R = S * 0.48, dark = m.1
+      g.fillStyle(dark ? ink : ivory); g.beginPath(); g.arc(x, y, R, 0, Double.pi * 2); g.fill()
+      g.strokeStyle(dark ? ivory : ink); g.lineWidth = S * 0.05; g.stroke()
+      g.fillStyle(dark ? ivory : ink)
+      g.fillTextCentered(m.0, x, y + R * 0.06, size: (R * (m.0.count > 1 ? 1.0 : 1.2) * 10).rounded() / 10)
+    }
+    return g.image()
+  }
   public static func numbers() -> CGImage {
     let S = 128.0, g = Canvas2D(width: 16 * 128, height: 128)
     g.fillStyle("#fff")

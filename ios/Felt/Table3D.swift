@@ -100,14 +100,14 @@ fragment float4 shadowF(ShOut i [[stage_in]], constant ShU &u [[buffer(1)]]) {
   return float4(0.0, 0.0, 0.0, a);
 }
 struct BallU { float4x4 V; float4x4 P; float3x3 Vi; float3 C; float3 Cv; float R; float3 Ax0; float3 Ax1; float3 Ax2; float3 base;
-  float4 cap0; float4 cap1; float4 cap2; float3 capC0; float3 capC1; float3 capC2; float num; float3 Lv; float3 bounce; float alpha; float rim; float4 hole; float3 bedN; float dark; };
+  float4 cap0; float4 cap1; float4 cap2; float3 capC0; float3 capC1; float3 capC2; float num; float3 Lv; float3 bounce; float alpha; float rim; float4 hole; float3 bedN; float dark; float mark; };
 struct BallOut { float4 pos [[position]]; float3 vp; float2 vq; };
 vertex BallOut ballV(uint id [[vertex_id]], constant float2 *q [[buffer(0)]], constant BallU &u [[buffer(1)]]) {
   BallOut o; float4 c = u.V * float4(u.C, 1.0); float3 pv = c.xyz + float3(q[id] * u.R * 1.35, 0.0); o.vp = pv; o.vq = q[id] * 1.35; o.pos = u.P * float4(pv, 1.0); return o;
 }
 float3 paintCap(float3 c, float4 cp, float3 col, float3 l) { if (cp.w < 0.5) return c; float a = cp.x < 0.5 ? l.x : cp.x < 1.5 ? l.y : l.z; return abs(a) >= cp.y ? col : c; }
 struct BallFrag { float4 color [[color(0)]]; float depth [[depth(any)]]; };
-fragment BallFrag ballF(BallOut i [[stage_in]], constant BallU &u [[buffer(1)]], texture2d<float> N [[texture(0)]], sampler s [[sampler(0)]]) {
+fragment BallFrag ballF(BallOut i [[stage_in]], constant BallU &u [[buffer(1)]], texture2d<float> N [[texture(0)]], texture2d<float> K [[texture(1)]], sampler s [[sampler(0)]]) {
   float3 d = normalize(i.vp);
   float b = dot(d, u.Cv), pr2 = dot(u.Cv, u.Cv) - b * b, pr = sqrt(max(pr2, 0.0)), edge = u.R - pr, fw = max(fwidth(pr), 1e-6);
   float cov = clamp(edge / fw + 0.5, 0.0, 1.0);
@@ -135,6 +135,12 @@ fragment BallFrag ballF(BallOut i [[stage_in]], constant BallU &u [[buffer(1)]],
   float df = max(dot(nv, lv), 0.0), sp = pow(max(dot(nv, h), 0.0), 120.0), sh = pow(max(dot(nv, h), 0.0), 14.0), fr = pow(1.0 - max(dot(nv, vv), 0.0), 3.0);
   float3 col = c * (0.3 + 0.78 * df) + u.bounce * 0.2 * max(-np.z, 0.0) * c + float3(1.0) * (0.95 * sp + 0.07 * sh) + float3(0.06) * fr;
   col *= 1.0 - 0.35 * smoothstep(0.2, 0.95, -np.z);
+  /* the colour-blind mark (settings.marks): an upright badge 0.6 of the ball across, on its face to the eye */
+  if (u.mark > -0.5 && length(i.vq) < 0.62) {
+    float2 m = i.vq / 1.24 + 0.5; m.y = 1.0 - m.y;
+    float4 k = K.sample(s, float2((u.mark + m.x) / 32.0, m.y));
+    col = mix(col, k.rgb, k.a);
+  }
   if (u.rim > 0.5 && edge < u.R * 0.09) col = mix(col, float3(0.77), 0.85);
   col *= 1.0 - u.dark;
   float4 cl = u.P * float4(dp, 1.0);
@@ -163,7 +169,7 @@ struct BallU {
   var Ax0: SIMD3<Float>; var Ax1: SIMD3<Float>; var Ax2: SIMD3<Float>; var base: SIMD3<Float>
   var cap0: SIMD4<Float>; var cap1: SIMD4<Float>; var cap2: SIMD4<Float>; var capC0: SIMD3<Float>; var capC1: SIMD3<Float>; var capC2: SIMD3<Float>
   var num: Float; var Lv: SIMD3<Float>; var bounce: SIMD3<Float>; var alpha: Float; var rim: Float
-  var hole = SIMD4<Float>(0, 0, 0, 0); var bedN = SIMD3<Float>(0, 0, 0); var dark: Float = 0
+  var hole = SIMD4<Float>(0, 0, 0, 0); var bedN = SIMD3<Float>(0, 0, 0); var dark: Float = 0; var mark: Float = -1
 }
 
 @MainActor final class Renderer3D: NSObject, MTKViewDelegate {
@@ -182,6 +188,7 @@ struct BallU {
   var roomBusy = false
   var wrapSampler: MTLSamplerState!
   var numTex: MTLTexture!
+  var markTex: MTLTexture!
   let quad: [SIMD2<Float>] = [[-1, -1], [1, -1], [-1, 1], [1, 1]]
   /* V3's seat and moves (v3Update, v3Go): the pivot and yaw, what the seat was set for, the overview and a move */
   var px = Double.nan, py = Double.nan, yaw = 0.0, seatSet = false, seatShot = -1.0, seatTurn = -1, seatPlan: Double? = nil
@@ -291,6 +298,7 @@ struct BallU {
     sd.sAddressMode = .repeat
     wrapSampler = device.makeSamplerState(descriptor: sd)
     numTex = texture(V3Art.numbers())
+    markTex = texture(V3Art.marks())
   }
   func texture(_ img: CGImage) -> MTLTexture? {
     let l = MTKTextureLoader(device: device)
@@ -546,7 +554,7 @@ struct BallU {
     e.setDepthStencilState(depthOn)
     e.setRenderPipelineState(ballP)
     e.setVertexBytes(&q, length: 32, index: 0)
-    e.setFragmentTexture(numTex, index: 0); e.setFragmentSamplerState(sampler, index: 0)
+    e.setFragmentTexture(numTex, index: 0); e.setFragmentTexture(markTex, index: 1); e.setFragmentSamplerState(sampler, index: 0)
     let toV = { (p: [Double]) -> SIMD3<Float> in let V = C.V; return SIMD3<Float>((0..<3).map { Float(V[$0] * p[0] + V[4 + $0] * p[1] + V[8 + $0] * p[2] + V[12 + $0]) }) }
     let Vi = simd_float3x3(f3(C.r), f3(C.u), -f3(C.f))
     let painter = model.ballPainter(upright: true, scale: CGFloat(sc))
@@ -561,6 +569,8 @@ struct BallU {
                     Ax2: SIMD3<Float>(Float(m[2]), Float(m[5]), Float(m[8])), base: rgb(p.base), cap0: c0.0, cap1: c1.0, cap2: c2.0, capC0: c0.1, capC1: c1.1, capC2: c2.1,
                     num: Float(o.n > 0 && o.n < 16 ? o.n : 0), Lv: toV(lamp), bounce: f3(G.bounce), alpha: Float(o.a), rim: painter.rim3(o.n) ? 1 : 0)
       u.bedN = SIMD3<Float>(Float(C.V[8]), Float(C.V[9]), Float(C.V[10])); u.dark = Float(o.dark)
+      /* v3MarkIdx: the ball's mark cell when settings.marks is on */
+      u.mark = painter.marks ? Float(V3Art.markIdx(o.n)) : -1
       if let d = o.drop { let h = toV([s.POCKETS[d.k][0], s.POCKETS[d.k][1], 0]); u.hole = SIMD4<Float>(h.x, h.y, h.z, Float(s.POCKET_R[d.k])) }
       e.setVertexBytes(&u, length: MemoryLayout<BallU>.stride, index: 1); e.setFragmentBytes(&u, length: MemoryLayout<BallU>.stride, index: 1)
       e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
