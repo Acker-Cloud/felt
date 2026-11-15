@@ -679,6 +679,45 @@ public final class CPU {
     }
   }
 
+  /* suggestAim (sim 1f): the aim to start a human turn on, the cue angle of the easiest pot for the player to shoot
+     ({ angle, n, k }: object ball, pocket), from the CPU's ghost-ball lines and clearance tests, no simulation. Legal
+     balls only. Easiest is the widest cue-angle tolerance (SUGGEST: minCos 0.2, a noise so wide tanh stays linear).
+     No clean line: straight at the nearest legal ball's centre, k = -1 (snooker: one in sight first); on the break, at
+     the head ball (9-ball the 1; snooker's break-off a thin contact on the end red of the back row on the cue ball's
+     side). Bumper pool and carom: their own (suggestBumper, suggestCarom: the hint level's shot). nil when the game is
+     over or the cue ball is off the table. */
+  public func suggestAim(_ g: Game) -> (angle: Double, n: Int, k: Int)? {
+    if g.kind == "bumper" { return suggestBumper(g).flatMap { r in r.n.map { (r.angle, $0, r.k) } } }
+    if g.kind == "carom" {
+      if g.winner != nil { return nil }
+      let sh = cpuShot(g, seed: 1, level: "hint"), n = sh.first ?? E.caromTargets(g).first
+      guard let n, g.balls.contains(where: { $0.n == n }) else { return nil }
+      return (sh.angle, n, -1)
+    }
+    guard g.winner == nil, let c = g.ball(0), c.on else { return nil }
+    let targets = cpuTargets(g)
+    func toward(_ t: GBall) -> (angle: Double, n: Int, k: Int) { (M.atan2(t.y - c.y, t.x - c.x), t.n, -1) }
+    if g.breakShot && g.kind == "snooker" {
+      let sd: Double = c.y >= s.TW / 2 ? 1 : -1, reds = g.balls.filter { $0.on && $0.n >= 41 && $0.n <= 55 }
+      if var t = reds.first {
+        for b in reds.dropFirst() where sd * b.y * 10 + b.x > sd * t.y * 10 + t.x { t = b }
+        let D = M.hypot(t.x - c.x, t.y - c.y)
+        return (M.atan2(t.y - c.y, t.x - c.x) + sd * M.asin(min(1, 0.88 * 2 * s.BALL_R / D)), t.n, -1)
+      }
+    }
+    if g.breakShot && g.kind != "snooker" {
+      let objs = g.balls.filter { $0.on && $0.n > 0 }
+      guard var t = objs.first else { return nil }
+      if g.kind == "9", let one = g.ball(1) { t = one } else { for b in objs.dropFirst() where b.x < t.x { t = b } }
+      return toward(t)
+    }
+    if let l = cpuLines(g.balls, c.x, c.y, targets, minCos: 0.2, noise: 1).first { return (l.angle, l.n, l.k) }
+    let all = targets.compactMap { g.ball($0) }.filter { $0.on }
+    let seen = g.kind == "snooker" ? all.filter { cpuSight(g.balls, c.x, c.y, [$0.n]) != 0 } : []
+    var near: GBall? = nil
+    for b in seen.isEmpty ? all : seen where near == nil || M.hypot(b.x - c.x, b.y - c.y) < M.hypot(near!.x - c.x, near!.y - c.y) { near = b }
+    return near.map(toward)
+  }
   public func cpuShot(_ g: Game, seed: Double, level: String) -> CPUShot {
     if g.kind == "bumper" { return cpuBumper(g, seed: seed, level: level) }
     if g.kind == "carom" { return cpuCarom(g, seed: seed, level: level) }

@@ -548,7 +548,7 @@ final class TableModel {
     if prac != nil { pushUndo(before) }
     let next = engine.practiceJudge(before, shot), v = next.verdict!
     potCount += v.potted.count
-    g = next; rolling = nil; spin = Spin(); v3Top2d = false
+    g = next; rolling = nil; spin = Spin(); v3Top2d = false; handAimed = false
     syncBalls()
     guard var P = prac else { return }
     P.shots += 1; P.pots += v.potted.count; if !v.potted.isEmpty { P.potting += 1 }
@@ -813,7 +813,7 @@ final class TableModel {
 
   func rerack() {
     abandonCpuGame()
-    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], [], [], []]; stats = GStats(); potCount = 0; banner = nil
+    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); handAimed = false; pottedBy = [[], [], [], []]; stats = GStats(); potCount = 0; banner = nil
     if tut != nil { tutBegin(0); return }
     if lesson != nil { g = lessonGame(); syncBalls(); randomOrient(); lessonAim(); return }
     if let D = drill, let d = drillById(D.id) {
@@ -887,6 +887,8 @@ final class TableModel {
     if !Prefs.autoAim && (g?.shots ?? 0) > 0 { return }
     /* bumper's autoAim (page 5): suggestBumper's ball unless one was picked; its line, or straight at the far cup */
     if game == .bumper, var gm = g, gm.winner == nil, let sg = CPU(engine: engine).suggestBumper(gm) {
+      aimAnim = nil; hint = nil
+      if let n = sg.n, !cpuTurn { hint = (n, sg.k); hintT = now }
       if !picked, let n = sg.n, n != gm.striker { gm.striker = n; g = gm; syncBalls() }
       if let c = cue {
         let T = sim.POCKETS[sg.k]
@@ -894,11 +896,54 @@ final class TableModel {
       }
       return
     }
+    /* autoAim (page 5): a human turn starts on suggestAim's line, the cue swung onto it over AUTO_AIM_MS (at once
+       with Reduce Motion), and `hint` names its ball and pocket (drawHint); never in the lesson, which teaches aiming,
+       nor once the player has aimed by hand this turn (the hint still follows) */
+    aimAnim = nil; hint = nil
+    if let gm = g, !cpuTurn, lesson == nil, rolling == nil {
+      guard Prefs.autoAim, let sg = CPU(engine: engine).suggestAim(gm), let c = cue, gm.balls.contains(where: { $0.n == sg.n && $0.on }) else {
+        if !Prefs.autoAim && (g?.shots ?? 0) == 0 { nearestAim() }
+        return
+      }
+      hint = (sg.n, sg.k); hintT = now
+      if handAimed { return }
+      /* the cue points at the centre of the ball suggested (carom: the suggested line itself) */
+      guard let t = gm.balls.first(where: { $0.n == sg.n }) else { return }
+      let to = gm.kind == "carom" ? sg.angle : atan2(t.y - c.y, t.x - c.x)
+      if reduceMotion { aim = to; return }
+      aimAnim = (aim, AimFeel.wrap(to - aim), now)
+      return
+    }
+    nearestAim()
+  }
+  private func nearestAim() {
     guard let c = balls.first(where: { $0.n == cueN }) else { return }
     let others = balls.filter { $0.on && $0.n != cueN }
     if let t = others.min(by: { JSMath.hypot($0.x - c.x, $0.y - c.y) < JSMath.hypot($1.x - c.x, $1.y - c.y) }) {
       aim = atan2(t.y - c.y, t.x - c.x)
     }
+  }
+  /* auto aim's suggestion (hint: the ball and pocket drawHint marks), its swing (stepAutoAim), and whether the player
+     has aimed by hand this turn */
+  static let AUTO_AIM_MS = 0.25
+  @ObservationIgnored var hint: (n: Int, k: Int)?
+  @ObservationIgnored var hintT: TimeInterval = 0
+  @ObservationIgnored var aimAnim: (from: Double, d: Double, t0: TimeInterval)?
+  @ObservationIgnored var handAimed = false
+  /* the system's Reduce Motion, as the game screen reads it */
+  @ObservationIgnored var reduceMotion = false
+  func stepAutoAim() {
+    guard let a = aimAnim else { return }
+    if rolling != nil || stroke != nil { aimAnim = nil; return }
+    let u = min(1, max(0, (now - a.t0) / (TableModel.AUTO_AIM_MS / speed)))
+    aim = a.from + a.d * (1 - pow(1 - u, 3))
+    if u >= 1 { aimAnim = nil }
+  }
+  /* finishAutoAim: the player takes the aim mid-swing: it lands where it was going first; and from now this turn's aim
+     is the player's */
+  func takeAim() {
+    if let a = aimAnim { aim = a.from + a.d; aimAnim = nil }
+    handAimed = true
   }
 
   /* only the power bar shoots (the page's rule). Its release starts the stroke: the cue is driven
@@ -941,6 +986,7 @@ final class TableModel {
     defer { frame &+= 1 }
     if paused { lastT = nil; return }
     self.now = now
+    stepAutoAim()
     if lesson != nil { lessonCheck() }
     if let o = offer, now > o.until || rolling != nil || stroke != nil { offer = nil }
     if rp != nil { if let f = flashDue { banner = (f.0, f.1, now + f.2); flashDue = nil }; pots.removeAll { now - $0.t >= potMs }; replayStep(now); return }

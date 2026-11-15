@@ -288,6 +288,7 @@ struct TableScreen: View {
   @State private var pinch0: Double? = nil
   @State private var eating = false
   @Environment(\.displayScale) private var scale
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   /* the window's interface orientation, read as the size changes (a turn) */
   private var interface: UIInterfaceOrientation { (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.effectiveGeometry.interfaceOrientation ?? .portrait }
 
@@ -318,6 +319,8 @@ struct TableScreen: View {
       }
     }
     .background(Color(rgb: 9, 9, 10).ignoresSafeArea())
+    .onAppear { model.reduceMotion = reduceMotion }
+    .onChange(of: reduceMotion) { _, v in model.reduceMotion = v }
     .overlay(alignment: .topTrailing) { if model.prac != nil && !model.paused { PracticeTools(model: model).padding(.top, 8).padding(.trailing, 12) } }
     /* the elevation sheet over the pad (upright: above it, at the strip's leading end), a tap anywhere else closing it */
     .overlay(alignment: .bottomLeading) {
@@ -464,7 +467,7 @@ struct TableScreen: View {
       else if t - g.t0 >= AimFeel.HOLD_MS && g.far > AimFeel.HOLD_SLOP { g.sweep = true; g.held = true }
     }
     /* while a let-go would still be a tap the line waits, then catches up with the finger in one step */
-    if g.sweep && !g.maybeTap(t) { g.shown = true; turnTo(&g, b, t, m, c) }
+    if g.sweep && !g.maybeTap(t) { if !g.shown { model.takeAim() }; g.shown = true; turnTo(&g, b, t, m, c) }
     gest = g
   }
   /* v3Drag: across turns the aim (rate by finger speed, 0.02 to 0.3 deg a point), up and down tilts (0.25 deg a point) */
@@ -515,8 +518,8 @@ struct TableScreen: View {
         let q = m.pt(o.x, o.y), d = JSMath.hypot(Double(q.x - p.x), Double(q.y - p.y))
         if d < bd { bd = d; best = o }
       }
-      if let o = best { model.aim = atan2(o.y - c.y, o.x - c.x) }
-      else if JSMath.hypot(x - c.x, y - c.y) > s.BALL_R { model.aim = atan2(y - c.y, x - c.x) }
+      if let o = best { model.takeAim(); model.aim = atan2(o.y - c.y, o.x - c.x) }
+      else if JSMath.hypot(x - c.x, y - c.y) > s.BALL_R { model.takeAim(); model.aim = atan2(y - c.y, x - c.x) }
       return
     }
     turnTo(&g, v.location, t, m, c)
@@ -603,7 +606,7 @@ struct FineWheel: View {
       .contentShape(Rectangle())
       .gesture(DragGesture(minimumDistance: 0).onChanged { v in
         let t = v.time.timeIntervalSinceReferenceDate * 1000
-        if !live { live = true; model.fineAim = true; model.lessonWheel(); wv = nil; wt = t; trail = [(t, model.aim, Double(v.location.x), Double(v.location.y))] }
+        if !live { live = true; model.fineAim = true; model.lessonWheel(); model.takeAim(); wv = nil; wt = t; trail = [(t, model.aim, Double(v.location.x), Double(v.location.y))] }
         let d = v.translation.height, dy = Double(d - last)
         guard dy != 0 else { return }
         /* wheelRate by the finger's smoothed speed; down turns the cue clockwise on screen */

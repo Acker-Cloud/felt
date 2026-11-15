@@ -236,7 +236,8 @@ func encode(_ g: Game) -> [String: Any] {
     let fresh = kind == "carom" ? E.caromGame(race: int(G["race"])!, cushions: int(G["need"])!, side: int(G["side"])!) : kind == "snooker" ? E.snookerGame(frames: int((G["g0"] as! [String: Any])["frames"])!, first: int((G["g0"] as! [String: Any])["breaker"])!) : E.newGame(kind, rules: rules)
     let d0 = diffGame(G["g0"] as! [String: Any], fresh)
     #expect(d0.isEmpty, "\(name): newGame: \(d0.prefix(5))")
-    var prev = G["g0"] as! [String: Any], conceded = 0
+    var prev = G["g0"] as! [String: Any], conceded = 0, suggested = 0
+    defer { #expect(suggested > 0, "\(name): suggestAim checked") }
     defer { if kind == "snooker" { #expect(conceded > 0, "\(name): concedes checked") } }
     for (k, s) in (G["steps"] as! [[String: Any]]).enumerated() {
       var g = decodeGame(prev, rules: rules)
@@ -249,6 +250,14 @@ func encode(_ g: Game) -> [String: Any] {
           g.balls[i].x = p[0].doubleValue; g.balls[i].y = p[1].doubleValue; g.balls[i].vx = 0; g.balls[i].vy = 0; g.balls[i].on = true
         }
         g.call = decodeCall(s["call"])
+        /* auto aim (suggestAim): the line, the ball and the pocket the page suggests for this position */
+        if s.keys.contains("sug") {
+          let got = CPU(engine: E).suggestAim(g), want = s["sug"] as? [Any]
+          let gs: [String]? = got.map { [String($0.angle.bitPattern, radix: 16).leftPad(16), String($0.n), String($0.k)] }
+          let ws: [String]? = want.map { [$0[0] as! String, "\(($0[1] as! NSNumber).intValue)", "\(($0[2] as! NSNumber).intValue)"] }
+          if gs != ws { Issue.record("\(name) step \(k): suggestAim \(String(describing: gs)) vs \(String(describing: ws))") }
+          suggested += 1
+        }
         /* Concede Frame (concedeSnooker) from the game as it stood */
         if let c = s["concede"] as? [String: Any] {
           let d = diffGame(c, E.concedeSnooker(g, g.turn))
@@ -325,3 +334,5 @@ func encode(_ g: Game) -> [String: Any] {
     #expect(checked > 100)
   }
 }
+
+extension String { func leftPad(_ n: Int) -> String { String(repeating: "0", count: max(0, n - count)) + self } }

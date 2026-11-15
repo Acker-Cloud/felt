@@ -73,7 +73,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf', 'newPractice', 'practiceJudge', 'scatter', 'addBall', 'removeBall', 'rng', 'canDrop', 'onTable', 'TRICKS', 'trickJudge', 'trickPoints', 'trickSol', 'trickGame', 'programMax', 'TRICK_VAL', 'trickPts', 'trickScoreFromStars', 'trickStars', 'newBall', 'shotMoments', 'concedeSnooker', 'DRILL_LIB', 'drillRun', 'drillShot', 'drillTier', 'drillTotal', 'drillJudge', 'drillBalls', 'drillOver', 'TUTORIALS', 'tutGame', 'tutJudge', 'tutNum', 'tutSol'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf', 'newPractice', 'practiceJudge', 'scatter', 'addBall', 'removeBall', 'rng', 'canDrop', 'onTable', 'TRICKS', 'trickJudge', 'trickPoints', 'trickSol', 'trickGame', 'programMax', 'TRICK_VAL', 'trickPts', 'trickScoreFromStars', 'trickStars', 'newBall', 'shotMoments', 'concedeSnooker', 'suggestAim', 'DRILL_LIB', 'drillRun', 'drillShot', 'drillTier', 'drillTotal', 'drillJudge', 'drillBalls', 'drillOver', 'TUTORIALS', 'tutGame', 'tutJudge', 'tutNum', 'tutSol'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -82,6 +82,8 @@ function loadFd() {
 
 const dv = new DataView(new ArrayBuffer(8));
 const hx = v => { dv.setFloat64(0, v); return dv.getBigUint64(0).toString(16).padStart(16, '0'); };
+/* suggestAim's answer (auto aim's line, ball and pocket), null when it has none */
+const sugOf = s => s && s.n !== null && s.n !== undefined ? [hx(s.angle), s.n, s.k] : null;
 /* FNV-1a, 32 bit, over a ball list's state, in the Swift test's order */
 function fnv(h, w) { h ^= w; return Math.imul(h, 16777619) >>> 0; }
 function hashBalls(B) {
@@ -315,7 +317,7 @@ function build() {
         step.r = JSON.parse(JSON.stringify({ balls: res.balls, first: res.first, railAfter: res.railAfter, crossed: res.crossed, potted: res.potted, pocketOf: res.pocketOf, rails: res.rails, kick: res.kick }));
         const out = S.judge(g, res);
         step.out = bare(out);
-        step.m = mom(g, res, out);
+        step.m = mom(g, res, out); step.sug = sugOf(S.suggestAim(g));
         steps.push(step);
         g = out;
       }
@@ -353,7 +355,7 @@ function build() {
       step.r = JSON.parse(JSON.stringify({ balls: res.balls, first: res.first, railAfter: res.railAfter, crossed: res.crossed, potted: res.potted, pocketOf: res.pocketOf, rails: res.rails, kick: res.kick, seq: res.seq, over: res.over }));
       const out = S.judge(g, res);
       step.out = bare(out);
-      step.m = mom(g, res, out);
+      step.m = mom(g, res, out); step.sug = sugOf(S.suggestAim(g));
       /* Concede Frame (concedeSnooker) from the game as it stood, every twelfth shot */
       if (k % 12 === 5) step.concede = bare(S.concedeSnooker(g, g.turn));
       steps.push(step);
@@ -386,7 +388,7 @@ function build() {
       step.r = JSON.parse(JSON.stringify({ balls: res.balls, first: res.first, railAfter: res.railAfter, crossed: res.crossed, potted: res.potted, pocketOf: res.pocketOf, rails: res.rails, kick: res.kick, seq: res.seq, over: res.over, cue: res.cue }));
       const out = S.judge(g, res);
       step.out = bare(out);
-      step.m = mom(g, res, out);
+      step.m = mom(g, res, out); step.sug = sugOf(S.suggestAim(g));
       steps.push(step);
       g = out;
     }
@@ -418,7 +420,7 @@ function build() {
       step.r = JSON.parse(JSON.stringify({ balls: res.balls, cue: res.cue, first: res.first, railAfter: res.railAfter, crossed: res.crossed, potted: res.potted, pocketOf: res.pocketOf, rails: res.rails, kick: res.kick }));
       const out = S.judge(g, res);
       step.out = bare(out);
-      step.m = mom(g, res, out);
+      step.m = mom(g, res, out); step.sug = sugOf(S.suggestAim(g));
       steps.push(step);
       g = out;
     }
