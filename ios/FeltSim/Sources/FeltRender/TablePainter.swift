@@ -153,7 +153,7 @@ public final class TablePainter {
     else { c.setTransform(k, 0, 0, k, view.ox * dpr, view.oy * dpr) }
   }
   func tdir(_ sx: Double, _ sy: Double) -> [Double] { view.portrait ? [-sy, sx] : [sx, sy] }
-  func cushionDepth() -> Double {
+  public func cushionDepth() -> Double {
     var d = 0.02
     for p in s.CUSHION_POLYS { for q in p { d = max(d, -q[0], -q[1], q[0] - TL, q[1] - TW) } }
     return min(d, RAIL - 0.02)
@@ -163,7 +163,7 @@ public final class TablePainter {
   func capBack(_ co: Double) -> Double { clampD(0.3 * (RAIL - co), 0.006, 0.014) }
   func capGap(_ co: Double) -> Double { clampD(0.12 * (RAIL - co), 0.004, 0.008) }
   func circle(_ g: Canvas2D, _ x: Double, _ y: Double, _ r: Double) { g.beginPath(); g.arc(x, y, r, 0, Double.pi * 2) }
-  func polyPath(_ g: Canvas2D, _ p: [[Double]]) {
+  public func polyPath(_ g: Canvas2D, _ p: [[Double]]) {
     for (i, q) in p.enumerated() { i == 0 ? g.moveTo(q[0], q[1]) : g.lineTo(q[0], q[1]) }
     g.closePath()
   }

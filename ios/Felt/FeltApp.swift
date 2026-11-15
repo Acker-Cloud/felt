@@ -20,6 +20,7 @@ struct Home: View {
   @State private var showTourney = false
   @State private var career = CareerStore()
   @State private var showCareer = false
+  @State private var setupGame: TableGame? = nil
   struct PartyGo: Identifiable { let game: TableGame, names: [String], ruleset: String; var id: String { ruleset + names.joined() } }
   struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var archs: [String] = ["allround", "allround"]; var id: String { game.rawValue + levels.joined() + archs.joined() } }
   var body: some View {
@@ -34,7 +35,7 @@ struct Home: View {
         } header: { Text("Opponent") } footer: { Text("The CPU plays every game at three levels, the web build's own search.") }
         Section {
           ForEach(TableGame.allCases) { g in
-            Button { playing = g } label: {
+            NavigationLink { GameSetup(game: g) { playing = g } } label: {
               VStack(alignment: .leading, spacing: 2) {
                 Text(g.rawValue).font(.body.weight(.semibold)).foregroundStyle(.primary)
                 Text(g.line).font(.footnote).foregroundStyle(.secondary)
@@ -80,6 +81,7 @@ struct Home: View {
       }
       .navigationTitle("felt")
       .navigationDestination(isPresented: $showCareer) { CareerView(store: career) }
+      .navigationDestination(item: $setupGame) { g in GameSetup(game: g) { playing = g } }
       .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { store.markLive(); playingTourney = true } }
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
@@ -93,6 +95,8 @@ struct Home: View {
       let a = ProcessInfo.processInfo.arguments
       if let i = a.firstIndex(of: "-felt-game"), i + 1 < a.count { playing = TableGame(rawValue: a[i + 1]) }
       /* `-felt-tourney`: the golden's first tournament (9-ball, 8 players, seed 11), its screen open */
+      /* `-felt-setup "8-Ball"`: that game's setup open */
+      if let i = a.firstIndex(of: "-felt-setup"), i + 1 < a.count { setupGame = TableGame(rawValue: a[i + 1]) }
       /* `-felt-career`: the career's screen open */
       if a.contains("-felt-career") { showCareer = true }
       if a.contains("-felt-tourney") { store.start(Tourney.make(kind: "9", ruleset: nil, size: 8, fmt: "single", race: 3, field: "mixed", seed: 11)); showTourney = true }
@@ -1001,5 +1005,33 @@ struct Overlays: View {
       .padding(20).frame(maxWidth: 340)
       .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
       .padding(24)
+  }
+}
+
+/* the game setup (6, the setup sheet): the hero at its top (4m: the table and its signature shot, a tap replays it), the
+   game's name in Large Title over its line, and Break pinned at the foot */
+struct GameSetup: View {
+  let game: TableGame
+  let go: () -> Void
+  var body: some View {
+    GeometryReader { g in
+      VStack(spacing: 0) {
+        /* heroFit: the room the form leaves, 20% to 50% of the sheet (for 8-ball vs the CPU at 393 x 852, 381 pt) */
+        HeroView(game: game, txt: 104).frame(height: min(g.size.height * 0.5, max(g.size.height * 0.2, g.size.width * 0.97)))
+          .overlay(alignment: .bottomLeading) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text(game.rawValue).font(.largeTitle.bold()).foregroundStyle(.white)
+              Text(game.line).font(.subheadline).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+            }
+            .padding(.horizontal, 16).padding(.bottom, 12)
+          }
+        Spacer(minLength: 16)
+        Button(action: go) { Text("Break").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+          .background(Capsule().fill(.white)).foregroundStyle(.black).padding(.horizontal, 16).padding(.bottom, 12)
+          .accessibilityIdentifier("break")
+      }
+    }
+    .background(Color.black)
+    .ignoresSafeArea(edges: .top)
   }
 }

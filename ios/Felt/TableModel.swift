@@ -75,6 +75,15 @@ final class TableModel {
   /* the table this game is played on, and one Sim set to it exactly as the model's is (the art and the CPU's
      search build their own): a bumper table reached from the 7 ft table, as every golden reaches it */
   let spec: (table: String, shape: String?, pockets: String)
+  /* start()'s table for a game from the settings (every pool game on its size and pockets; snooker's size; bumper's shape) */
+  static func spec(for game: TableGame) -> (table: String, shape: String?, pockets: String) {
+    switch game {
+    case .eight, .nine, .ten, .straight, .rotation: (Prefs.table, nil, Prefs.pockets)
+    case .snooker: ("snooker", Prefs.snookerTable, Prefs.pockets)
+    case .bumper: ("bumper", Prefs.bumperTable, Prefs.pockets)
+    default: (game.table.0, game.table.1, Prefs.pockets)
+    }
+  }
   nonisolated static func setUp(_ sim: Sim, _ spec: (table: String, shape: String?, pockets: String)) {
     if spec.table == "bumper" { sim.setTable("7") }
     sim.setPockets(spec.pockets)

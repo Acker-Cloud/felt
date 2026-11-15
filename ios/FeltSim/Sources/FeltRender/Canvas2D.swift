@@ -363,6 +363,20 @@ public final class Canvas2D {
     cg.restoreGState()
   }
   public func drawImage(_ src: Canvas2D, _ x: Double, _ y: Double, _ w: Double, _ h: Double) { drawImage(src.image(), x, y, w, h) }
+  /* drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh): the source rect (cut to whole pixels and the image) into the dest */
+  public func drawImage(_ img: CGImage, _ sx: Double, _ sy: Double, _ sw: Double, _ sh: Double, _ dx: Double, _ dy: Double, _ dw: Double, _ dh: Double) {
+    let x0 = Swift.max(0, sx.rounded(.down)), y0 = Swift.max(0, sy.rounded(.down)), x1 = Swift.min(Double(img.width), (sx + sw).rounded(.up)), y1 = Swift.min(Double(img.height), (sy + sh).rounded(.up))
+    guard x1 > x0, y1 > y0, let c = img.cropping(to: CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)) else { return }
+    let kx = dw / sw, ky = dh / sh
+    drawImage(c, dx + (x0 - sx) * kx, dy + (y0 - sy) * ky, (x1 - x0) * kx, (y1 - y0) * ky)
+  }
+  /* ellipse(x, y, rx, ry, rotation, a0, a1, ccw), as the canvas's (rotation 0 here) */
+  public func ellipse(_ x: Double, _ y: Double, _ rx: Double, _ ry: Double, _ a0: Double, _ a1: Double, _ ccw: Bool = false) {
+    let keep = st.ctm
+    st.ctm = CGAffineTransform(a: rx, b: 0, c: 0, d: ry, tx: x, ty: y).concatenating(keep)
+    arc(0, 0, 1, a0, a1, ccw)
+    st.ctm = keep
+  }
   nonisolated(unsafe) private static var fonts: [Double: CTFont] = [:]
   private static let fontLock = NSLock()
   static func font(_ size: Double, _ weight: CGFloat) -> CTFont {

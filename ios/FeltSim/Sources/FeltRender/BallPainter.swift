@@ -150,6 +150,19 @@ public final class BallPainter {
   }
 
   /* one ball at device pixel (X, Y), radius r device px, axes from axesOf() */
+  /* drawShadow: the contact shadow sprite (ballSprites' shadow) at (X, Y) for radius r: the lamp's offset pool and the
+     shade round the ball's foot */
+  public func drawShadow(_ g: Canvas2D, _ X: Double, _ Y: Double, _ r: Double, alpha: Double = 1) {
+    let sc = (5 * r).rounded(.up) / 2, ox = -LIGHT[0] * r * 0.38, oy = -LIGHT[1] * r * 0.38
+    g.save(); g.translate(X, Y); let a0 = g.globalAlpha; g.globalAlpha = alpha
+    let gr = g.createRadialGradient(ox, oy, 0, ox, oy, r * 1.55)
+    gr.addColorStop(0, "rgba(0,0,0,0.45)"); gr.addColorStop(0.55, "rgba(0,0,0,0.26)"); gr.addColorStop(1, "rgba(0,0,0,0)")
+    g.fillStyle = .gradient(gr); g.fillRect(-sc, -sc, 2 * sc, 2 * sc)
+    let g2 = g.createRadialGradient(0, 0, r * 0.85, 0, 0, r * 1.14)
+    g2.addColorStop(0, "rgba(0,0,0,0.5)"); g2.addColorStop(1, "rgba(0,0,0,0)")
+    g.fillStyle = .gradient(g2); g.fillRect(-sc, -sc, 2 * sc, 2 * sc)
+    g.globalAlpha = a0; g.restore()
+  }
   public func drawBall(_ g: Canvas2D, _ n: Int, _ X: Double, _ Y: Double, _ r: Double, _ ax: [[Double]], alpha: Double = 1, dark: Double = 0, rim: Bool = false) {
     guard let P = paint[n] else { return }
     let S = ballSprites(r), k = r / S.r

@@ -14,7 +14,7 @@ public struct V3Geo {
   public static let FLOOR = 0.76
 
   /* heroOutline: the table's outline at the rails' outer edge (the octagon, or the rectangle with rounded corners) */
-  static func outline(_ s: Sim, _ P: TablePainter, _ co: Double) -> [[Double]] {
+  public static func outline(_ s: Sim, _ P: TablePainter, _ co: Double) -> [[Double]] {
     let RAIL = P.RAIL
     if s.BED_LINES != nil { return s.octagon(RAIL) }
     let r = s.MOUTHS.isEmpty ? Swift.min(0.045, RAIL) : Swift.min(P.pocketShape(0, co).rc + P.capGap(co), RAIL + co)
