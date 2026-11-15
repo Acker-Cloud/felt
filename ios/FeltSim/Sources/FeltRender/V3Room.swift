@@ -327,5 +327,59 @@ public enum V3Room {
     g.globalAlpha = 0.82; g.drawImage(paintShadow(), X(s.TL / 2 - hx), Y(s.TW / 2 - hy), 2 * hx * K, 2 * hy * K); g.globalAlpha = 1
     return g.image()
   }
+  // MARK: the neighbours' cards
+  /* v3PaintNTop: a neighbouring table from above, 3.4 x 2.3 m, lit by its own lamp */
+  static func paintNTop() -> CGImage {
+    let K = 64.0, g = Canvas2D(width: js(3.4 * K), height: js(2.3 * K)), rnd = cpuRng(5), o = 0.45
+    g.fillStyle("#2c1a11"); roundRect(g, o * K, o * K, 2.5 * K, 1.4 * K, 0.06 * K); g.fill()
+    g.fillStyle("#2f7560"); g.fillRect((o + 0.13) * K, (o + 0.13) * K, 2.24 * K, 1.14 * K)
+    let L = g.createRadialGradient((o + 1.25) * K, (o + 0.7) * K, 0, (o + 1.25) * K, (o + 0.7) * K, 1.3 * K)
+    L.addColorStop(0, "rgba(255,240,200,0.4)"); L.addColorStop(1, "rgba(0,0,0,0.35)")
+    g.fillStyle = .gradient(L); g.fillRect((o + 0.13) * K, (o + 0.13) * K, 2.24 * K, 1.14 * K)
+    for c in ["#d8d2c0", "#c9a43a", "#2d4a9a", "#a8342c", "#5a2e70", "#d07a2a", "#222"] {
+      g.fillStyle(c); g.beginPath(); let x = (o + 0.4 + rnd() * 1.7) * K, y = (o + 0.3 + rnd() * 0.8) * K; g.arc(x, y, 0.035 * K, 0, 7); g.fill()
+    }
+    return blur(g.image(), 4)
+  }
+  public static let NSIDE = [0.16, -0.34], NSIDE_W = 3.0, NSIDE_EL = [0.2, 0.5]
+  /* v3PaintNSide: a neighbouring table side on, as a low eye sees it across the room */
+  static func paintNSide() -> CGImage {
+    let K = 64.0, W = NSIDE_W, g = Canvas2D(width: js(W * K), height: js((NSIDE[0] - NSIDE[1]) * K)), rnd = cpuRng(9)
+    let Y = { (z: Double) in (NSIDE[0] - z) * K }, X = { (x: Double) in (W / 2 + x) * K }, L = 1.3, Lb = 1.05
+    let bd = g.createLinearGradient(0, Y(-0.17), 0, Y(-0.32))
+    bd.addColorStop(0, "rgba(18,11,7,1)"); bd.addColorStop(1, "rgba(18,11,7,0)")
+    g.fillStyle = .gradient(bd); g.fillRect(X(-Lb), Y(-0.17), 2 * Lb * K, 0.15 * K)
+    let ap = g.createLinearGradient(0, Y(0), 0, Y(-0.17))
+    ap.addColorStop(0, "#7a4a2a"); ap.addColorStop(1, "#2e1b10")
+    g.fillStyle = .gradient(ap); g.fillRect(X(-L), Y(0), 2 * L * K, 0.17 * K)
+    g.fillStyle("#b07a4a"); g.fillRect(X(-L), Y(0.035), 2 * L * K, 0.035 * K)
+    g.fillStyle("#4fae8a"); g.fillRect(X(-L + 0.12), Y(0.06), 2 * (L - 0.12) * K, 0.025 * K)
+    for c in ["#e8e2d0", "#d9b240", "#3a5ab0", "#b8402f", "#222"] { g.fillStyle(c); g.beginPath(); let x = X(-0.9 + rnd() * 1.8); g.arc(x, Y(0.085), 0.03 * K, 0, 7); g.fill() }
+    return blur(g.image(), 2)
+  }
+  /* v3PaintLamp: the neighbour's lamp side on, the shade with its lit lip and its glow round and under it */
+  static func paintLamp() -> CGImage {
+    let K = 64.0, g = Canvas2D(width: js(1.9 * K), height: js(0.66 * K)), y0 = 0.16 * K, y1 = 0.33 * K
+    let gr = g.createRadialGradient(0, 0, 0, 0, 0, 1)
+    gr.addColorStop(0, "rgba(255,214,160,0.42)"); gr.addColorStop(0.35, "rgba(255,200,140,0.16)"); gr.addColorStop(1, "rgba(255,200,140,0)")
+    g.save(); g.translate(0.95 * K, y1); g.scale(0.92 * K, 0.33 * K); g.fillStyle = .gradient(gr); g.fillRect(-1, -1, 2, 2); g.restore()
+    g.fillStyle("#121110"); g.beginPath(); g.moveTo(0.3 * K, y0); g.lineTo(1.6 * K, y0); g.lineTo(1.65 * K, y1); g.lineTo(0.25 * K, y1); g.closePath(); g.fill()
+    g.fillStyle("rgba(255,214,150,0.9)"); g.fillRect(0.25 * K, y1 - 2, 1.4 * K, 3)
+    return blur(g.image(), 3)
+  }
+  /* v3CardAtlas: the three cards in one 512 x 256 atlas with gutters; at[name] = [u0, v0, u1, v1] */
+  public static func cardAtlas() -> (image: CGImage, at: [String: [Double]]) {
+    let parts: [(String, CGImage)] = [("top", paintNTop()), ("lamp", paintLamp()), ("side", paintNSide())]
+    let W = 512.0, H = 256.0, g = Canvas2D(width: 512, height: 256), gap = 6.0
+    var at: [String: [Double]] = [:], x = gap, y = gap, row = 0.0
+    for (k, c) in parts {
+      let cw = Double(c.width), ch = Double(c.height)
+      if x + cw + gap > W { x = gap; y += row + gap; row = 0 }
+      g.drawImage(c, x, y, cw, ch)
+      at[k] = [(x + 0.5) / W, (y + 0.5) / H, (x + cw - 0.5) / W, (y + ch - 0.5) / H]
+      x += cw + gap; row = Swift.max(row, ch)
+    }
+    return (g.image(), at)
+  }
 }
 #endif

@@ -41,6 +41,10 @@ vertex OverOut overV(OverIn i [[stage_in]], constant OverU &u [[buffer(1)]]) {
   p.xy += m * l * i.sw.x / u.VP * p.w;
   o.pos = p; return o;
 }
+struct CardIn { float3 p [[attribute(0)]]; float2 uv [[attribute(1)]]; float4 c [[attribute(2)]]; };
+struct CardOut { float4 pos [[position]]; float2 v; float4 vc; };
+vertex CardOut cardV(CardIn i [[stage_in]], constant float4x4 &M [[buffer(1)]]) { CardOut o; o.v = i.uv; o.vc = i.c; o.pos = M * float4(i.p, 1.0); return o; }
+fragment float4 cardF(CardOut i [[stage_in]], texture2d<float> T [[texture(0)]], sampler s [[sampler(0)]]) { return T.sample(s, i.v) * i.vc; }
 fragment float4 overF(OverOut i [[stage_in]]) {
   float a = 1.0;
   if (i.vw > 0.0) { float d = abs(i.vs) * (i.vw * 0.5 + 1.0); a = clamp(i.vw * 0.5 + 0.5 - d, 0.0, 1.0); }
@@ -134,6 +138,7 @@ struct BallU {
 @MainActor final class Renderer3D: NSObject, MTKViewDelegate {
   let model: TableModel
   let device: MTLDevice, queue: MTLCommandQueue
+  var cardP: MTLRenderPipelineState!, cards: (tex: MTLTexture, at: [String: [Double]])?
   var overP: MTLRenderPipelineState!, cueBuf: (key: String, b: MTLBuffer, n: Int)?
   var texP: MTLRenderPipelineState!, meshP: MTLRenderPipelineState!, shadowP: MTLRenderPipelineState!, ballP: MTLRenderPipelineState!
   var depthOn: MTLDepthStencilState!, depthRead: MTLDepthStencilState!
@@ -233,6 +238,12 @@ struct BallU {
     for (i, (f, o)) in [(MTLVertexFormat.float3, 0), (.float3, 12), (.float3, 24), (.float2, 36), (.float4, 44)].enumerated() { ov.attributes[i].format = f; ov.attributes[i].offset = o; ov.attributes[i].bufferIndex = 0 }
     ov.layouts[0].stride = 60
     overP = try pipe("overV", "overF", ov, blend: true, premul: true)
+    let cv = MTLVertexDescriptor()
+    for (i, (f, o)) in [(MTLVertexFormat.float3, 0), (.float2, 12), (.float4, 20)].enumerated() { cv.attributes[i].format = f; cv.attributes[i].offset = o; cv.attributes[i].bufferIndex = 0 }
+    cv.layouts[0].stride = 36
+    cardP = try pipe("cardV", "cardF", cv, blend: true, premul: true)
+    let A = V3Room.cardAtlas()
+    if let t = texture(A.image) { cards = (t, A.at) }
     let dd = MTLDepthStencilDescriptor(); dd.depthCompareFunction = .lessEqual; dd.isDepthWriteEnabled = true
     depthOn = device.makeDepthStencilState(descriptor: dd)
     dd.isDepthWriteEnabled = false
@@ -354,6 +365,46 @@ struct BallU {
       e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: Rm.G.nWall)
       e.setVertexBuffer(Rm.floorB, offset: 0, index: 0); e.setFragmentTexture(Rm.floor, index: 0); e.setFragmentSamplerState(sampler, index: 0)
       e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: Rm.G.nFloor)
+      /* the neighbours' soft cards, far to near, faded as the camera comes close; side on while the eye is low (v3Cards) */
+      if let cd = cards, !Rm.G.near.isEmpty {
+        var out: [Float] = []
+        let E = C.E
+        func push(_ k: String, _ t: Double, _ P: [[Double]]) {
+          var m = 31
+          for q in P {
+            let w = V3.sub(q, C.Er), dd = V3.dot(w, C.f)
+            if dd < V3.NEAR { m &= 16; continue }
+            let sx = C.cx + C.F * V3.dot(w, C.r) / dd, sy = C.cy - C.F * V3.dot(w, C.u) / dd
+            m &= (sx < 0 ? 1 : 0) | (sx > C.W ? 2 : 0) | (sy < 0 ? 4 : 0) | (sy > C.H ? 8 : 0)
+          }
+          if m != 0 { return }
+          let a = cd.at[k]!, uv = [[a[0], a[1]], [a[2], a[1]], [a[2], a[3]], [a[0], a[3]]]
+          for j in [0, 1, 2, 0, 2, 3] { out += [P[j][0], P[j][1], P[j][2], uv[j][0], uv[j][1], t, t, t, t].map { Float($0) } }
+        }
+        func flat(_ x: Double, _ y: Double, _ hx: Double, _ hy: Double, _ z: Double) -> [[Double]] { [[x - hx, y - hy, -z], [x + hx, y - hy, -z], [x + hx, y + hy, -z], [x - hx, y + hy, -z]] }
+        func stand(_ x: Double, _ y: Double, _ w: Double, _ z0: Double, _ z1: Double) -> [[Double]] {
+          var rx = -(y - E[1]), ry = x - E[0]
+          var l = JSMath.hypot(rx, ry); if l == 0 { l = 1 }
+          rx *= w / 2 / l; ry *= w / 2 / l
+          return [[x - rx, y - ry, -z1], [x + rx, y + ry, -z1], [x + rx, y + ry, -z0], [x - rx, y - ry, -z0]]
+        }
+        func sm(_ u: Double) -> Double { let t = min(1, max(0, u)); return t * t * (3 - 2 * t) }
+        let ns = Rm.G.near.map { n in (n[0], n[1], JSMath.hypot(n[0] - E[0], n[1] - E[1], E[2])) }.sorted { $0.2 > $1.2 }
+        for (nx, ny, _) in ns {
+          let f = sm((JSMath.hypot(nx - E[0], ny - E[1]) - 1.2) / 1.6)
+          if f <= 0.01 || V3.dot(V3.sub([nx, ny, 0], C.Er), C.f) < -2 { continue }
+          let el = atan2(E[2], JSMath.hypot(nx - E[0], ny - E[1])), fs = f * (1 - sm((el - V3Room.NSIDE_EL[0]) / (V3Room.NSIDE_EL[1] - V3Room.NSIDE_EL[0])))
+          if fs > 0.01 { push("side", fs, stand(nx, ny, V3Room.NSIDE_W, V3Room.NSIDE[1], V3Room.NSIDE[0])) }
+          push("top", f, flat(nx, ny, 1.7, 1.15, 0.035))
+          push("lamp", f, stand(nx, ny, 1.9, BallPainter.LAMP_H - 0.39, BallPainter.LAMP_H + 0.27))
+        }
+        if !out.isEmpty, let cb = device.makeBuffer(bytes: out, length: out.count * 4) {
+          e.setRenderPipelineState(cardP)
+          e.setVertexBuffer(cb, offset: 0, index: 0); e.setVertexBytes(&Mv, length: 64, index: 1)
+          e.setFragmentTexture(cd.tex, index: 0); e.setFragmentSamplerState(sampler, index: 0)
+          e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: out.count / 9)
+        }
+      }
       e.setDepthStencilState(depthOn)
     }
     /* the balls on the table, far to near */
