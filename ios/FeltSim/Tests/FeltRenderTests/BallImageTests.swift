@@ -9,7 +9,7 @@ import Testing
 import FeltSim
 
 @Suite struct BallImageTests {
-  @Test(arguments: ["8", "9", "heyball", "snooker", "carom"])
+  @Test(arguments: ["8", "9", "heyball", "snooker", "carom", "shop-red-pro", "shop-grey-vintage", "shop-midnight-pro", "shop-plum-vintage"])
   func balls(_ game: String) throws {
     let url = try #require(Bundle.module.url(forResource: "balls-\(game).json", withExtension: nil, subdirectory: "Fixtures"))
     let e = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]

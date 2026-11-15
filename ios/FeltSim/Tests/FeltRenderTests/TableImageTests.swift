@@ -44,6 +44,11 @@ func writePNG(_ img: CGImage, _ url: URL) {
     return try! JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [[String: Any]]
   }()
 
+  /* the look the page painted with (look() and roomId() recorded beside each image) */
+  static func lookOf(_ e: [String: Any]) -> TableLook {
+    guard let l = e["look"] as? [String: Any], let room = e["room"] as? String else { return TableLook.of(game: e["game"] as! String) }
+    return TableLook.of(Dress(cloth: l["cloth"] as! String, cue: l["cue"] as! String, chalk: l["chalk"] as! String, rail: l["rail"] as! String, balls: l["balls"] as! String, room: room))
+  }
   @Test(arguments: 0..<TableImageTests.index.count)
   func table(_ i: Int) throws {
     let e = Self.index[i], file = e["file"] as! String
@@ -54,7 +59,7 @@ func writePNG(_ img: CGImage, _ url: URL) {
     let v = e["view"] as! [String: Any]
     let view = TableView2D(k: v["k"] as! Double, ox: v["ox"] as! Double, oy: v["oy"] as! Double, portrait: v["portrait"] as! Bool)
     let p = TablePainter(sim: sim, view: view, dpr: e["dpr"] as! Double, rail: e["RAIL"] as! Double,
-                         look: TableLook.of(game: e["game"] as! String), pageColor: e["page"] as! String)
+                         look: Self.lookOf(e), pageColor: e["page"] as! String)
     let t0 = Date()
     let ours = p.paint(width: e["w"] as! Int, height: e["h"] as! Int).image()
     let ms = Date().timeIntervalSince(t0) * 1000

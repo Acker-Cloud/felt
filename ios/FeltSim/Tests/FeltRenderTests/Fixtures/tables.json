@@ -268,5 +268,140 @@
    "ring": null
   },
   "room": "rec"
+ },
+ {
+  "file": "table-shop-red-up.png",
+  "game": "8",
+  "table": "7",
+  "shape": null,
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 327.45591939546597,
+   "portrait": true,
+   "ox": 32.7455919395466,
+   "oy": 55.65491183879094,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "red",
+   "cue": "house",
+   "chalk": "blue",
+   "rail": "cherry",
+   "balls": "pro",
+   "ring": null
+  },
+  "room": "hall"
+ },
+ {
+  "file": "table-shop-grey-up.png",
+  "game": "8",
+  "table": "7",
+  "shape": null,
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 327.45591939546597,
+   "portrait": true,
+   "ox": 32.7455919395466,
+   "oy": 55.65491183879094,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "grey",
+   "cue": "house",
+   "chalk": "blue",
+   "rail": "oak",
+   "balls": "vintage",
+   "ring": null
+  },
+  "room": "hall"
+ },
+ {
+  "file": "table-shop-teal-up.png",
+  "game": "8",
+  "table": "7",
+  "shape": null,
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 327.45591939546597,
+   "portrait": true,
+   "ox": 32.7455919395466,
+   "oy": 55.65491183879094,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "teal",
+   "cue": "house",
+   "chalk": "blue",
+   "rail": "ebony",
+   "balls": "classic",
+   "ring": null
+  },
+  "room": "hall"
+ },
+ {
+  "file": "table-shop-midnight-up.png",
+  "game": "8",
+  "table": "7",
+  "shape": null,
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 327.45591939546597,
+   "portrait": true,
+   "ox": 32.7455919395466,
+   "oy": 55.65491183879094,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "midnight",
+   "cue": "house",
+   "chalk": "blue",
+   "rail": "walnut",
+   "balls": "pro",
+   "ring": null
+  },
+  "room": "hall"
+ },
+ {
+  "file": "table-shop-plum-up.png",
+  "game": "8",
+  "table": "7",
+  "shape": null,
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 327.45591939546597,
+   "portrait": true,
+   "ox": 32.7455919395466,
+   "oy": 55.65491183879094,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "plum",
+   "cue": "house",
+   "chalk": "blue",
+   "rail": "cherry",
+   "balls": "vintage",
+   "ring": null
+  },
+  "room": "hall"
  }
 ]

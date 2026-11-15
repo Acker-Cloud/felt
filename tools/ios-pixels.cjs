@@ -15,6 +15,10 @@ const PORT = 4187;
 const GAMES = [['8', '7'], ['9', '9'], ['straight', '7'], ['rotation', '7'], ['heyball', 'heyball'], ['snooker', 'snooker', 'compact'], ['carom', 'carom'], ['bumper', 'bumper', 'octagon'], ['bumper', 'bumper', 'rect']];
 /* views: a phone upright (portrait, the table turned) and on its side, in CSS px at dpr; every game
    upright, 8-ball on its side too (the nap is noise and does not compress: about 2 MB an image) */
+/* the shop's looks (a career's equipped items, lookCareer), on 8-ball's 7 ft table upright: every cloth and rail the
+   game looks do not cover, and the Pro and Vintage ball sets on the cloths with a rim */
+const SHOP = [{ cloth: 'red', rail: 'cherry', balls: 'pro' }, { cloth: 'grey', rail: 'oak', balls: 'vintage' }, { cloth: 'teal', rail: 'ebony', balls: 'classic' },
+  { cloth: 'midnight', rail: 'walnut', balls: 'pro' }, { cloth: 'plum', rail: 'cherry', balls: 'vintage' }];
 const VIEWS = [{ name: 'up', w: 390, h: 760, dpr: 2, portrait: true }, { name: 'side', w: 760, h: 390, dpr: 2, portrait: false }];
 
 async function main() {
@@ -44,9 +48,30 @@ async function main() {
         index.push({ file, game, table, shape: shape || null, w: V.w * V.dpr, h: V.h * V.dpr, dpr: r.dpr, RAIL: r.RAIL, view: r.view, page: r.page, look: r.look, room: r.room });
       }
     }
+    for (const L of SHOP) {
+      const V = VIEWS[0];
+      const r = await page.evaluate(({ L, V }) => {
+        setPockets('regulation'); setTable('7');
+        lookCareer = () => ({ cloth: L.cloth, cue: 'house', chalk: 'blue', rail: L.rail, balls: L.balls, ring: null });
+        try {
+          RAIL = railFor(V.w, V.h);
+          const sw = TW + 2 * RAIL, sh = TL + 2 * RAIL, k = Math.min(V.w / sw, V.h / sh);
+          view = { k, portrait: true, ox: (V.w - sw * k) / 2 + RAIL * k, oy: (V.h - sh * k) / 2 + RAIL * k, tray: null };
+          dpr = V.dpr; napCache = null;
+          const c = lookIn('8', () => { const c = paintTable(V.w * V.dpr, V.h * V.dpr); paintVignette(c.getContext('2d')); return c; });
+          return { png: c.toDataURL('image/png'), view, RAIL, dpr, page: pageColor(), look: lookIn('8', () => look()), room: lookIn('8', () => roomId()) };
+        } finally { lookCareer = () => null; }
+      }, { L, V });
+      const file = `table-shop-${L.cloth}-up.png`;
+      fs.writeFileSync(path.join(OUT, file), Buffer.from(r.png.split(',')[1], 'base64'));
+      index.push({ file, game: '8', table: '7', shape: null, w: V.w * V.dpr, h: V.h * V.dpr, dpr: r.dpr, RAIL: r.RAIL, view: r.view, page: r.page, look: r.look, room: r.room });
+    }
     /* balls: each look's set in a grid, at a phone's size and large, on the cloth, with their shadows */
-    for (const [game, table, shape] of GAMES.filter(g => !['bumper', 'straight', 'rotation'].includes(g[0]))) {
-      const r = await page.evaluate(({ game, table, shape }) => {
+    const BALLS = GAMES.filter(g => !['bumper', 'straight', 'rotation'].includes(g[0])).map(g => [...g, null]).concat(SHOP.filter(L => L.balls !== 'classic').map(L => ['8', '7', undefined, L]));
+    for (const [game, table, shape, L] of BALLS) {
+      const r = await page.evaluate(({ game, table, shape, L }) => {
+        if (L) lookCareer = () => ({ cloth: L.cloth, cue: 'house', chalk: 'blue', rail: L.rail, balls: L.balls, ring: null });
+        try {
         setPockets('regulation'); setTable(table, shape);
         const W = 960, H = 400, nums = table === 'snooker' ? [0, 41, 42, 57, 58, 59, 60, 61, 62] : table === 'carom' ? [70, 71, 72] : [...Array(16).keys()];
         const R = rng(0x0ba11), balls = [];
@@ -65,11 +90,12 @@ async function main() {
           return { png: c.toDataURL('image/png'), cloth: CLOTH, bounce: CL.bounce, lowRim: !!CL.lowRim, rim: !!CL.rim, balls: look().balls };
         });
         return Object.assign(out, { W, H, list: balls, TL, TW, R: BALL_R });
-      }, { game, table, shape });
-      const file = `balls-${game}.png`;
+        } finally { lookCareer = () => null; }
+      }, { game, table, shape, L });
+      const name = L ? `shop-${L.cloth}-${L.balls}` : game, file = `balls-${name}.png`;
       fs.writeFileSync(path.join(OUT, file), Buffer.from(r.png.split(',')[1], 'base64'));
       delete r.png;
-      fs.writeFileSync(path.join(OUT, `balls-${game}.json`), JSON.stringify(Object.assign({ file, game, table, shape: shape || null }, r)));
+      fs.writeFileSync(path.join(OUT, `balls-${name}.json`), JSON.stringify(Object.assign({ file, game, table, shape: shape || null }, r)));
     }
   } finally {
     await browser.close();
