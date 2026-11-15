@@ -36,6 +36,8 @@ public struct TableLook: Sendable {
     case "heyball": return TableLook(cloth: CLOTH["joy"]!, rail: RAILS["arena"]!, room: ROOM["joy"]!)
     case "snooker": return TableLook(cloth: CLOTH["baize"]!, rail: RAILS["baulk"]!, room: ROOM["crucible"]!)
     case "carom": return TableLook(cloth: CLOTH["blue"]!, rail: RAILS["carom"]!, room: ROOM["carom"]!)
+    case "straight": return TableLook(cloth: CLOTH["spruce"]!, rail: RAILS["mahogany"]!, room: ROOM["hall"]!)
+    case "rotation": return TableLook(cloth: CLOTH["wine"]!, rail: RAILS["cherry"]!, room: ROOM["hall"]!)
     case "bumper": return TableLook(cloth: CLOTH["olive"]!, rail: RAILS["veneer"]!, room: ROOM["rec"]!)
     default: return TableLook(cloth: CLOTH["green"]!, rail: RAILS["walnut"]!, room: ROOM["hall"]!)
     }
@@ -47,6 +49,8 @@ public struct TableLook: Sendable {
     "electric": ClothLook(base: "#1566b8", cushion: "#186fc4", lamp: "235,242,255", worsted: true),
     "baize": ClothLook(base: "#1f6b3a", cushion: "#22733f", lamp: "255,248,220", worsted: false),
     "joy": ClothLook(base: "#1e6340", cushion: "#206a45", lamp: "255,250,230", worsted: false),
+    "spruce": ClothLook(base: "#134a44", cushion: "#16524b", lamp: "245,250,235", worsted: false),
+    "wine": ClothLook(base: "#8c1f25", cushion: "#94242b", lamp: "255,196,160", worsted: false),
     "olive": ClothLook(base: "#4f6030", cushion: "#586a35", lamp: "255,244,210", worsted: false),
   ]
   public static let RAILS: [String: RailLook] = [
@@ -56,6 +60,8 @@ public struct TableLook: Sendable {
     "baulk": RailLook(base: "#7c5228", dark: [86, 52, 22], lite: [190, 142, 86], mat: nil, metal: "brass", sight: nil),
     "arena": RailLook(base: "#2a1a12", dark: [16, 9, 6], lite: [92, 62, 42], mat: nil, metal: "leather", sight: nil),
     "carom": RailLook(base: "#33201a", dark: [20, 11, 8], lite: [104, 70, 54], mat: nil, metal: nil, sight: "dot"),
+    "mahogany": RailLook(base: "#44190f", dark: [34, 10, 6], lite: [122, 54, 32], mat: nil, metal: nil, sight: nil),
+    "cherry": RailLook(base: "#6b2213", dark: [60, 14, 8], lite: [178, 70, 42], mat: nil, metal: nil, sight: nil),
     "veneer": RailLook(base: "#5c3a1e", dark: [58, 34, 16], lite: [148, 104, 62], mat: nil, metal: nil, sight: nil),
   ]
   public static let ROOM: [String: RoomLook] = [

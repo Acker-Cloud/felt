@@ -81,6 +81,60 @@
   "room": "arena"
  },
  {
+  "file": "table-straight-up.png",
+  "game": "straight",
+  "table": "7",
+  "shape": null,
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 327.45591939546597,
+   "portrait": true,
+   "ox": 32.7455919395466,
+   "oy": 55.65491183879094,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "spruce",
+   "cue": "maple",
+   "chalk": "blue",
+   "rail": "mahogany",
+   "balls": "vintage",
+   "ring": null
+  },
+  "room": "hall"
+ },
+ {
+  "file": "table-rotation-up.png",
+  "game": "rotation",
+  "table": "7",
+  "shape": null,
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 327.45591939546597,
+   "portrait": true,
+   "ox": 32.7455919395466,
+   "oy": 55.65491183879094,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "wine",
+   "cue": "gold",
+   "chalk": "blue",
+   "rail": "cherry",
+   "balls": "classic",
+   "ring": null
+  },
+  "room": "hall"
+ },
+ {
   "file": "table-heyball-up.png",
   "game": "heyball",
   "table": "heyball",

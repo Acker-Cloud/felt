@@ -9,10 +9,10 @@ import SwiftUI
 struct Look {
   var cloth: Color, cushion: Color, rail: Color, railDark: Color
   /* CLOTHS[...].ovMin and .illegal: every white overlay at least ovMin opaque; the illegal colour */
-  var ovMin: Double { ["8": 0.6, "9": 0.72, "10": 0.78, "heyball": 0.64, "snooker": 0.66, "carom": 0.66, "bumper": 0.76][game] ?? 0.6 }
-  var illegal: Color { game == "8" ? Color(hex: 0xffa597) : Color(hex: 0xffe27a) }
+  var ovMin: Double { ["8": 0.6, "9": 0.72, "10": 0.78, "heyball": 0.64, "snooker": 0.66, "carom": 0.66, "bumper": 0.76, "straight": 0.6, "rotation": 0.66][game] ?? 0.6 }
+  var illegal: Color { game == "8" || game == "straight" ? Color(hex: 0xffa597) : Color(hex: 0xffe27a) }
   /* CL.call: the called ball's ring and pocket's glow, 3:1 and more on the cloth */
-  var call: Color { game == "8" ? Color(hex: 0xffe27a) : Color(hex: 0x9ff0ff) }
+  var call: Color { game == "8" || game == "straight" ? Color(hex: 0xffe27a) : Color(hex: 0x9ff0ff) }
   var game = "8"
   static func of(_ g: TableGame) -> Look {
     var l = base(g); l.game = g.table.2; return l
@@ -24,6 +24,8 @@ struct Look {
     case .heyball: Look(cloth: Color(hex: 0x1d4f91), cushion: Color(hex: 0x21579c), rail: Color(hex: 0x2a1a12), railDark: Color(rgb: 16, 9, 6))
     case .snooker: Look(cloth: Color(hex: 0x1b5d47), cushion: Color(hex: 0x1d6450), rail: Color(hex: 0x7c5228), railDark: Color(rgb: 86, 52, 22))
     case .carom: Look(cloth: Color(hex: 0x1d4f91), cushion: Color(hex: 0x21579c), rail: Color(hex: 0x33201a), railDark: Color(rgb: 20, 11, 8))
+    case .straight: Look(cloth: Color(hex: 0x134a44), cushion: Color(hex: 0x16524b), rail: Color(hex: 0x44190f), railDark: Color(rgb: 34, 10, 6))
+    case .rotation: Look(cloth: Color(hex: 0x8c1f25), cushion: Color(hex: 0x94242b), rail: Color(hex: 0x6b2213), railDark: Color(rgb: 60, 14, 8))
     case .bumper: Look(cloth: Color(hex: 0x4f6030), cushion: Color(hex: 0x586a35), rail: Color(hex: 0x5c3a1e), railDark: Color(rgb: 58, 34, 16))
     }
   }

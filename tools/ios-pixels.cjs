@@ -12,7 +12,7 @@ const { spawn } = require('child_process');
 const OUT = path.join(__dirname, '..', 'ios', 'FeltSim', 'Tests', 'FeltRenderTests', 'Fixtures');
 const PORT = 4187;
 /* [game, table, shape]: the table each game is dressed for (GAME_LOOK) */
-const GAMES = [['8', '7'], ['9', '9'], ['heyball', 'heyball'], ['snooker', 'snooker', 'compact'], ['carom', 'carom'], ['bumper', 'bumper', 'octagon'], ['bumper', 'bumper', 'rect']];
+const GAMES = [['8', '7'], ['9', '9'], ['straight', '7'], ['rotation', '7'], ['heyball', 'heyball'], ['snooker', 'snooker', 'compact'], ['carom', 'carom'], ['bumper', 'bumper', 'octagon'], ['bumper', 'bumper', 'rect']];
 /* views: a phone upright (portrait, the table turned) and on its side, in CSS px at dpr; every game
    upright, 8-ball on its side too (the nap is noise and does not compress: about 2 MB an image) */
 const VIEWS = [{ name: 'up', w: 390, h: 760, dpr: 2, portrait: true }, { name: 'side', w: 760, h: 390, dpr: 2, portrait: false }];
@@ -45,7 +45,7 @@ async function main() {
       }
     }
     /* balls: each look's set in a grid, at a phone's size and large, on the cloth, with their shadows */
-    for (const [game, table, shape] of GAMES.filter(g => g[0] !== 'bumper')) {
+    for (const [game, table, shape] of GAMES.filter(g => !['bumper', 'straight', 'rotation'].includes(g[0]))) {
       const r = await page.evaluate(({ game, table, shape }) => {
         setPockets('regulation'); setTable(table, shape);
         const W = 960, H = 400, nums = table === 'snooker' ? [0, 41, 42, 57, 58, 59, 60, 61, 62] : table === 'carom' ? [70, 71, 72] : [...Array(16).keys()];

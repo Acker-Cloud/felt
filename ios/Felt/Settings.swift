@@ -19,6 +19,8 @@ enum Prefs {
   static var table: String { str("table", "7") }
   static var pockets: String { str("pockets", "regulation") }
   /* snooker's table: compact (10 ft) on a phone, as loadSettings picks it */
+  /* 14.1's race: 50 on a phone, as loadSettings picks it */
+  static var race141: Int { int("race141", 50) }
   static var snookerTable: String { str("snookerTable", "compact") }
   static var snookerFrames: Int { int("snookerFrames", 1) }
   static var bumperTable: String { str("bumperTable", "octagon") }
@@ -30,7 +32,7 @@ enum Prefs {
   static func rules(_ kind: String) -> RuleSet {
     var c = CallConfig(); c.mode = calls
     let id = kind == "8" ? rules8 : kind == "9" ? rules9 : kind == "10" ? rules10 : nil
-    return makeRules(kind, ruleset: id, call: c)
+    return makeRules(kind, ruleset: id, call: c, race: kind == "straight" ? race141 : nil)
   }
   /* the two-player rulesets a game offers (rulesetsFor: no ring sets) */
   static func rulesets(_ kind: String) -> [RuleSet] {
@@ -47,6 +49,7 @@ struct SettingsView: View {
   @AppStorage("felt.settings.autoAim") private var autoAim = true
   @AppStorage("felt.settings.table") private var table = "7"
   @AppStorage("felt.settings.pockets") private var pockets = "regulation"
+  @AppStorage("felt.settings.race141") private var race141 = 50
   @AppStorage("felt.settings.snookerTable") private var snookerTable = "compact"
   @AppStorage("felt.settings.snookerFrames") private var snookerFrames = 1
   @AppStorage("felt.settings.bumperTable") private var bumperTable = "octagon"
@@ -72,7 +75,8 @@ struct SettingsView: View {
       Section {
         Picker("Pool Table", selection: $table) { Text("7 ft").tag("7"); Text("9 ft").tag("9") }.pickerStyle(.segmented)
         Picker("Pockets", selection: $pockets) { Text("Regulation").tag("regulation"); Text("Generous").tag("generous") }.pickerStyle(.segmented)
-      } header: { Text("Pool") } footer: { Text("8, 9 and 10-ball. Chinese 8-ball plays on its own table.") }
+        Picker("Straight Pool Race", selection: $race141) { Text("25").tag(25); Text("50").tag(50); Text("100").tag(100); Text("150").tag(150) }
+      } header: { Text("Pool") } footer: { Text("8, 9, 10-ball, straight pool and rotation. Chinese 8-ball plays on its own table.") }
       Section {
         Picker("Table", selection: $snookerTable) { Text("10 ft").tag("compact"); Text("12 ft").tag("full") }.pickerStyle(.segmented)
         Picker("Frames", selection: $snookerFrames) { Text("1 Frame").tag(1); Text("Best of 3").tag(3) }.pickerStyle(.segmented)

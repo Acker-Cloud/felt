@@ -6,7 +6,9 @@ import FeltSim
 enum Words {
   /* against the CPU the page says "You" and "CPU" (nameOf, turnOf, isOf, handWords) */
   static var cpuMode = false
-  static func nameOf(_ p: Int) -> String { cpuMode ? (p == 0 ? "You" : "CPU") : "Player \(p + 1)" }
+  /* an exhibition's players by name (exhib.names); else You and the CPU, or Player 1 and 2 */
+  static var names: [String]? = nil
+  static func nameOf(_ p: Int) -> String { names.map { $0[min(p, $0.count - 1)] } ?? (cpuMode ? (p == 0 ? "You" : "CPU") : "Player \(p + 1)") }
   static func turnOf(_ p: Int) -> String { cpuMode ? (p == 0 ? "Your turn" : "CPU to shoot") : "\(nameOf(p)) to shoot" }
   static func isOf(_ p: Int) -> String { "\(nameOf(p)) \(cpuMode && p == 0 ? "are" : "is")" }
   static func handWords(_ p: Int, kitchen: Bool) -> String {

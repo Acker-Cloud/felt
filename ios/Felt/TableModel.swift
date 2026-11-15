@@ -11,7 +11,9 @@ import FeltSim
 import Observation
 
 enum TableGame: String, CaseIterable, Identifiable {
-  case eight = "8-Ball", nine = "9-Ball", ten = "10-Ball", heyball = "Chinese 8-Ball", snooker = "Snooker", carom = "Three-Cushion", bumper = "Bumper Pool"
+  /* the page's home order: 8, 9, 10, 14.1, rotation, bumper, snooker, carom, Chinese 8-ball */
+  case eight = "8-Ball", nine = "9-Ball", ten = "10-Ball", straight = "Straight Pool", rotation = "Rotation", bumper = "Bumper Pool"
+  case snooker = "Snooker", carom = "Three-Cushion", heyball = "Chinese 8-Ball"
   var id: String { rawValue }
   /* the sim's table, its shape, and the game whose look it wears (GAME_LOOK) */
   var table: (String, String?, String) {
@@ -23,6 +25,8 @@ enum TableGame: String, CaseIterable, Identifiable {
     case .snooker: ("snooker", "compact", "snooker")
     case .carom: ("carom", nil, "carom")
     case .bumper: ("bumper", "octagon", "bumper")
+    case .straight: ("7", nil, "straight")
+    case .rotation: ("7", nil, "rotation")
     }
   }
   var line: String {
@@ -34,6 +38,8 @@ enum TableGame: String, CaseIterable, Identifiable {
     case .snooker: "Fifteen reds on a 10 ft table"
     case .carom: "No pockets, three cushions"
     case .bumper: "Round the posts"
+    case .straight: "14.1, a point a ball"
+    case .rotation: "Numbers score, 61 wins"
     }
   }
 }
@@ -62,7 +68,7 @@ final class TableModel {
   private(set) var banner: (title: String, sub: String, until: TimeInterval)?
   /* a flash asked for before the clock runs (a new rack): shown for its ms from the next tick */
   @ObservationIgnored private var flashDue: (String, String, TimeInterval)?
-  var rulesKind: String? { ["8": "8", "9": "9", "10": "10", "heyball": "heyball", "snooker": "snooker", "carom": "carom", "bumper": "bumper"][game.table.2] }
+  var rulesKind: String? { ["8": "8", "9": "9", "10": "10", "heyball": "heyball", "snooker": "snooker", "carom": "carom", "bumper": "bumper", "straight": "straight", "rotation": "rotation"][game.table.2] }
 
   /* the baked table (FeltRender: index.html's paintTable and vignette) for one screen size */
   /* the table this game is played on, and one Sim set to it exactly as the model's is (the art and the CPU's
@@ -106,7 +112,7 @@ final class TableModel {
   func ballPainter(upright: Bool, scale: CGFloat) -> BallPainter {
     if let p = painter, p.1 == upright, p.2 == scale { return p.0 }
     let look = TableLook.of(game: game.table.2), cloth = RGBA(css: look.cloth.base)
-    let bounce = ["8": "120,200,160", "9": "120,165,235", "10": "110,170,240", "heyball": "120,200,150", "snooker": "120,205,150", "carom": "120,160,230", "bumper": "170,190,110"][game.table.2] ?? "120,200,160"
+    let bounce = ["8": "120,200,160", "9": "120,165,235", "10": "110,170,240", "heyball": "120,200,150", "snooker": "120,205,150", "carom": "120,160,230", "bumper": "170,190,110", "straight": "110,190,175", "rotation": "236,122,118"][game.table.2] ?? "120,200,160"
     let p = BallPainter(set: BallSet.of(game: game.table.2), bounce: bounce, dpr: Double(scale), portrait: upright,
                         lowRim: game != .eight && game != .carom, clothBase: [cloth.r * 255, cloth.g * 255, cloth.b * 255])
     painter = (p, upright, scale); ballCache = [:]
@@ -127,16 +133,20 @@ final class TableModel {
 
   /* the opponent: nil for two players on one device, else the CPU's level, playing player 2 */
   let cpuLevel: String?
+  /* an exhibition (6f, 'exhibit'): both players the CPU, each at its own level */
+  let exhib: [String]?
   @ObservationIgnored private var cpuBusy = false
   private(set) var cpuThinking = false
 
-  init(game: TableGame, cpu: String? = nil) {
+  init(game: TableGame, cpu: String? = nil, exhib: [String]? = nil) {
     self.game = game
-    cpuLevel = cpu
+    cpuLevel = exhib == nil ? cpu : nil
+    self.exhib = exhib
     Words.cpuMode = cpuLevel != nil
+    Words.names = exhib.map { $0.map { TableModel.FOES[$0] ?? "CPU" } }
     /* start(): the settings' table (every pool game on its size and pockets; snooker's size; the bumper table's shape) */
     spec = switch game {
-    case .eight, .nine, .ten: (Prefs.table, nil, Prefs.pockets)
+    case .eight, .nine, .ten, .straight, .rotation: (Prefs.table, nil, Prefs.pockets)
     case .snooker: ("snooker", Prefs.snookerTable, Prefs.pockets)
     case .bumper: ("bumper", Prefs.bumperTable, Prefs.pockets)
     default: (game.table.0, game.table.1, Prefs.pockets)
@@ -189,7 +199,7 @@ final class TableModel {
     case .ten: balls = sim.rack("10")
     case .heyball: balls = sim.rack("heyball")
     case .snooker: balls = sim.snookerRack()
-    case .bumper: balls = []
+    case .bumper, .straight, .rotation: balls = []
     case .carom:
       balls = [Ball(70, sim.HEAD_X, sim.TW / 2 + 0.1524), Ball(71, sim.HEAD_X, sim.TW / 2), Ball(72, sim.FOOT[0], sim.FOOT[1])]
     }
@@ -380,9 +390,12 @@ final class TableModel {
   }
   /* the CPU's turn (page 5's think): its search off the main thread on its own sim, held for the page's
      think time (cpuThinkMs, from the search's start), then its stroke through the same cue as a player's */
-  var cpuTurn: Bool { cpuLevel != nil && g != nil && g!.winner == nil && (g!.option?.who ?? g!.turn) == 1 }
+  static let FOES = ["easy": "Rookie", "medium": "Regular", "hard": "Hustler"]
+  var cpuTurn: Bool { (cpuLevel != nil || exhib != nil) && g != nil && g!.winner == nil && (exhib != nil || (g!.option?.who ?? g!.turn) == 1) }
+  /* the level searching for the player to act now: the opponent's, or an exhibition's player's own */
+  var actingLevel: String? { exhib.map { $0[min(1, g?.option?.who ?? g?.turn ?? 0)] } ?? cpuLevel }
   func cpuStep() {
-    guard cpuTurn, !cpuBusy, rolling == nil, stroke == nil, let gm = g, let level = cpuLevel else { return }
+    guard cpuTurn, !cpuBusy, rolling == nil, stroke == nil, let gm = g, let level = actingLevel else { return }
     cpuBusy = true; cpuThinking = true
     let t0 = now, spec = spec, seed = Double(Int.random(in: 1...1_000_000))
     if gm.option != nil {

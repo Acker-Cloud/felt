@@ -21,6 +21,8 @@ struct CueGeo {
 struct CueLook {
   let shaft: [String], metal, joint, fore: String, pts: String?, wrap, pat, sleeve, ring, cap: String
   static let all: [String: CueLook] = [
+    "maple": CueLook(shaft: ["#f3e2b8", "#dcb983"], metal: "#d8c79a", joint: "#2a160b", fore: "#c99a5b", pts: "#2a160b", wrap: "#141414", pat: "leather", sleeve: "#c99a5b", ring: "#2a160b", cap: "#141414"),
+    "gold": CueLook(shaft: ["#f0dcae", "#d7b07a"], metal: "#d4af37", joint: "#1a140a", fore: "#1b1610", pts: "#d4af37", wrap: "#3a2a12", pat: "diamond", sleeve: "#1b1610", ring: "#d4af37", cap: "#0c0c0c"),
     "house": CueLook(shaft: ["#f0dcae", "#d7b07a"], metal: "#c9ccd2", joint: "#151515", fore: "#2b150b", pts: "#a3622f", wrap: "#1c1d21", pat: "linen", sleeve: "#3c1b0d", ring: "#e7e2ef", cap: "#0c0c0c"),
     "ebony": CueLook(shaft: ["#f0dcae", "#d7b07a"], metal: "#e3e6ea", joint: "#0d0d0f", fore: "#121012", pts: "#d8dbe0", wrap: "#2b2c31", pat: "stack", sleeve: "#121012", ring: "#d8dbe0", cap: "#0a0a0a"),
     "carbon": CueLook(shaft: ["#454950", "#26282c"], metal: "#8a9099", joint: "#111214", fore: "#202226", pts: nil, wrap: "#2a2c31", pat: "weave", sleeve: "#1a1b1e", ring: "#c8433b", cap: "#0c0c0c"),
@@ -30,7 +32,7 @@ struct CueLook {
   ]
   /* GAME_LOOK's cue and chalk */
   static func of(game: String) -> (CueLook, String) {
-    let cue = ["9": "ebony", "10": "carbon", "heyball": "rosewood", "snooker": "ash", "carom": "hall"][game] ?? "house"
+    let cue = ["9": "ebony", "10": "carbon", "heyball": "rosewood", "snooker": "ash", "carom": "hall", "straight": "maple", "rotation": "gold"][game] ?? "house"
     return (all[cue]!, game == "snooker" ? "#3f9a5c" : "#4f84bd")
   }
 }

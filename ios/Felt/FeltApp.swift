@@ -13,6 +13,8 @@ struct FeltApp: App {
 struct Home: View {
   @State private var playing: TableGame?
   @AppStorage("felt.opponent") private var opponent = "medium"
+  @State private var exhibit: Exhibit?
+  struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var id: String { game.rawValue + levels.joined() } }
   var body: some View {
     NavigationStack {
       List {
@@ -36,6 +38,17 @@ struct Home: View {
         } header: { Text("Games") } footer: {
           Text("The web build's physics, rules and CPU, bit for bit.")
         }
+        Section {
+          NavigationLink { ExhibitionSetup { exhibit = $0 } } label: {
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Exhibition").font(.body.weight(.semibold))
+              Text("Two CPU players, any game").font(.footnote).foregroundStyle(.secondary)
+            }.frame(minHeight: 44, alignment: .leading)
+          }
+          .accessibilityIdentifier("mode-exhibit")
+        } header: { Text("Modes") } footer: {
+          Text("Watch the CPU play itself, each player at its own level.")
+        }
       }
       .navigationTitle("felt")
       .toolbar {
@@ -49,6 +62,7 @@ struct Home: View {
     .onAppear {
       let a = ProcessInfo.processInfo.arguments
       if let i = a.firstIndex(of: "-felt-game"), i + 1 < a.count { playing = TableGame(rawValue: a[i + 1]) }
+      if let i = a.firstIndex(of: "-felt-exhibit"), i + 1 < a.count, let g = TableGame(rawValue: a[i + 1]) { exhibit = Exhibit(game: g, levels: ["medium", "hard"]) }
       /* `-felt-landscape left|right`: the interface turned on its side (the simulator cannot be turned from a script) */
       if let i = a.firstIndex(of: "-felt-landscape"), i + 1 < a.count,
          let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
@@ -56,6 +70,7 @@ struct Home: View {
       }
     }
     .fullScreenCover(item: $playing) { g in TableScreen(model: TableModel(game: g, cpu: opponent == "two" ? nil : opponent)) }
+    .fullScreenCover(item: $exhibit) { e in TableScreen(model: TableModel(game: e.game, exhib: e.levels)) }
   }
 }
 
@@ -358,6 +373,28 @@ struct PowerBar: View {
     .accessibilityIdentifier("power")
     /* aria-valuetext: the call's words with the percentage while a call is open (callSay) */
     .accessibilityValue(model.rolling != nil ? "Rolling" : model.callMenuOffered ? "\(model.callLab(upright: upright) ?? "Call your shot"), \(Int(model.power * 100)) percent" : "\(Int(model.power * 100)) percent")
+  }
+}
+
+/* the exhibition's setup (6f): the game and each CPU player's level, then Start */
+struct ExhibitionSetup: View {
+  let start: (Home.Exhibit) -> Void
+  @State private var game: TableGame = .eight
+  @State private var a = "medium"
+  @State private var b = "hard"
+  var body: some View {
+    List {
+      Section { Picker("Game", selection: $game) { ForEach(TableGame.allCases) { Text($0.rawValue).tag($0) } } }
+      Section {
+        Picker("Player 1", selection: $a) { Text("Rookie").tag("easy"); Text("Regular").tag("medium"); Text("Hustler").tag("hard") }
+        Picker("Player 2", selection: $b) { Text("Rookie").tag("easy"); Text("Regular").tag("medium"); Text("Hustler").tag("hard") }
+      } header: { Text("Players") } footer: { Text("Each searches at its own level through the same physics and rules as any CPU turn.") }
+      Section {
+        Button { start(Home.Exhibit(game: game, levels: [a, b])) } label: { Text("Start").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+          .background(Capsule().fill(.white)).foregroundStyle(.black).listRowBackground(Color.clear).accessibilityIdentifier("exhibit-start")
+      }
+    }
+    .navigationTitle("Exhibition").navigationBarTitleDisplayMode(.inline)
   }
 }
 
