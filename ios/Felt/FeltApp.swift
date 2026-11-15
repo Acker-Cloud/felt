@@ -33,6 +33,8 @@ struct Home: View {
   @State private var lessonOffer = false
   @State private var helpPath: String? = nil
   @State private var prefsOpen = false
+  /* `-felt-mode tour|ex|party`: a mode's page open */
+  @State private var modePath: String? = nil
   struct PracticeGo: Identifiable { let layout: String; var id: String { layout } }
   /* How to play's actions: the lesson, a game's tutorial, the drills, the career (More Modes: the home's Modes section) */
   private var helpActs: HelpActions {
@@ -184,6 +186,11 @@ struct Home: View {
       .navigationTitle("").navigationBarTitleDisplayMode(.inline)
       .navigationDestination(isPresented: $showCareer) { CareerView(store: career) }
       .navigationDestination(isPresented: $prefsOpen) { SettingsView() }
+      .navigationDestination(item: $modePath) { m in
+        if m == "ex" { ExhibitionSetup { exhibit = $0 } }
+        else if m == "party" { PartySetup { party = $0 } }
+        else { TourneyView(store: store) { store.markLive(); playingTourney = true } }
+      }
       .navigationDestination(item: $helpPath) { p in
         if p == "drills" { DrillsList { drilling = PracticeGo(layout: $0) } }
         else if p.hasPrefix("topic:"), let t = HelpTopic.all.first(where: { $0.id == String(p.dropFirst(6)) }) { HelpPage(t: t, acts: helpActs) }
@@ -209,6 +216,7 @@ struct Home: View {
       if let i = a.firstIndex(of: "-felt-help") { helpPath = i + 1 < a.count && !a[i + 1].hasPrefix("-") ? "topic:" + a[i + 1] : "help" }
       /* `-felt-prefs`: Settings open */
       if a.contains("-felt-prefs") { prefsOpen = true }
+      if let i = a.firstIndex(of: "-felt-mode"), i + 1 < a.count { modePath = a[i + 1] }
       /* `-felt-lesson`: the lesson */
       if a.contains("-felt-lesson") { lessoning = true }
       /* `-felt-tutorial id`: that tutorial (`-felt-tutshow` plays each step's Show me) */
@@ -982,24 +990,100 @@ struct PartySetup: View {
   @State private var ruleset = "9-ring"
   @State private var count = 3
   @State private var names = ["", "", "", ""]
-  static let SETS: [(String, String, TableGame)] = [("9-ring", "9-Ball Ring", .nine), ("rotation-ring", "Rotation Ring", .rotation), ("straight-ring", "Around the Table", .straight)]
+  /* the ring rulesets (rulesetsFor: ring: true), with RULESETS' descriptions */
+  static let SETS: [(String, String, TableGame, String)] = [
+    ("9-ring", "9-Ball Ring", .nine, "Two to four players in turn. Lowest ball first; a foul gives the next player ball in hand. Whoever pots the 9 legally wins the rack."),
+    ("rotation-ring", "Rotation Ring", .rotation, "Two to four players in turn. Lowest ball first; balls potted on a legal shot score their numbers. The race wins, or the most points when the table is clear."),
+    ("straight-ring", "Around the Table", .straight, "Straight pool for two to four in turn: any ball, called, a point each, fourteen down and the rack again. A foul costs a point. First to the race wins.")]
+  static let ORD = ["1st", "2nd", "3rd", "4th"]
   var body: some View {
-    List {
-      Section { Picker("Game", selection: $ruleset) { ForEach(Self.SETS, id: \.0) { Text($0.1).tag($0.0) } } }
-      Section {
-        Picker("Players", selection: $count) { Text("2").tag(2); Text("3").tag(3); Text("4").tag(4) }.pickerStyle(.segmented)
-        ForEach(0..<count, id: \.self) { i in TextField("Player \(i + 1)", text: $names[i]).textInputAutocapitalization(.words) }
-      } header: { Text("Players") } footer: { Text("The device is passed round as the turn goes to each player; racks won are kept.") }
-      Section {
-        Button {
-          let set = Self.SETS.first { $0.0 == ruleset }!
-          let nm = (0..<count).map { i in names[i].trimmingCharacters(in: .whitespaces).isEmpty ? "Player \(i + 1)" : String(names[i].prefix(16)) }
-          start(Home.PartyGo(game: set.2, names: nm, ruleset: ruleset))
-        } label: { Text("Start").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
-          .background(Capsule().fill(.white)).foregroundStyle(.black).listRowBackground(Color.clear).accessibilityIdentifier("party-start")
+    let set = Self.SETS.first { $0.0 == ruleset }!
+    ModeForm(kicker: "Party", title: "Party", action: "Start", actionID: "party-start", go: {
+      let nm = (0..<count).map { i in names[i].trimmingCharacters(in: .whitespaces).isEmpty ? "Player \(i + 1)" : String(names[i].prefix(16)) }
+      start(Home.PartyGo(game: set.2, names: nm, ruleset: ruleset))
+    }) {
+      ModeField("Game") { ModePop(selection: $ruleset, items: Self.SETS.map { ($0.0, $0.1) }) }
+      ModeNote(set.3)
+      ModeField("Players") {
+        Picker("Players", selection: $count) { Text("2").tag(2); Text("3").tag(3); Text("4").tag(4) }.pickerStyle(.segmented).labelsHidden()
       }
+      ModeField("Names, in Turn Order") {
+        VStack(spacing: 0) {
+          ForEach(0..<count, id: \.self) { i in
+            HStack {
+              Text("\(Self.ORD[i]) to shoot").font(.system(size: 15, weight: .semibold))
+              TextField("Player \(i + 1)", text: $names[i]).multilineTextAlignment(.trailing).textInputAutocapitalization(.words).autocorrectionDisabled()
+                .font(.system(size: 15)).accessibilityLabel("\(Self.ORD[i]) to shoot")
+            }
+            .padding(.horizontal, 14).frame(minHeight: 44)
+            if i < count - 1 { Divider().padding(.leading, 14) }
+          }
+        }
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(rgb: 0x1c, 0x1c, 0x1f)))
+      }
+      ModeNote("The device goes round the table: whenever the turn passes, it asks for the next player. 8-ball, snooker, bumper pool and three-cushion are two-player games, played from the home screen.")
     }
-    .navigationTitle("Party").navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+/* the modes' setup pages (6f, cvForm): a small kicker over the title, each field's label in Footnote above its control,
+   notes in Footnote, the action pinned at the foot on the bar's material (cvPin) */
+struct ModeForm<C: View>: View {
+  let kicker: String, title: String, action: String, actionID: String
+  let go: () -> Void
+  @ViewBuilder let content: () -> C
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text(kicker).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+          Text(title).font(.system(size: 28, weight: .bold)).accessibilityAddTraits(.isHeader)
+        }
+        content()
+      }
+      .padding(.horizontal, 16).padding(.bottom, 24)
+    }
+    .safeAreaInset(edge: .bottom) {
+      Button(action: go) { Text(action).font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+        .background(Capsule().fill(.white)).foregroundStyle(.black).padding(.horizontal, 16).padding(.vertical, 8)
+        .background(Color.black.opacity(0.92)).accessibilityIdentifier(actionID)
+    }
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+    .tint(.primary)
+  }
+}
+struct ModeField<C: View>: View {
+  let label: String
+  @ViewBuilder let control: () -> C
+  init(_ label: String, @ViewBuilder control: @escaping () -> C) { self.label = label; self.control = control }
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(label).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+      control()
+    }
+  }
+}
+struct ModeNote: View {
+  let text: String
+  init(_ t: String) { text = t }
+  var body: some View { Text(text).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).fixedSize(horizontal: false, vertical: true) }
+}
+/* a pop-up button the width of the form (6p's .popBtn): its value, the chevrons */
+struct ModePop<T: Hashable>: View {
+  @Binding var selection: T
+  let items: [(T, String)]
+  var body: some View {
+    Menu {
+      Picker("", selection: $selection) { ForEach(items, id: \.0) { Text($0.1).tag($0.0) } }
+    } label: {
+      HStack {
+        Text(items.first { $0.0 == selection }?.1 ?? "").font(.system(size: 17)).foregroundStyle(.white)
+        Spacer()
+        Image(systemName: "chevron.up.chevron.down").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa))
+      }
+      .padding(.horizontal, 14).frame(minHeight: 44)
+      .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(rgb: 0x1c, 0x1c, 0x1f)))
+    }
   }
 }
 
@@ -1043,29 +1127,29 @@ struct Handoff: View {
 /* the exhibition's setup (6f): the game and each CPU player's level, then Start */
 struct ExhibitionSetup: View {
   let start: (Home.Exhibit) -> Void
-  @State private var game: TableGame = .eight
+  @State private var game: TableGame = .nine
   @State private var a = "medium"
-  @State private var b = "hard"
-  @State private var archA = "allround"
-  @State private var archB = "allround"
+  @State private var b = "medium"
+  @State private var archA = "potter"
+  @State private var archB = "defender"
   /* ARCH_WORDS: the career's archetypes as styles */
   static let STYLES = [("allround", "All-Round"), ("potter", "Potter"), ("shotmaker", "Shotmaker"), ("defender", "Defender"), ("positional", "Positional"),
                        ("breaker", "Breaker"), ("banker", "Banker"), ("grinder", "Grinder"), ("clutch", "Clutch")]
   var body: some View {
-    List {
-      Section { Picker("Game", selection: $game) { ForEach(TableGame.allCases) { Text($0.rawValue).tag($0) } } }
-      Section {
-        Picker("Player 1", selection: $a) { Text("Rookie").tag("easy"); Text("Regular").tag("medium"); Text("Hustler").tag("hard") }
-        Picker("Player 1 Style", selection: $archA) { ForEach(Self.STYLES, id: \.0) { Text($0.1).tag($0.0) } }
-        Picker("Player 2", selection: $b) { Text("Rookie").tag("easy"); Text("Regular").tag("medium"); Text("Hustler").tag("hard") }
-        Picker("Player 2 Style", selection: $archB) { ForEach(Self.STYLES, id: \.0) { Text($0.1).tag($0.0) } }
-      } header: { Text("Players") } footer: { Text("Each searches at its own level through the same physics and rules as any CPU turn.") }
-      Section {
-        Button { start(Home.Exhibit(game: game, levels: [a, b], archs: [archA, archB])) } label: { Text("Start").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
-          .background(Capsule().fill(.white)).foregroundStyle(.black).listRowBackground(Color.clear).accessibilityIdentifier("exhibit-start")
+    ModeForm(kicker: "AI Exhibition", title: "Watch the CPU", action: "Watch", actionID: "exhibit-start", go: {
+      start(Home.Exhibit(game: game, levels: [a, b], archs: [archA, archB]))
+    }) {
+      ModeField("Table") { ModePop(selection: $game, items: TableGame.allCases.map { ($0, $0.rawValue) }) }
+      ForEach(0..<2, id: \.self) { i in
+        ModeField("Player \(i + 1)") {
+          VStack(spacing: 10) {
+            Picker("Level", selection: i == 0 ? $a : $b) { Text("Easy").tag("easy"); Text("Medium").tag("medium"); Text("Hard").tag("hard") }.pickerStyle(.segmented).labelsHidden()
+            ModePop(selection: i == 0 ? $archA : $archB, items: Self.STYLES)
+          }
+        }
       }
+      ModeNote("Both players are the CPU, each with the style you pick, through the same physics and rules as any game. The bar under the table pauses and sets the speed: 1x, 2x or 4x. Tap Replay after a shot to see it again.")
     }
-    .navigationTitle("Exhibition").navigationBarTitleDisplayMode(.inline)
   }
 }
 
