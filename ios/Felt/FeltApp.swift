@@ -41,13 +41,6 @@ struct Home: View {
             .accessibilityAddTraits(.isHeader).accessibilityLabel("felt")
         }
         Section {
-          Picker("Opponent", selection: $opponent) {
-            Text("2 Players").tag("two"); Text("Easy").tag("easy"); Text("Medium").tag("medium"); Text("Hard").tag("hard")
-          }
-          .pickerStyle(.segmented)
-          .accessibilityIdentifier("opponent")
-        } header: { Text("Opponent") } footer: { Text("The CPU plays every game at three levels, the web build's own search.") }
-        Section {
           ForEach(TableGame.allCases) { g in
             NavigationLink { GameSetup(game: g) { playing = g } } label: {
               VStack(alignment: .leading, spacing: 2) {
@@ -1024,30 +1017,134 @@ struct Overlays: View {
   }
 }
 
-/* the game setup (6, the setup sheet): the hero at its top (4m: the table and its signature shot, a tap replays it), the
-   game's name in Large Title over its line, and Break pinned at the foot */
+/* the game setup (6, the setup sheet): the hero at its top (4m), the game's name in Large Title over its line (KINDS'
+   sub), an inset grouped list (Opponent: Two Players or the CPU's three, each a ball, a name and its level; then the
+   game's table and rules rows: Table and Pockets on the pool tables, bumper pool's shape, carom's race and cushions,
+   snooker's table and frames, 8 and 9-ball's rules, 14.1's race, Stalemate at 8 and 9-ball), Break pinned at the foot.
+   Every choice is a setting, so the setup opens on the last ones. */
 struct GameSetup: View {
   let game: TableGame
   let go: () -> Void
+  @AppStorage("felt.opponent") private var opponent = "medium"
+  @AppStorage("felt.settings.table") private var table = "7"
+  @AppStorage("felt.settings.pockets") private var pockets = "regulation"
+  @AppStorage("felt.settings.bumperTable") private var bumperTable = "octagon"
+  @AppStorage("felt.settings.caromRace") private var caromRace = 10
+  @AppStorage("felt.settings.caromCush") private var caromCush = 3
+  @AppStorage("felt.settings.snookerTable") private var snookerTable = "compact"
+  @AppStorage("felt.settings.snookerFrames") private var snookerFrames = 1
+  @AppStorage("felt.settings.rules8") private var rules8 = DEFAULT_RULESET["8"]!
+  @AppStorage("felt.settings.rules9") private var rules9 = DEFAULT_RULESET["9"]!
+  @AppStorage("felt.settings.race141") private var race141 = 50
+  @AppStorage("felt.settings.stalemate") private var stalemate = false
+  /* the form's measured height (setupRoom), which the hero gives way to */
+  @State private var formContent = 0.0
+  static let SUB: [TableGame: String] = [
+    .eight: "Solids and stripes. Clear your group, then pot the 8.", .nine: "Lowest ball first. A legal 9 wins, whenever it drops.",
+    .bumper: "Red against white, five each, round the posts to the far cup.", .carom: "No pockets. Your cue ball meets both others, three cushions before the second.",
+    .snooker: "A red, then a colour, and again. Most points wins the frame.", .ten: "Lowest ball first, and call your shots. The 10 wins, called, when it is the last ball.",
+    .straight: "14.1 continuous: any ball, called, a point each. Fourteen down, rack again.", .rotation: "Lowest ball first; every ball scores its number. 61 wins.",
+    .heyball: "Snooker pockets, pool balls. Clear your group, then the 8 in any pocket."]
+  /* FOES: the CPU opponents, one per level, each with its ball (1, 5, 8) */
+  static let FOES: [(id: String, name: String, level: String, n: Int)] = [("easy", "Rookie", "Easy", 1), ("medium", "Regular", "Medium", 5), ("hard", "Hustler", "Hard", 8)]
+  var kind: String { game.table.2 }
+  var pool: Bool { ["8", "9", "10", "straight", "rotation"].contains(kind) }
   var body: some View {
     GeometryReader { g in
       VStack(spacing: 0) {
-        /* heroFit: the room the form leaves, 20% to 50% of the sheet (for 8-ball vs the CPU at 393 x 852, 381 pt) */
-        HeroView(game: game, txt: 104).frame(height: min(g.size.height * 0.5, max(g.size.height * 0.2, g.size.width * 0.97)))
+        /* heroFit: the room the form leaves (each row 44 pt, the groups' gaps, Break's bar), 20% to 50% of the sheet */
+        let formH = (formContent > 0 ? formContent : Double(rows) * 55 + 44) + 70 + g.safeAreaInsets.bottom
+        HeroView(game: game, txt: 104).frame(height: min(g.size.height * 0.5, max(g.size.height * 0.2, g.size.height + g.safeAreaInsets.top - formH)))
           .overlay(alignment: .bottomLeading) {
             VStack(alignment: .leading, spacing: 4) {
               Text(game.rawValue).font(.largeTitle.bold()).foregroundStyle(.white)
-              Text(game.line).font(.subheadline).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+              Text(Self.SUB[game] ?? game.line).font(.subheadline).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).lineLimit(2)
             }
-            .padding(.horizontal, 16).padding(.bottom, 12)
+            .padding(.horizontal, 16).padding(.bottom, 8)
           }
-        Spacer(minLength: 16)
+          .id(setupKey)
+        form
         Button(action: go) { Text("Break").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
-          .background(Capsule().fill(.white)).foregroundStyle(.black).padding(.horizontal, 16).padding(.bottom, 12)
+          .background(Capsule().fill(.white)).foregroundStyle(.black).padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 12)
           .accessibilityIdentifier("break")
       }
     }
     .background(Color.black)
     .ignoresSafeArea(edges: .top)
+  }
+  /* the hero is rebuilt when the table changes */
+  /* the form's rows: Opponent, the CPU's three, then the game's table and rules rows */
+  var rows: Int {
+    let foes = opponent == "two" ? 0 : 3
+    let more = pool ? 2 + (kind == "8" || kind == "9" ? 2 : kind == "straight" ? 1 : 0) : kind == "heyball" ? 0 : 2
+    return 1 + foes + more
+  }
+  var setupKey: String { [table, pockets, bumperTable, snookerTable].joined(separator: "|") }
+  var form: some View {
+    List {
+      Section {
+        Picker("Opponent", selection: Binding(get: { opponent == "two" ? "two" : "cpu" }, set: { opponent = $0 == "two" ? "two" : (opponent == "two" ? "medium" : opponent) })) {
+          Text("Two Players").tag("two"); Text("CPU").tag("cpu")
+        }
+        .pickerStyle(.segmented).accessibilityIdentifier("opponent")
+        if opponent != "two" {
+          ForEach(Self.FOES, id: \.id) { f in
+            Button { opponent = f.id } label: {
+              HStack(spacing: 12) {
+                BallDot(n: f.n).frame(width: 26, height: 26)
+                Text(f.name).font(.body.weight(.semibold)).foregroundStyle(.primary)
+                Text(f.level).font(.subheadline).foregroundStyle(.secondary)
+                Spacer()
+                if opponent == f.id { Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(.primary) }
+              }
+            }
+            .accessibilityAddTraits(opponent == f.id ? .isSelected : []).accessibilityIdentifier("foe-" + f.id)
+          }
+        }
+      }
+      Section {
+        if pool {
+          Picker("Table", selection: $table) { Text("7 ft Bar").tag("7"); Text("9 ft Pro").tag("9") }
+          Picker("Pockets", selection: $pockets) { Text("Regulation").tag("regulation"); Text("Generous").tag("generous") }
+        }
+        if kind == "bumper" { Picker("Table", selection: $bumperTable) { Text("Octagon").tag("octagon"); Text("Rectangle").tag("rect") } }
+        if kind == "carom" {
+          Picker("Race To", selection: $caromRace) { Text("5").tag(5); Text("10").tag(10); Text("15").tag(15) }
+          Picker("Cushions", selection: $caromCush) { Text("Three").tag(3); Text("1-Cushion (Easier)").tag(1) }
+        }
+        if kind == "snooker" {
+          Picker("Table", selection: $snookerTable) { Text("Compact 10 ft").tag("compact"); Text("Full 12 ft").tag("full") }
+          Picker("Frames", selection: $snookerFrames) { Text("One Frame").tag(1); Text("Best of 3").tag(3) }
+        }
+        if kind == "8" { Picker("Rules", selection: $rules8) { Text("House Rules").tag("8-house"); Text("WPA").tag("8-wpa") } }
+        if kind == "9" { Picker("Rules", selection: $rules9) { Text("House Rules").tag("9-house"); Text("WPA, Push Out").tag("9-wpa") } }
+        if kind == "straight" { Picker("Race To", selection: $race141) { ForEach([25, 50, 100, 150], id: \.self) { Text("\($0)").tag($0) } } }
+        if kind == "8" || kind == "9" { Picker("Stalemate", selection: $stalemate) { Text("Play On").tag(false); Text("Re-Rack (House)").tag(true) } }
+      }
+    }
+    .pickerStyle(.menu)
+    .tint(.primary)
+    .environment(\.defaultMinListRowHeight, 44)
+    .listSectionSpacing(16)
+    .contentMargins(.top, 12, for: .scrollContent)
+    .scrollBounceBehavior(.basedOnSize)
+    .onScrollGeometryChange(for: Double.self) { $0.contentSize.height + $0.contentInsets.top + $0.contentInsets.bottom } action: { _, h in formContent = h }
+  }
+}
+
+/* a little ball for a row (the foes' 1, 5 and 8: .b1, .b5, .b8): a lit sphere, the ivory circle to 30%, its number */
+struct BallDot: View {
+  let n: Int
+  var body: some View {
+    let c: (Color, Color) = n == 1 ? (Color(rgb: 0xff, 0xd8, 0x66), Color(rgb: 0xd2, 0x9a, 0x0e)) : n == 5 ? (Color(rgb: 0xff, 0x9e, 0x57), Color(rgb: 0xc4, 0x52, 0x0c)) : (Color(rgb: 0x4a, 0x4a, 0x4e), Color(rgb: 0x16, 0x16, 0x18))
+    GeometryReader { g in
+      let d = min(g.size.width, g.size.height)
+      ZStack {
+        Circle().fill(RadialGradient(colors: [c.0, c.1], center: UnitPoint(x: 0.35, y: 0.3), startRadius: 0, endRadius: d * 0.72))
+        Circle().fill(Color(rgb: 0xf6, 0xf4, 0xec)).frame(width: d * 0.6, height: d * 0.6)
+        Text("\(n)").font(.system(size: d * 0.36, weight: .bold)).foregroundStyle(.black)
+      }
+    }
+    .accessibilityHidden(true)
   }
 }

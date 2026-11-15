@@ -231,11 +231,14 @@ final class IntroBuilt: @unchecked Sendable {
   @ObservationIgnored var halo: CGImage? = nil
   @ObservationIgnored var dp = 3.0
   @ObservationIgnored var prepT0 = 0.0
+  /* decided at launch, before anything is drawn: off in Settings, or a test hook (any -felt- argument but -felt-intro) */
+  init() {
+    let a = ProcessInfo.processInfo.arguments
+    if !Prefs.intro || a.contains(where: { $0.hasPrefix("-felt-") && $0 != "-felt-intro" }) { state = .done; ik = 1 }
+  }
   /* introBoot: on a cold launch at home, unless it is off, Reduce Motion (the fade) or a test asks for none */
   func boot(size: CGSize, title: CGRect, insets: EdgeInsets, scale: Double) {
     guard state == .off else { return }
-    let a = ProcessInfo.processInfo.arguments
-    if !Prefs.intro || a.contains(where: { $0.hasPrefix("-felt-") && $0 != "-felt-intro" }) { state = .done; ik = 1; return }
     if UIAccessibility.isReduceMotionEnabled { state = .fade; withAnimation(.easeOut(duration: 0.24)) { ik = 1 } completion: { self.state = .done }; return }
     state = .prep; prepT0 = CACurrentMediaTime(); ik = 0; cv = 0; pose = [0, 0, 1, 1, 100]
     let dp = min(3, scale), W = Int((size.width * dp).rounded()), H = Int((size.height * dp).rounded())

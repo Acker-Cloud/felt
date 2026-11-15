@@ -62,7 +62,10 @@ enum Prefs {
   static func rules(_ kind: String) -> RuleSet {
     var c = CallConfig(); c.mode = calls
     let id = kind == "8" ? rules8 : kind == "9" ? rules9 : kind == "10" ? rules10 : nil
-    return makeRules(kind, ruleset: id, call: c, race: kind == "straight" ? race141 : nil)
+    var r = makeRules(kind, ruleset: id, call: c, race: kind == "straight" ? race141 : nil)
+    /* the setup's Stalemate (8 and 9-ball): re-rack after STALEMATE_INNINGS dry innings each */
+    if (kind == "8" || kind == "9") && bool("stalemate", false) { r.stalemate = 6 }
+    return r
   }
   /* the two-player rulesets a game offers (rulesetsFor: no ring sets) */
   static func rulesets(_ kind: String) -> [RuleSet] {
