@@ -39,6 +39,9 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: felt
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIStatusBarHidden: YES
+        # ProMotion: let the table's TimelineView run at the display's 120 Hz, as the touches do (else iOS holds an app to
+        # 60). Not an INFOPLIST_KEY_ Xcode knows: merged in from this one-key plist
+        INFOPLIST_FILE: Felt-Info.plist
         INFOPLIST_KEY_UIRequiresFullScreen: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

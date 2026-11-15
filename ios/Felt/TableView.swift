@@ -132,6 +132,7 @@ struct TableCanvas: View {
   @Environment(\.displayScale) private var scale
 
   var body: some View {
+    let _ = Bench.hit("TableCanvas")
     Canvas { ctx, size in
       let dt0 = CACurrentMediaTime()
       defer { if TableModel.fpsOn { let d = CACurrentMediaTime() - dt0; if d > 0.1 { print(String(format: "felt-fps slow draw %.0f ms", d * 1000)) } } }

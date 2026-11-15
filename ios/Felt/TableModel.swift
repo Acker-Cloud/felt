@@ -997,6 +997,7 @@ final class TableModel {
     return (ang, pow, spinOf(x: x, y: y, e: sp.e))
   }
   private func strikeNow(_ pw: Double, _ t: TimeInterval) {
+    if held != nil { placeEnd(); placeAt = nil; placeBack = nil }
     if g?.mode == "trick" { scoreDaily() }
     /* shoot(): the declaration the player built (humanCall) goes on the game; judge takes it from there */
     if var gm = g, !cpuTurn { gm.call = humanCall(); g = gm }
@@ -1017,13 +1018,29 @@ final class TableModel {
   @ObservationIgnored var fps: (t0: Double?, prev: Double?, n: Int, sim: Double, dtMax: Double) = (nil, nil, 0, 0, 0)
   /* the pause menu is up: the table stands still (frameBody does not run under it) */
   var paused = false
+  /* a test hook: `-felt-aimbench` turns the aim a little every frame, as a slow sweep, and prints every 2 s the frames,
+     the worst gap between them and how many times each counted view's body ran (Bench.bodies) */
+  static let aimBench = ProcessInfo.processInfo.arguments.contains("-felt-aimbench")
+  static let touchBench = ProcessInfo.processInfo.arguments.contains("-felt-touchbench") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-hand")
+  @ObservationIgnored private var bench: (t0: Double, prev: Double, n: Int, worst: Double)?
   func tick(_ now: TimeInterval) {
+    if (TableModel.aimBench || TableModel.touchBench) && rolling == nil && !cpuTurn && g?.winner == nil {
+      if TableModel.aimBench { aim = AimFeel.wrap(aim + 0.004) }
+      var b = bench ?? (now, now, 0, 0)
+      b.n += 1; b.worst = max(b.worst, now - b.prev); b.prev = now
+      if now - b.t0 >= 2 {
+        print(String(format: "felt-aimbench %.1f frames/s, worst gap %.1f ms, bodies %@", Double(b.n) / (now - b.t0), b.worst * 1000, Bench.bodies.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")))
+        Bench.bodies = [:]; b = (now, now, 0, 0)
+      }
+      bench = b
+    }
     let tt0 = CACurrentMediaTime()
     defer { if TableModel.fpsOn { let d = CACurrentMediaTime() - tt0; if d > 0.1 { print(String(format: "felt-fps slow tick %.0f ms", d * 1000)) } } }
     defer { frame &+= 1 }
     if paused { lastT = nil; return }
     self.now = now
     stepAutoAim()
+    stepPlaceBack()
     if lesson != nil { lessonCheck() }
     if let o = offer, now > o.until || rolling != nil || stroke != nil { offer = nil }
     if rp != nil { if let f = flashDue { banner = (f.0, f.1, now + f.2); flashDue = nil }; pots.removeAll { now - $0.t >= potMs }; replayStep(now); return }
@@ -1263,26 +1280,47 @@ final class TableModel {
     return (max(R + 0.001, px), y)
   }
 
-  /* placeAt: while the cue ball in hand is carried, where the finger has it (drawPlace's ghost and ring); on a legal
-     spot the ball is there too, on an illegal one it stays on its last legal spot, where the let-go puts it back */
-  var placeAt: (Double, Double)? = nil
-  func placeEnd() { if placeAt != nil { placeAt = nil; frame &+= 1 } }
-  /* ball in hand: carry the cue ball to (x, y), and put it there if it fits */
+  /* placeAt: while the cue ball in hand is carried, where the finger has it (drawPlace's ghost and ring), up to 2 cm
+     past the rails as the page's moveBall; on a legal spot the ball is there too, on an illegal one it stays on its
+     last legal spot. The game takes the spot once, at the let-go (placeEnd): writing the observed game on every move
+     rebuilt the whole screen at the touch rate. An illegal let-go slides the ghost back to the last legal spot over
+     PLACE_BACK_MS (at once with Reduce Motion); a ball that moved gets auto aim again (endMove). */
+  static let PLACE_BACK_MS = 0.120
+  @ObservationIgnored var placeAt: (Double, Double)? = nil
+  @ObservationIgnored private var held: (moved: Bool, last: (Double, Double))? = nil
+  @ObservationIgnored private var placeBack: (from: (Double, Double), to: (Double, Double), t0: TimeInterval)? = nil
+  func placeEnd() {
+    guard let m = held else { return }
+    held = nil
+    if let at = placeAt, let gm = g, !engine.canPlace(gm, at.0, at.1), !reduceMotion { placeBack = (at, m.last, now) } else { placeAt = nil }
+    if m.moved, let gm = g {
+      g = engine.placeCue(gm, m.last.0, m.last.1)
+      aimAtNearest()
+    }
+  }
+  func stepPlaceBack() {
+    guard let b = placeBack else { return }
+    if rolling != nil { placeBack = nil; placeAt = nil; return }
+    let u = min(1, max(0, (now - b.t0) / (TableModel.PLACE_BACK_MS / speed))), e = 1 - pow(1 - u, 3)
+    placeAt = (b.from.0 + (b.to.0 - b.from.0) * e, b.from.1 + (b.to.1 - b.from.1) * e)
+    if u >= 1 { placeBack = nil; placeAt = nil }
+  }
+  /* ball in hand: held the cue ball to (x, y), and put it there if it fits */
   func place(_ x: Double, _ y: Double) {
     guard inHand, rolling == nil, !cpuTurn, let c = balls.first(where: { $0.n == cueN }) else { return }
     if let gm = g {
-      let R = sim.BALL_R, lo = R + 0.001
-      let px = min(max(x, lo), sim.TL - lo), py = min(max(y, lo), sim.TW - lo)
-      placeAt = (px, py); frame &+= 1
+      placeBack = nil
+      if held == nil { held = (false, (c.x, c.y)) }
+      let px = min(max(x, -0.02), sim.TL + 0.02), py = min(max(y, -0.02), sim.TW + 0.02)
+      placeAt = (px, py)
       guard engine.canPlace(gm, px, py) else { return }
-      g = engine.placeCue(gm, px, py); c.x = px; c.y = py
+      c.x = px; c.y = py; held = (true, (px, py))
       return
     }
     let R = sim.BALL_R, lo = R + 0.001
     let px = min(max(x, lo), sim.TL - lo), py = min(max(y, lo), sim.TW - lo)
     if balls.contains(where: { $0 !== c && $0.on && JSMath.hypot($0.x - px, $0.y - py) < 2 * R }) { return }
     c.x = px; c.y = py
-    frame &+= 1
   }
 
   /* 4c: a pot runs on into its drop over POT_MS, shrinking and darkening under the rim */
@@ -1638,6 +1676,8 @@ final class TableModel {
   /* this frame's aimTrace: the line and the ghost follow the aim even while no complete preview of the layout exists */
   @ObservationIgnored private(set) var aimHit: AimHit?
   func guide() -> (AimHit, Preview)? {
+    let gt0 = CACurrentMediaTime()
+    defer { if TableModel.touchBench || TableModel.aimBench { let d = (CACurrentMediaTime() - gt0) * 1000; if d > 8 { print(String(format: "felt-bench slow guide %.1f ms", d)) } } }
     guard rolling == nil, let c = cue else { return nil }
     /* once a frame: the loupe asks again in the same frame */
     if pvFrame == frame { return pvLast }
@@ -1671,3 +1711,6 @@ final class TableModel {
     return pvLast
   }
 }
+
+/* the aim bench: how many times each counted view's body ran (`-felt-aimbench`) */
+@MainActor enum Bench { static var bodies: [String: Int] = [:]; static func hit(_ k: String) { if TableModel.aimBench || TableModel.touchBench { bodies[k, default: 0] += 1 } } }

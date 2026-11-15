@@ -301,17 +301,16 @@ struct TableScreen: View {
   @State var model: TableModel
   @Environment(\.dismiss) private var dismiss
   @State private var aimDrag: Double?
-  @State private var placing = false
-  @State private var picking = false
-  @State private var gest: AimGesture? = nil
-  @State private var pinch0: Double? = nil
-  @State private var eating = false
+  /* the drag's working state: a plain object, not observed, so a touch event (120 a second) never rebuilds the screen */
+  final class Touch { var placing = false, picking = false, eating = false, gest: AimGesture? = nil, pinch0: Double? = nil }
+  @State private var tch = Touch()
   @Environment(\.displayScale) private var scale
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   /* the window's interface orientation, read as the size changes (a turn) */
   private var interface: UIInterfaceOrientation { (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.effectiveGeometry.interfaceOrientation ?? .portrait }
 
   var body: some View {
+    let _ = Bench.hit("TableScreen")
     GeometryReader { geo in
       let ins = geo.safeAreaInsets, W = geo.size.width + ins.leading + ins.trailing, H = geo.size.height + ins.top + ins.bottom
       /* sideRot (6b): a phone on its side (under 600 pt tall) shows the upright layout turned a quarter, so the table
@@ -410,11 +409,13 @@ struct TableScreen: View {
         /* v3Pinch: two fingers move the 3D camera in or out (its distance by their spread, kept) */
         .simultaneousGesture(MagnifyGesture().onChanged { v in
           guard model.view3d else { return }
-          if pinch0 == nil { pinch0 = model.v3Dist; gest = nil }
-          model.v3Dist = min(V3.DIST[1], max(V3.DIST[0], pinch0! / Double(v.magnification)))
-        }.onEnded { _ in pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist") })
-        .gesture(DragGesture(minimumDistance: 0).onChanged { v in model.touching = true; if pinch0 == nil { touch(v, tg.size, began: v.translation == .zero) } }
-          .onEnded { v in if eating { eating = false } else { touchEnd(v, tg.size) }; placing = false; picking = false; gest = nil; model.touching = false; model.placeEnd() })
+          if tch.pinch0 == nil { tch.pinch0 = model.v3Dist; tch.gest = nil }
+          model.v3Dist = min(V3.DIST[1], max(V3.DIST[0], tch.pinch0! / Double(v.magnification)))
+        }.onEnded { _ in tch.pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist") })
+        .gesture(DragGesture(minimumDistance: 0).onChanged { v in model.touching = true; if tch.pinch0 == nil { touch(v.location, v.time.timeIntervalSinceReferenceDate, tg.size, began: tch.gest == nil && !tch.eating && !tch.picking && !tch.placing) } }
+          .onEnded { v in lift(v.location, v.time.timeIntervalSinceReferenceDate, tg.size) })
+        /* a test hook: `-felt-touchbench` sweeps a synthetic finger through touch() at 120 Hz (a press, an arc, a lift, every 2 s) */
+        .task(id: tg.size) { if TableModel.touchBench { await touchBench(tg.size) } }
         .accessibilityElement()
         .accessibilityLabel("Table")
         .accessibilityIdentifier("table")
@@ -429,16 +430,43 @@ struct TableScreen: View {
     .frame(width: W, height: H)
   }
 
-  private func touch(_ v: DragGesture.Value, _ size: CGSize, began: Bool) {
+  private func lift(_ at: CGPoint, _ time: TimeInterval, _ size: CGSize) {
+    let tt0 = CACurrentMediaTime()
+    defer { if TableModel.touchBench { let d = (CACurrentMediaTime() - tt0) * 1000; if d > 8 { print(String(format: "felt-bench slow lift %.1f ms", d)) } } }
+    if tch.eating { tch.eating = false } else { touchEnd(at, time, size) }
+    tch.placing = false; tch.picking = false; tch.gest = nil; model.touching = false; model.placeEnd()
+  }
+  private func touchBench(_ size: CGSize) async {
+    while !Task.isCancelled {
+      let t0 = Date.timeIntervalSinceReferenceDate
+      /* `-felt-touchbench-hand`: the press on the cue ball (in hand on the break), carried round a small circle */
+      let hand = ProcessInfo.processInfo.arguments.contains("-felt-touchbench-hand")
+      let m = Mapper(size: size, TL: model.sim.TL, TW: model.sim.TW), cp = model.cue.map { m.pt($0.x, $0.y) } ?? .zero
+      let cx = hand ? cp.x : size.width / 2, cy = hand ? cp.y : size.height * 0.7, rx: CGFloat = hand ? 30 : 120, ry: CGFloat = hand ? 30 : 60
+      var k = 0
+      while k < 200 && !Task.isCancelled {
+        let u = Double(k) / 200, p = CGPoint(x: cx + rx * (cos(u * 2 * .pi) - (hand ? 1 : 0)), y: cy + ry * sin(u * 2 * .pi))
+        model.touching = true
+        touch(p, t0 + Double(k) / 120, size, began: k == 0)
+        k += 1
+        try? await Task.sleep(for: .milliseconds(8))
+      }
+      lift(CGPoint(x: cx + rx * (hand ? 0 : 1), y: cy), t0 + 200 / 120, size)
+      try? await Task.sleep(for: .milliseconds(300))
+    }
+  }
+  private func touch(_ at: CGPoint, _ time: TimeInterval, _ size: CGSize, began: Bool) {
+    let tt0 = CACurrentMediaTime()
+    defer { if TableModel.touchBench { let d = (CACurrentMediaTime() - tt0) * 1000; if d > 8 { print(String(format: "felt-bench slow touch %.1f ms began %d", d, began ? 1 : 0)) } } }
     /* during a replay nothing reaches the game: the first touch ends it and the rest of it is eaten; an offer goes on a touch */
-    if began, model.rp != nil { model.endReplay(); eating = true; return }
-    if eating { return }
+    if began, model.rp != nil { model.endReplay(); tch.eating = true; return }
+    if tch.eating { return }
     /* the rail's 3D switch: a 44 pt target round its glyph; the tap is the switch's, the rest of it eaten */
-    if began, let c = model.railSwitch, abs(v.location.x - c.x) < 22, abs(v.location.y - c.y) < 22 { model.toggleView(); eating = true; return }
+    if began, let c = model.railSwitch, abs(at.x - c.x) < 22, abs(at.y - c.y) < 22 { model.toggleView(); tch.eating = true; return }
     if began { model.hideOffer() }
     let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW)
     model.uprightView = m.upright
-    let (x, y) = m.table(v.location)
+    let (x, y) = m.table(at)
     /* bumper pool: a touch on one of the shooter's own balls strikes that one from now on (pickBall) */
     if began, model.game == .bumper, let g = model.g {
       /* ballAt: the shooter's striker nearest the touch within max(22, 1.5 ball radii); the current one aims instead */
@@ -446,41 +474,41 @@ struct TableScreen: View {
       var best: Int? = nil, bd = reach
       for n in model.engine.bumperStrikers(g) {
         guard let b = g.balls.first(where: { $0.n == n && $0.on }) else { continue }
-        let p = m.pt(b.x, b.y), d = JSMath.hypot(Double(p.x - v.location.x), Double(p.y - v.location.y))
+        let p = m.pt(b.x, b.y), d = JSMath.hypot(Double(p.x - at.x), Double(p.y - at.y))
         if d < bd { bd = d; best = n }
       }
-      if let n = best, n != model.cueN, model.pickBall(n) { picking = true; return }
+      if let n = best, n != model.cueN, model.pickBall(n) { tch.picking = true; return }
     }
-    if picking { return }
+    if tch.picking { return }
     /* a call open: a touch on a pocket calls it (pocketAt: 26 pt or 1.6 ball radii round its centre), on a ball calls
        that ball (and still aims) */
     if began, model.callOn {
       var best = -1, bd = Double.infinity
       for (k, p) in s.POCKETS.enumerated() {
-        let q = m.pt(p[0], p[1]), d = JSMath.hypot(Double(q.x - v.location.x), Double(q.y - v.location.y))
+        let q = m.pt(p[0], p[1]), d = JSMath.hypot(Double(q.x - at.x), Double(q.y - at.y))
         if d < max(26, 1.6 * s.BALL_R * m.k) && d < bd { bd = d; best = k }
       }
-      if best >= 0 { model.pickPocket(best); picking = true; return }
+      if best >= 0 { model.pickPocket(best); tch.picking = true; return }
       if let b = model.balls.first(where: { $0.on && $0.n != model.cueN && JSMath.hypot($0.x - x, $0.y - y) < s.BALL_R * 1.4 }) { model.pickCallBall(b.n) }
     }
-    let t = v.time.timeIntervalSinceReferenceDate * 1000, b = v.location
+    let t = time * 1000, b = at
     if began {
-      gest = AimGesture(t0: t, p0: b, last: b, tLast: t, at: b, trail: [(t, model.aim, Double(b.x), Double(b.y))])
+      tch.gest = AimGesture(t0: t, p0: b, last: b, tLast: t, at: b, trail: [(t, model.aim, Double(b.x), Double(b.y))])
       /* ball in hand: a press within grabR (30 pt or 2.5 ball radii) moves it, relative to where it was */
       if model.inHand, let c = model.cue {
         let q = m.pt(c.x, c.y)
-        if JSMath.hypot(Double(q.x - b.x), Double(q.y - b.y)) < max(30, 2.5 * s.BALL_R * m.k) { placing = true; gest?.grab = (c.x - x, c.y - y) }
+        if JSMath.hypot(Double(q.x - b.x), Double(q.y - b.y)) < max(30, 2.5 * s.BALL_R * m.k) { tch.placing = true; tch.gest?.grab = (c.x - x, c.y - y) }
       }
     }
-    guard var g = gest else { return }
-    if model.view3d && !placing { drag3d(&g, b, t); gest = g; return }
+    guard var g = tch.gest else { return }
+    if model.view3d && !tch.placing { drag3d(&g, b, t); tch.gest = g; return }
     g.far = max(g.far, JSMath.hypot(Double(b.x - g.p0.x), Double(b.y - g.p0.y)))
-    if placing, let o = g.grab {
+    if tch.placing, let o = g.grab {
       if !g.moving && g.far > AimFeel.GRAB_SLOP { g.moving = true }
       if g.moving { model.place(x + o.dx, y + o.dy) }
-      gest = g; return
+      tch.gest = g; return
     }
-    guard model.rolling == nil, let c = model.cue else { gest = g; return }
+    guard model.rolling == nil, let c = model.cue else { tch.gest = g; return }
     let dv = JSMath.hypot(Double(b.x - g.last.x), Double(b.y - g.last.y))
     if dv > 0 { g.v = AimFeel.fingerSpeed(g.v, dv, t - g.tLast); g.last = b; g.tLast = t }
     if !g.sweep {
@@ -489,7 +517,7 @@ struct TableScreen: View {
     }
     /* while a let-go would still be a tap the line waits, then catches up with the finger in one step */
     if g.sweep && !g.maybeTap(t) { if !g.shown { model.takeAim() }; g.shown = true; turnTo(&g, b, t, m, c) }
-    gest = g
+    tch.gest = g
   }
   /* v3Drag: across turns the aim (rate by finger speed, 0.02 to 0.3 deg a point), up and down tilts (0.25 deg a point) */
   private func drag3d(_ g: inout AimGesture, _ b: CGPoint, _ t: Double) {
@@ -520,9 +548,9 @@ struct TableScreen: View {
     AimFeel.push(&g.trail, t, model.aim, b)
   }
   /* the let-go: a tap aims at the spot (an object ball's centre within tapReach), a sweep may restore its lift jitter */
-  private func touchEnd(_ v: DragGesture.Value, _ size: CGSize) {
-    guard var g = gest, !placing, !picking, model.rolling == nil, let c = model.cue else { return }
-    let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW), t = v.time.timeIntervalSinceReferenceDate * 1000
+  private func touchEnd(_ at: CGPoint, _ time: TimeInterval, _ size: CGSize) {
+    guard var g = tch.gest, !tch.placing, !tch.picking, model.rolling == nil, let c = model.cue else { return }
+    let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW), t = time * 1000
     /* in 3D a tap aims at the table point under it (v3Table) */
     if model.view3d {
       if !g.sweep && !g.held, let (C, box) = model.v3Cam, let p = V3.unproj(C, box, Double(g.p0.x), Double(g.p0.y), s.BALL_R), JSMath.hypot(p[0] - c.x, p[1] - c.y) > s.BALL_R {
@@ -543,7 +571,7 @@ struct TableScreen: View {
       else if JSMath.hypot(x - c.x, y - c.y) > s.BALL_R { model.takeAim(); model.aim = atan2(y - c.y, x - c.x) }
       return
     }
-    turnTo(&g, v.location, t, m, c)
+    turnTo(&g, at, t, m, c)
     if let r = AimFeel.liftAim(g.trail, t) { model.aim = r }
   }
 }
@@ -558,6 +586,7 @@ struct Controls: View {
   @AppStorage("felt.settings.hand") private var hand = "right"
   @AppStorage("felt.settings.bar") private var bar = "mid"
   var body: some View {
+    let _ = Bench.hit("Controls")
     let items = Group {
       SpinPad(model: model)
       PowerBar(model: model, upright: upright).overlay { LessonRing(on: model.lesson?.step == 3 && !model.lessonDone) }
@@ -619,6 +648,7 @@ struct FineWheel: View {
   @State private var wt = 0.0
   @State private var trail: AimFeel.Trail = []
   var body: some View {
+    let _ = Bench.hit("FineWheel")
     let stops: [Gradient.Stop] = [.init(color: Color(rgb: 0x14, 0x14, 0x16), location: 0), .init(color: Color(rgb: 0x50, 0x50, 0x5a), location: 0.24),
       .init(color: Color(rgb: 0x6e, 0x6e, 0x78), location: 0.5), .init(color: Color(rgb: 0x50, 0x50, 0x5a), location: 0.76), .init(color: Color(rgb: 0x14, 0x14, 0x16), location: 1)]
     RoundedRectangle(cornerRadius: 12).fill(LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom))
@@ -670,6 +700,7 @@ struct SpinPad: View {
   @State private var hold: Task<Void, Never>? = nil
   static let ELEV_HOLD_MS = 450
   var body: some View {
+    let _ = Bench.hit("SpinPad")
     GeometryReader { g in
       let d = min(g.size.width, g.size.height), R = d * 0.31
       ZStack {
@@ -784,6 +815,7 @@ struct PowerBar: View {
   @Environment(\.accessibilityReduceMotion) private var sysStill
   private var still: Bool { sysStill || Prefs.bool("reduceMotion", false) }
   var body: some View {
+    let _ = Bench.hit("PowerBar")
     GeometryReader { g in
       let len = upright ? g.size.width : g.size.height, p = CGFloat(model.power), live = p > 0
       let fill: [Gradient.Stop] = p > 0.85 ? [.init(color: Color(rgb: 0xcf, 0xc6, 0xb2), location: 0), .init(color: Color(rgb: 0xec, 0xe4, 0xd2), location: 0.6), .init(color: Color(rgb: 0xc0, 0x39, 0x2b), location: 1)]
