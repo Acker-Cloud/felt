@@ -147,6 +147,12 @@ final class TableModel {
   private(set) var tmatch: TMatch?
   /* what the table, the cue and the balls wear (4l) */
   @ObservationIgnored var dress: Dress = .standard
+  /* 4g: the fine-aim wheel held (fineAim), the loupe's fade, place and clock, the guide's last verdict */
+  @ObservationIgnored var fineAim = false
+  @ObservationIgnored var loupeA = 0.0
+  @ObservationIgnored var loupeT = 0.0
+  @ObservationIgnored var loupe: (x: Double, y: Double, r: Double, to: (x: Double, y: Double, r: Double))? = nil
+  @ObservationIgnored var guideLegal = true
   /* the 3D view (4o): on, its pitch and distance (the player's, kept in the settings), the camera last drawn */
   var view3d = Prefs.view == "3d"
   @ObservationIgnored var v3Pitch = Prefs.viewPitch
@@ -192,6 +198,8 @@ final class TableModel {
     rerack()
     /* a test hook: `-felt-paused` opens the table with the pause menu up */
     if ProcessInfo.processInfo.arguments.contains("-felt-paused") { paused = true }
+    /* a test hook: `-felt-loupe` holds the fine-aim wheel's loupe open */
+    if ProcessInfo.processInfo.arguments.contains("-felt-loupe") { fineAim = true }
   }
 
   /* the game's balls as the sim's (velocities as the game left them; newTable zeroes the spin) */

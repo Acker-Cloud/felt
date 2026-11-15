@@ -108,6 +108,7 @@ struct TableCanvas: View {
       }
       ctx.scaleBy(x: sc, y: sc)
       drawGuide(&ctx, m)
+      defer { drawLoupe(&ctx, m, bp) }
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       drawPots(&ctx, m, bp, rb, sc)
       for b in list {
@@ -167,6 +168,7 @@ struct TableCanvas: View {
     /* guideLines' verdict: a first contact that is not a legal target, or (ball in hand in the kitchen) a
        ball behind the string reached before the cue ball crossed it; practice: any contact */
     var legal = model.game == .carom ? true : first != nil
+    defer { model.guideLegal = legal }
     if let gm = model.g, let f = first {
       let E = model.engine, lt = E.legalTargets(gm)
       let wrong = !(is8(gm.kind) && gm.breakShot) && !lt.contains(f.n)
@@ -214,6 +216,121 @@ struct TableCanvas: View {
       ctx.stroke(p, with: .color(wa(0.7)), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round, dash: [2, 4]))
       for q in lands { ctx.fill(Path(ellipseIn: CGRect(x: q.x - 3, y: q.y - 3, width: 6, height: 6)), with: .color(wa(0.85))) }
     }
+  }
+
+  /* 4g's loupe: while the fine-aim wheel is held, a round magnifier, LOUPE_MAG times, over the ghost-ball contact: the
+     table behind it, the balls, the aim line, the ghost ring and the object ball's line drawn again at the larger scale;
+     off the contact, inside the table, keeping off the lines and balls, leaning to the middle, kept while it fits and
+     gliding (LOUPE_GLIDE_MS) when it must move; it fades in and out over LOUPE_FADE_MS */
+  static let LOUPE_MAG = 3.0, LOUPE_FADE_MS = 90.0, LOUPE_GLIDE_MS = 60.0
+  func loupeStep(_ m: Mapper) -> (L: (x: Double, y: Double, r: Double), a: Double, C: CGPoint, h: AimHit, P: FeltSim.Preview)? {
+    let now = model.now * 1000
+    let gi = Prefs.guide == "off" ? nil : model.guide()
+    let on = gi != nil && model.rolling == nil && !model.cpuTurn && model.fineAim
+    let dt = model.loupeT > 0 ? min(100, max(0, now - model.loupeT)) : 16
+    model.loupeT = now
+    model.loupeA = on ? min(1, model.loupeA + dt / Self.LOUPE_FADE_MS) : max(0, model.loupeA - dt / Self.LOUPE_FADE_MS)
+    if !on { if model.loupeA == 0 { model.loupe = nil }; if gi == nil || model.loupeA == 0 { return nil } }
+    guard let (h, P) = gi, let c = model.cue else { return nil }
+    let s = model.sim, a0 = m.pt(0, 0), b0 = m.pt(s.TL, s.TW)
+    let tl = Double(min(a0.x, b0.x)), tr = Double(max(a0.x, b0.x)), tt = Double(min(a0.y, b0.y)), tb = Double(max(a0.y, b0.y))
+    let r = min(72, max(56, min(tr - tl, tb - tt) * 0.2)), rp = s.BALL_R * m.k
+    let dx = JSMath.cos(model.aim), dy = JSMath.sin(model.aim), C = m.pt(c.x + dx * h.t, c.y + dy * h.t), cue = m.pt(c.x, c.y)
+    var lines: [(CGPoint, CGPoint, Double)] = [(cue, C, 8)]
+    if let o = P.obj, o.count > 1 { for i in 1..<o.count { lines.append((m.pt(o[i - 1][0], o[i - 1][1]), m.pt(o[i][0], o[i][1]), 4)) } }
+    if P.cue.count > 1 { for i in 1..<P.cue.count { lines.append((m.pt(P.cue[i - 1][0], P.cue[i - 1][1]), m.pt(P.cue[i][0], P.cue[i][1]), 2)) } }
+    let balls = model.balls.filter { $0.on }.map { b -> (CGPoint, Double) in (m.pt(b.x, b.y), b.n == model.cueN ? 16 : 1) }
+    /* loupePlace */
+    let mx = (tl + tr) / 2, my = (tt + tb) / 2, mg = 4.0, cx = Double(C.x), cy = Double(C.y)
+    func seg(_ x: Double, _ y: Double, _ a: CGPoint, _ b: CGPoint) -> Double {
+      let ax = Double(a.x), ay = Double(a.y), bx = Double(b.x), by = Double(b.y), l2 = (bx - ax) * (bx - ax) + (by - ay) * (by - ay)
+      let t = l2 > 0 ? min(1, max(0, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / l2)) : 0
+      return JSMath.hypot(x - (ax + (bx - ax) * t), y - (ay + (by - ay) * t))
+    }
+    func fits(_ x: Double, _ y: Double) -> Bool { x - r >= tl - mg && x + r <= tr + mg && y - r >= tt - mg && y + r <= tb + mg && JSMath.hypot(x - cx, y - cy) > r * 1.25 }
+    func cost(_ x: Double, _ y: Double) -> Double {
+      var k = 0.0
+      for l in lines where seg(x, y, l.0, l.1) < r + 6 { k += l.2 }
+      for b in balls where JSMath.hypot(x - Double(b.0.x), y - Double(b.0.y)) < r + rp { k += b.1 }
+      return k
+    }
+    let prev = model.loupe?.to
+    var to: (x: Double, y: Double, r: Double)
+    let was = prev.map { p in abs(p.r - r) < 0.5 && fits(p.x, p.y) ? cost(p.x, p.y) : Double.infinity } ?? .infinity
+    if was == 0, let p = prev { to = p } else {
+      var best: (x: Double, y: Double, r: Double)? = nil, bs = Double.infinity, bc = Double.infinity
+      for d in [1.45, 1.9, 2.5, 3.2] { for i in 0..<24 {
+        let ang = Double(i) * Double.pi / 12, x = cx + cos(ang) * r * d, y = cy + sin(ang) * r * d
+        if !fits(x, y) { continue }
+        let k = cost(x, y), sc = k * 1000 + JSMath.hypot(x - mx, y - my) + d * r * 0.3
+        if sc < bs { bs = sc; bc = k; best = (x, y, r) }
+      } }
+      if let p = prev, was <= bc { to = p } else if let b = best { to = b } else {
+        let pl = tr - tl > tb - tt
+        to = (pl ? (cx < mx ? (mx + tr) / 2 : (tl + mx) / 2) : mx, pl ? my : (cy < my ? (my + tb) / 2 : (tt + my) / 2), r)
+      }
+    }
+    if model.loupe == nil || model.loupeA <= dt / Self.LOUPE_FADE_MS { model.loupe = (to.x, to.y, r, to) }
+    else { let L = model.loupe!, u = 1 - exp(-dt / Self.LOUPE_GLIDE_MS); model.loupe = (L.x + (to.x - L.x) * u, L.y + (to.y - L.y) * u, r, to) }
+    let L = model.loupe!, A = model.loupeA
+    return ((L.x, L.y, L.r), A * A * (3 - 2 * A), C, h, P)
+  }
+  private func drawLoupe(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter) {
+    guard let st = loupeStep(m), let c = model.cue else { return }
+    let s = model.sim, R = s.BALL_R, rp = R * m.k, M = Self.LOUPE_MAG, L = st.L, C = st.C, sc = model.scaleFactor
+    func at(_ x: Double, _ y: Double) -> CGPoint { let p = m.pt(x, y); return CGPoint(x: L.x + Double(p.x - C.x) * M, y: L.y + Double(p.y - C.y) * M) }
+    var g = ctx
+    g.opacity = st.a
+    let lens = Path(ellipseIn: CGRect(x: L.x - L.r, y: L.y - L.r, width: 2 * L.r, height: 2 * L.r))
+    /* a soft shadow under it, the cloth, then everything inside clipped to it */
+    var sh = g; sh.addFilter(.shadow(color: .black.opacity(0.55), radius: 7, x: 0, y: 3)); sh.fill(lens, with: .color(look.cloth))
+    g.clip(to: lens)
+    if let img = model.tableImage {
+      var t = g
+      t.translateBy(x: L.x - Double(C.x) * M, y: L.y - Double(C.y) * M); t.scaleBy(x: M, y: M)
+      t.draw(Image(decorative: img.image, scale: img.scale), in: CGRect(origin: .zero, size: img.size))
+    }
+    /* the balls near the contact */
+    let reach = L.r / M + 2 * rp
+    for b in model.balls where b.on {
+      let p = m.pt(b.x, b.y)
+      if JSMath.hypot(Double(p.x - C.x), Double(p.y - C.y)) > reach { continue }
+      let q = at(b.x, b.y), X = Double(q.x) * sc, Y = Double(q.y) * sc, Rr = rp * M * sc
+      var d = g; d.scaleBy(x: 1 / sc, y: 1 / sc)
+      for (img, rect, a) in bp.castParts(b.x, b.y, X, Y, Rr, tl: s.TL, tw: s.TW, ballR: R, z: 0) { var cc = d; cc.opacity = a * st.a; cc.draw(Image(decorative: img, scale: 1), in: rect) }
+      let (img, ix, iy) = bp.ballImage(b.n, X, Y, Rr, bp.axesOf(model.orient[b.n] ?? IDENT))
+      d.draw(Image(decorative: img, scale: 1), in: CGRect(x: ix, y: iy, width: Double(img.width), height: Double(img.height)))
+    }
+    /* the lines, a little heavier than on the table but not three times */
+    let ov = look.ovMin, wa = { (a: Double) in Color.white.opacity(max(a, ov)) }
+    func line(_ pts: [[Double]], _ col: Color, _ w: Double, _ dash: [CGFloat] = []) {
+      var p = Path(); for (i, q) in pts.enumerated() { i == 0 ? p.move(to: at(q[0], q[1])) : p.addLine(to: at(q[0], q[1])) }
+      g.stroke(p, with: .color(.black.opacity(0.25)), style: StrokeStyle(lineWidth: w + 2.5, lineCap: .round, lineJoin: .round, dash: dash))
+      g.stroke(p, with: .color(col), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round, dash: dash))
+    }
+    let dx = JSMath.cos(model.aim), dy = JSMath.sin(model.aim), gx = c.x + dx * st.h.t, gy = c.y + dy * st.h.t, legal = model.guideLegal
+    if st.h.t > 2 * R { line([[c.x + dx * R, c.y + dy * R], [gx - dx * R, gy - dy * R]], wa(0.6), 1.75) }
+    if let o = st.P.obj, o.count > 1 {
+      var d = R, ot: [[Double]] = []
+      for i in 1..<o.count {
+        let a = o[i - 1], b = o[i], l = JSMath.hypot(b[0] - a[0], b[1] - a[1])
+        if l > d { ot = [[a[0] + (b[0] - a[0]) * d / l, a[1] + (b[1] - a[1]) * d / l]] + o[i...]; break }
+        d -= l
+      }
+      if ot.count > 1 { line(ot, .white.opacity(0.92), 2.5) }
+    }
+    if st.P.cue.count > 1 { line(st.P.cue, wa(0.55), 2, [7, 6]) }
+    let q = at(gx, gy), ring = Path(ellipseIn: CGRect(x: q.x - rp * M, y: q.y - rp * M, width: 2 * rp * M, height: 2 * rp * M))
+    g.fill(ring, with: .color(.white.opacity(0.08))); g.stroke(ring, with: .color(legal ? .white.opacity(0.92) : look.illegal), lineWidth: 2)
+    /* the contact point itself */
+    if st.h.kind == "ball", let hb = st.h.ball {
+      let k = at(gx + (hb.x - gx) / 2, gy + (hb.y - gy) / 2)
+      g.fill(Path(ellipseIn: CGRect(x: k.x - 2.25, y: k.y - 2.25, width: 4.5, height: 4.5)), with: .color(legal ? .white : look.illegal))
+    }
+    /* the rim: a thin bright ring over a dark one */
+    var rim = ctx; rim.opacity = st.a
+    rim.stroke(Path(ellipseIn: CGRect(x: L.x - L.r - 0.5, y: L.y - L.r - 0.5, width: 2 * L.r + 1, height: 2 * L.r + 1)), with: .color(.black.opacity(0.45)), lineWidth: 3)
+    rim.stroke(lens, with: .color(.white.opacity(0.85)), lineWidth: 1.25)
   }
 
   /* 4c drawPots, in device px: the ball runs on to the drop's centre, shrinking and darkening, clipped to

@@ -406,7 +406,7 @@ struct FineWheel: View {
       .contentShape(Rectangle())
       .gesture(DragGesture(minimumDistance: 0).onChanged { v in
         let t = v.time.timeIntervalSinceReferenceDate * 1000
-        if !live { live = true; wv = nil; wt = t; trail = [(t, model.aim, Double(v.location.x), Double(v.location.y))] }
+        if !live { live = true; model.fineAim = true; wv = nil; wt = t; trail = [(t, model.aim, Double(v.location.x), Double(v.location.y))] }
         let d = v.translation.height, dy = Double(d - last)
         guard dy != 0 else { return }
         /* wheelRate by the finger's smoothed speed; down turns the cue clockwise on screen */
@@ -418,7 +418,7 @@ struct FineWheel: View {
         last = d; wt = t
       }.onEnded { v in
         if model.rolling == nil, let r = AimFeel.liftAim(trail, v.time.timeIntervalSinceReferenceDate * 1000) { model.aim = r }
-        last = 0; live = false; trail = []
+        last = 0; live = false; trail = []; model.fineAim = false
       })
       .accessibilityLabel("Fine aim")
   }
