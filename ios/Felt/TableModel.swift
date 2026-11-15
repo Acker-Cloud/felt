@@ -142,7 +142,9 @@ final class TableModel {
   private(set) var party: Party?
   /* a quick tournament's match (6f, tmatch): the bracket's match, the opponent, racks won, the race in racks (a points
      race is one game, need 1), the lag's winner, and where the result goes */
-  struct TMatch { let m: Int, foe: String, level: String, arch: String?, need: Int, points: Bool, race: Int, lag: Int, ruleset: String; var score = [0, 0], rack = 1, done = false, counted = false }
+  struct TMatch { let m: Int, foe: String, level: String, arch: String?, need: Int, points: Bool, race: Int, lag: Int, ruleset: String; var score = [0, 0], rack = 1, done = false, counted = false
+    /* a career match (careerTerms): its event's calls and table, the event's own words */
+    var call: CallConfig? = nil, spec: (table: String, shape: String?, pockets: String)? = nil, career = false }
   private(set) var tmatch: TMatch?
   @ObservationIgnored var onReport: ((Int, Int, Int, Bool) -> Void)?
   /* the handoff: the player the device is passed to (the breaker at a rack's start), until they are ready */
@@ -150,10 +152,10 @@ final class TableModel {
   @ObservationIgnored private var cpuBusy = false
   private(set) var cpuThinking = false
 
-  init(game: TableGame, cpu: String? = nil, exhib: [String]? = nil, exhibArch: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil) {
+  init(game: TableGame, cpu: String? = nil, exhib: [String]? = nil, exhibArch: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil, match: TMatch? = nil) {
     self.game = game
     /* tourneyPlay: the player's next match, the opponent's level, the lag from the tournament's seed */
-    var tm: TMatch? = nil
+    var tm: TMatch? = match
     if let t = tourney, let m = t.mine() {
       let foe = t.foe(m), pts = Tourney.points(t.kind)
       tm = TMatch(m: m, foe: foe.name, level: foe.level ?? "medium", arch: foe.arch, need: pts ? 1 : t.race, points: pts, race: t.race,
@@ -166,12 +168,13 @@ final class TableModel {
     Words.cpuMode = cpuLevel != nil
     Words.names = exhib.map { $0.map { TableModel.FOES[$0] ?? "CPU" } } ?? party?.names
     /* start(): the settings' table (every pool game on its size and pockets; snooker's size; the bumper table's shape) */
-    spec = switch game {
+    let prefSpec: (table: String, shape: String?, pockets: String) = switch game {
     case .eight, .nine, .ten, .straight, .rotation: (Prefs.table, nil, Prefs.pockets)
     case .snooker: ("snooker", Prefs.snookerTable, Prefs.pockets)
     case .bumper: ("bumper", Prefs.bumperTable, Prefs.pockets)
     default: (game.table.0, game.table.1, Prefs.pockets)
     }
+    spec = tm?.spec ?? prefSpec
     TableModel.setUp(sim, spec)
     engine = RulesEngine(sim: sim)
     sound.cupTable = !sim.BUMPERS.isEmpty
@@ -584,6 +587,7 @@ final class TableModel {
   private func tourneyGame(_ k: String) -> Game {
     let t = tmatch!, br = k == "carom" ? 0 : (t.lag + t.rack - 1) % 2
     var c = CallConfig(); c.mode = Prefs.calls
+    if let cc = t.call { c = cc }
     if k == "snooker" { return engine.snookerGame(frames: 1, first: br) }
     if k == "carom" { return engine.caromGame(race: t.race, cushions: 3) }
     var gm = engine.newGame(k, rules: makeRules(k, ruleset: t.ruleset, call: c, race: k == "straight" ? t.race : nil, locked: true))

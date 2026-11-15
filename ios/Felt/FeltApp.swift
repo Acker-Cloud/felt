@@ -18,6 +18,8 @@ struct Home: View {
   @State private var store = TourneyStore()
   @State private var playingTourney = false
   @State private var showTourney = false
+  @State private var career = CareerStore()
+  @State private var showCareer = false
   struct PartyGo: Identifiable { let game: TableGame, names: [String], ruleset: String; var id: String { ruleset + names.joined() } }
   struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var archs: [String] = ["allround", "allround"]; var id: String { game.rawValue + levels.joined() + archs.joined() } }
   var body: some View {
@@ -44,6 +46,13 @@ struct Home: View {
           Text("The web build's physics, rules and CPU, bit for bit.")
         }
         Section {
+          NavigationLink { CareerView(store: career) } label: {
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Career").font(.body.weight(.semibold))
+              Text(career.loaded ? "\(career.E.S["profile"]?["name"]?.str ?? "Career"), season \(career.E.season)" : "From local amateur to the world tour").font(.footnote).foregroundStyle(.secondary)
+            }.frame(minHeight: 44, alignment: .leading)
+          }
+          .accessibilityIdentifier("mode-career")
           NavigationLink { ExhibitionSetup { exhibit = $0 } } label: {
             VStack(alignment: .leading, spacing: 2) {
               Text("Exhibition").font(.body.weight(.semibold))
@@ -70,6 +79,7 @@ struct Home: View {
         }
       }
       .navigationTitle("felt")
+      .navigationDestination(isPresented: $showCareer) { CareerView(store: career) }
       .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { store.markLive(); playingTourney = true } }
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
@@ -83,6 +93,8 @@ struct Home: View {
       let a = ProcessInfo.processInfo.arguments
       if let i = a.firstIndex(of: "-felt-game"), i + 1 < a.count { playing = TableGame(rawValue: a[i + 1]) }
       /* `-felt-tourney`: the golden's first tournament (9-ball, 8 players, seed 11), its screen open */
+      /* `-felt-career`: the career's screen open */
+      if a.contains("-felt-career") { showCareer = true }
       if a.contains("-felt-tourney") { store.start(Tourney.make(kind: "9", ruleset: nil, size: 8, fmt: "single", race: 3, field: "mixed", seed: 11)); showTourney = true }
       if let i = a.firstIndex(of: "-felt-party"), i + 1 < a.count, let n = Int(a[i + 1]) { party = PartyGo(game: .nine, names: (1...n).map { "Player \($0)" }, ruleset: "9-ring") }
       if let i = a.firstIndex(of: "-felt-exhibit"), i + 1 < a.count, let g = TableGame(rawValue: a[i + 1]) { exhibit = Exhibit(game: g, levels: ["medium", "hard"]) }
@@ -910,7 +922,7 @@ struct Overlays: View {
           /* a tournament match: the racks, then the next rack or back to the bracket */
           Text("You \(t.score[0]), \(t.foe) \(t.score[1]), race to \(t.need)").font(.subheadline).foregroundStyle(.secondary)
           if t.done {
-            Button(action: back) { Text("Back to Tournament").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+            Button(action: back) { Text(model.tmatch?.career == true ? "Back to Career" : "Back to Tournament").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
               .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("tourney-back")
           } else {
             Button { model.tourneyNextRack() } label: { Text("Next Rack").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
