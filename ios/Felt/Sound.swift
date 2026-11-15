@@ -92,6 +92,10 @@ final class Sound {
   }
   /* hit: one take through a free voice at gain, rate and brightness; cut (s) ends it early with a fade. Its end. */
   @discardableResult private func hit(_ take: (AVAudioPCMBuffer, String)?, _ gain: Double, _ rate: Double, _ bright: Double, cut: Double = 0, fade: Double = 0.05, delay: Double = 0) -> Double {
+    /* the volumes (settings.vol, settings.volFx): the bus carries the master times BUS_GAIN, each take the table
+       sounds' share */
+    bus.outputVolume = Float(0.55 * Double(Prefs.int("vol", 100)) / 100)
+    let gain = gain * Double(Prefs.int("volFx", 100)) / 100
     guard ok, let (buf0, id) = take, gain > 0.0005 else { return now }
     let t = now + delay
     var buf = buf0

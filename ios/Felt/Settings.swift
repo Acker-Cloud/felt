@@ -102,6 +102,9 @@ struct SettingsView: View {
 
   @AppStorage("felt.settings.stalemate") private var stalemate = false
   @AppStorage("felt.settings.hand") private var hand = "right"
+  @AppStorage("felt.settings.vol") private var vol = 100
+  @AppStorage("felt.settings.volFx") private var volFx = 100
+  @AppStorage("felt.settings.replays") private var replays = true
   @AppStorage("felt.settings.bar") private var bar = "mid"
   /* the list (prefsList): a row per page (PREF_PAGES), its icon, name and line, pushed from the right. The page's
      Accessibility page is not here: none of its settings (ball marks, high-contrast aim, text size, Space on the bar)
@@ -111,8 +114,8 @@ struct SettingsView: View {
       Section {
         NavigationLink { page("Gameplay") { gameplay } } label: { PrefRow(icon: "circle.grid.2x1.fill", name: "Gameplay", line: "Rules, called shots, races, aim guide") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("Controls") { controls } } label: { PrefRow(icon: "switch.2", name: "Controls", line: "Auto aim, layout, power bar") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-        NavigationLink { page("Graphics") { graphics } } label: { PrefRow(icon: "photo", name: "Graphics", line: "Cloth, camera, motion") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-        NavigationLink { page("Audio and Haptics") { audio } } label: { PrefRow(icon: "speaker.wave.2.fill", name: "Audio and Haptics", line: "Sound, haptics") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        NavigationLink { page("Graphics") { graphics } } label: { PrefRow(icon: "photo", name: "Graphics", line: "Cloth, camera, replay, motion") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        NavigationLink { page("Audio and Haptics") { audio } } label: { PrefRow(icon: "speaker.wave.2.fill", name: "Audio and Haptics", line: "Volume, table sounds, haptics") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("About") { about } } label: { PrefRow(icon: "info.circle", name: "About", line: "This build") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
       } header: {
         /* the page's header row: "Settings" in Title 1, by the back button */
@@ -176,6 +179,9 @@ struct SettingsView: View {
       Picker("After the Shot", selection: $viewAfter) { Text("Pull Back").tag("pull"); Text("Top Down").tag("top"); Text("Stay").tag("stay") }.pickerStyle(.segmented).labelsHidden()
     } header: { Text("After the Shot") } footer: { Text("In 3D, once the cue strikes. Pull Back rises smoothly to a view of the whole table, holds it while the balls roll, then comes back down behind the cue ball. Top Down shows the roll on the flat table. Stay keeps your aiming view. Your pitch and distance are always kept.") }
     Section {
+      Picker("Replays", selection: $replays) { Text("Offer").tag(true); Text("Never").tag(false) }.pickerStyle(.segmented).labelsHidden()
+    } header: { Text("Replays") } footer: { Text("Offer puts a Replay pill over the table after a shot. Never keeps the table clear after every shot.") }
+    Section {
       Toggle("Opening Animation", isOn: $intro)
     } header: { Text("Opening") } footer: { Text("A break under the lamp each time felt opens, then the home. A tap skips it. With Reduce Motion the home simply fades in.") }
   }
@@ -183,7 +189,9 @@ struct SettingsView: View {
   @ViewBuilder private var audio: some View {
     Section {
       Picker("Sound", selection: $sound) { Text("On").tag(true); Text("Off").tag(false) }.pickerStyle(.segmented).labelsHidden()
-    } header: { Text("Sound") } footer: { Text("Table sounds are the balls, cushions, cue and pockets. felt has no music or ambience.") }
+      slider("Master Volume", $vol)
+      slider("Table Sounds", $volFx)
+    } header: { Text("Sound") } footer: { Text("Table sounds are the balls, cushions, cue and pockets; the master volume is everything, the game's little cues too. felt has no music or ambience.") }
     Section {
       Picker("Haptics", selection: $haptics) { Text("On").tag(true); Text("Off").tag(false) }.pickerStyle(.segmented).labelsHidden()
     } header: { Text("Haptics") } footer: { Text("A tick for a hard contact, two for a pot, three for a win.") }
@@ -201,6 +209,15 @@ struct SettingsView: View {
       credit("Pockets", "Yarmonics and Caitlin_100, on Freesound.")
       credit("Break and Roll", "RossJuterbock and csaszi, on Freesound.")
     } header: { Text("Sound Credits") } footer: { Text("Every recording is CC0 (public domain), trimmed and levelled for felt.") }
+  }
+  /* a volume row (#volRow): its name, the level in percent, a slider 0 to 100 in steps of 5 */
+  private func slider(_ t: String, _ v: Binding<Int>) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack { Text(t); Spacer(); Text("\(v.wrappedValue)%").foregroundStyle(.secondary).monospacedDigit() }
+      Slider(value: Binding(get: { Double(v.wrappedValue) }, set: { v.wrappedValue = Int($0.rounded()) }), in: 0...100, step: 5).tint(Color(rgb: 0x3d, 0xdc, 0x84))
+        .accessibilityLabel(t).accessibilityValue("\(v.wrappedValue) percent")
+    }
+    .padding(.vertical, 4)
   }
   private func credit(_ t: String, _ w: String) -> some View {
     VStack(alignment: .leading, spacing: 2) { Text(t); Text(w).font(.subheadline).foregroundStyle(.secondary) }
