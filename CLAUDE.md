@@ -24,8 +24,8 @@ Run these, do not guess them. Healthy output is shown so a wrong result is obvio
 | one suite | `node tests/run-all.cjs --only rules-check` | `1/1 suites ... ok` |
 | lint | `npm run lint` | `0 finding(s)` |
 | run | `npm run serve`, then http://localhost:4173 | the menu |
-| iOS physics | `cd ios/FeltSim && swift test -c release` | `Test run with 3 tests ... passed` (128 shots bit for bit) |
-| iOS goldens | `node tools/ios-golden.cjs` (after any change to sim 1a-1d) | `ios-golden: 8 tables, 128 shots, ...` |
+| iOS physics | `cd ios/FeltSim && swift test -c release` | `Test run with 3 tests ... passed` (160 shots bit for bit) |
+| iOS goldens | `node tools/ios-golden.cjs` (after any change to sim 1a-1d) | `ios-golden: 10 tables, 160 shots, ...` |
 | iOS app | `cd ios && xcodegen generate`, then `xcodebuild -project Felt.xcodeproj -scheme Felt -derivedDataPath /Volumes/silver/xcode/DerivedData/Felt-cli ...` (simulators in `--set /Volumes/silver/simulators`) | `** BUILD SUCCEEDED **` |
 
 ## Architecture
@@ -522,7 +522,7 @@ Run these, do not guess them. Healthy output is shown so a wrong result is obvio
   budget and memory, the wordmark's contrast on every cloth, the hand-over's pixels, Reduce Motion, setting off,
   visibility, layout at six sizes with insets) and `settings-check`.
 
-- iOS port (`ios/`, phased: T7). `ios/FeltSim` is a Swift package: sim 1a-1d (physics, every table but bumper pool)
+- iOS port (`ios/`, phased: T7). `ios/FeltSim` is a Swift package: sim 1a-1d (physics, every table; bumper pool's posts and cups, 1g's table half)
   line for line, same names, same operation order, so a shot is the page's shot bit for bit. JS engines differ in the
   last bit of sin/cos/tan/atan/acos/exp/pow (V8 fuses multiply-adds on arm64; JavaScriptCore uses the system libm), so
   the port and its reference both use fdlibm (`JSMath.swift`, `tools/fdlibm.cjs`, both from the JDK's FdLibm.java)

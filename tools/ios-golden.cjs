@@ -33,7 +33,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -58,7 +58,9 @@ function hashHits(H) {
   for (const [k, v, e] of H) {
     for (const c of k) h = fnv(h, c.charCodeAt(0));
     dv.setFloat64(0, v); h = fnv(h, dv.getUint32(0)); h = fnv(h, dv.getUint32(4));
-    h = fnv(h, e === undefined ? 0xffffffff : (e | 0) >>> 0);
+    /* a string (a bumper post's 'post'): its characters, then a mark */
+    if (typeof e === 'string') { for (const c of e) h = fnv(h, c.charCodeAt(0)); h = fnv(h, 0xfffffffe); }
+    else h = fnv(h, e === undefined ? 0xffffffff : (e | 0) >>> 0);
   }
   return h;
 }
@@ -82,14 +84,17 @@ function build() {
   const math = lines.join('\n') + '\n';
 
   const TABLES = [['7', null, 'regulation'], ['9', null, 'regulation'], ['7', null, 'generous'], ['9', null, 'generous'],
-    ['heyball', null, 'regulation'], ['snooker', 'compact', 'regulation'], ['snooker', 'full', 'regulation'], ['carom', null, 'regulation']];
+    ['heyball', null, 'regulation'], ['snooker', 'compact', 'regulation'], ['snooker', 'full', 'regulation'], ['carom', null, 'regulation'],
+    ['bumper', 'octagon', 'regulation'], ['bumper', 'rect', 'regulation']];
   const tables = [], cases = [];
-  const setT = ([t, shape, pk]) => { S.setPockets(pk); S.setTable(t, shape === null ? undefined : shape); };
+  /* the octagonal bumper table keeps the last table's SKIMS and HOLE_IN (buildOcta never sets them), so a bumper table
+     is always reached from the 7 ft table, as the Swift test's fresh Sim is */
+  const setT = ([t, shape, pk]) => { if (t === 'bumper') S.setTable('7'); S.setPockets(pk); S.setTable(t, shape === null ? undefined : shape); };
   for (const T of TABLES) {
     setT(T);
     const arr = a => a.map(v => Array.isArray(v) ? arr(v) : hx(v));
     tables.push({ table: T[0], shape: T[1], pockets: T[2], TL: hx(S.TL), TW: hx(S.TW), HEAD_X: hx(S.HEAD_X), FOOT: arr(S.FOOT), BALL_R: hx(S.BALL_R),
-      CUSH: arr(S.CUSH), POCKETS: arr(S.POCKETS), POCKET_R: arr(S.POCKET_R), POCKET_AIM: arr(S.POCKET_AIM), JAW_ARCS: arr(S.JAW_ARCS) });
+      CUSH: arr(S.CUSH), POCKETS: arr(S.POCKETS), POCKET_R: arr(S.POCKET_R), POCKET_AIM: arr(S.POCKET_AIM), JAW_ARCS: arr(S.JAW_ARCS), BUMPERS: arr(S.BUMPERS) });
   }
   const run = (T, name, balls, shot) => {
     setT(T);
@@ -118,7 +123,31 @@ function build() {
   const randSpin = k => k % 4 === 0 ? 0 : k % 4 === 1 ? (rnd() * 2 - 1) : k % 4 === 2 ? { x: rnd() * 1.4 - 0.7, y: rnd() * 1.4 - 0.7 }
     : { x: rnd() * 1.2 - 0.6, y: rnd() * 1.2 - 0.6, e: rnd() * 1.0 };
 
-  for (const T of TABLES.filter(t => t[0] !== 'snooker' && t[0] !== 'carom')) {
+  /* bumper pool (1g): each shape's rack shot at the far cup with the marked ball, and scattered balls (clear of the
+     posts and cups: bumperFree) struck every way, hard into the posts and soft at the cups */
+  /* its own stream, so the other fixtures' draws are as they were */
+  let bseed = 1919;
+  const brnd = () => { bseed = (Math.imul(bseed, 1103515245) + 12345) >>> 0; return bseed / 4294967296; };
+  const bSpin = k => k % 4 === 0 ? 0 : k % 4 === 1 ? (brnd() * 2 - 1) : k % 4 === 2 ? { x: brnd() * 1.4 - 0.7, y: brnd() * 1.4 - 0.7 }
+    : { x: brnd() * 1.2 - 0.6, y: brnd() * 1.2 - 0.6, e: brnd() * 1.0 };
+  for (const T of TABLES.filter(t => t[0] === 'bumper')) {
+    for (let k = 0; k < 6; k++) {
+      setT(T);
+      const balls = S.bumperRack(), m = balls.find(b => b.n === 21), cup = S.POCKETS[1];
+      const a = Math.atan2(cup[1] - m.y, cup[0] - m.x) + (brnd() - 0.5) * 0.6;
+      run(T, `bumper/${T[1]} rack ${k}`, balls, { ball: 21, angle: a, power: [0.9, 0.55, 0.35, 0.7, 0.45, 1][k], spin: bSpin(k) });
+    }
+    for (let k = 0; k < 10; k++) {
+      setT(T);
+      const nums = [21, 31, 22, 32, 23, 33, 24, 34, 25, 35], count = 2 + Math.floor(brnd() * 8), out = [];
+      while (out.length < count) {
+        const x = brnd() * S.TL, y = brnd() * S.TW;
+        if (S.bumperFree(out, x, y, -1)) out.push(S.newBall(nums[out.length], x, y));
+      }
+      run(T, `bumper/${T[1]} scatter ${k}`, out, { ball: 21, angle: brnd() * 2 * Math.PI, power: 0.1 + brnd() * 0.85, spin: bSpin(k) });
+    }
+  }
+  for (const T of TABLES.filter(t => t[0] !== 'snooker' && t[0] !== 'carom' && t[0] !== 'bumper')) {
     for (const kind of ['8', '9', '10', 'rotation']) {
       setT(T);
       if (T[0] === 'heyball' && kind !== '8') continue;
@@ -176,7 +205,7 @@ function build() {
   /* the guide: aimTrace and the shot preview, for racks and scatters on every table, both lengths */
   const guides = [];
   const pts = a => a ? a.map(q => q.map(hx)) : null;
-  for (const T of TABLES) {
+  for (const T of TABLES.filter(t => t[0] !== 'bumper')) {
     for (let k = 0; k < 10; k++) {
       setT(T);
       const carom = T[0] === 'carom', snk = T[0] === 'snooker';

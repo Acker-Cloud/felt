@@ -24,7 +24,8 @@ check('ios goldens match the current sim (re-run node tools/ios-golden.cjs and s
 check('ios math fixture matches tools/fdlibm.cjs', math === b.math);
 check('ios rules goldens match the current rules (sim 1e)', rules === b.rules, rules ? '' : 'rules.json missing');
 check('ios CPU goldens match the current CPU (sim 1f)', cpu === b.cpu, cpu ? '' : 'cpu.json missing');
-check('the goldens cover every ported table and pot balls', b.tables.length === 8 && b.cases.length >= 120 && b.cases.some(c => c.result.potted.length > 3), `${b.tables.length} tables, ${b.cases.length} shots`);
+check('the goldens cover every ported table and pot balls', b.tables.length === 10 && b.cases.length >= 150 && b.cases.some(c => c.result.potted.length > 3)
+  && ['octagon', 'rect'].every(sh => b.cases.some(c => c.table === 'bumper' && c.shape === sh && c.result.potted.length)), `${b.tables.length} tables, ${b.cases.length} shots`);
 check('the rules goldens play games to a win and reach the choices', b.games.filter(g => g.steps.length && g.steps[g.steps.length - 1].out.winner !== null).length >= 20 && b.games.some(g => g.steps.some(s => s.choice)), `${b.games.length} games`);
 const ulp = x => { const a = Math.abs(x); return a === 0 ? Number.MIN_VALUE : 2 ** (Math.floor(Math.log2(a)) - 52); };
 let worst = 0;

@@ -29,7 +29,8 @@ func hashHits(_ H: [Hit]) -> UInt32 {
   for x in H {
     for c in x.kind.utf8 { h = fnv(h, UInt32(c)) }
     h = fnvD(h, x.v)
-    h = fnv(h, x.extra.map { UInt32(bitPattern: Int32($0)) } ?? 0xffffffff)
+    if let t = x.tag { for c in t.utf8 { h = fnv(h, UInt32(c)) }; h = fnv(h, 0xfffffffe) }
+    else { h = fnv(h, x.extra.map { UInt32(bitPattern: Int32($0)) } ?? 0xffffffff) }
   }
   return h
 }
@@ -72,6 +73,8 @@ private func intMap(_ a: Any?) -> [Int: Int] {
   }
 
   private func setUp(_ sim: Sim, _ c: [String: Any]) {
+    /* a bumper table from the 7 ft table, as the generator does (the octagon keeps the last table's SKIMS) */
+    if c["table"] as! String == "bumper" { sim.setTable("7") }
     sim.setPockets(c["pockets"] as! String)
     sim.setTable(c["table"] as! String, c["shape"] as? String)
   }
@@ -90,6 +93,7 @@ private func intMap(_ a: Any?) -> [Int: Int] {
       #expect(sim.POCKET_R.map(hx) == flat(t["POCKET_R"]), "\(name) pocket radii")
       #expect(sim.POCKET_AIM.flatMap { $0.map(hx) } == flat(t["POCKET_AIM"]), "\(name) mouths")
       #expect(sim.JAW_ARCS.flatMap { $0.map(hx) } == flat(t["JAW_ARCS"]), "\(name) jaw arcs")
+      #expect(sim.BUMPERS.flatMap { $0.map(hx) } == flat(t["BUMPERS"] ?? []), "\(name) posts")
     }
   }
 

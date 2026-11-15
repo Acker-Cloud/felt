@@ -5,7 +5,7 @@
    The page's module globals (TL, CUSH, POCKETS, BALL_R, ...) are a Sim's properties: one Sim is one
    table, set with setTable/setPockets. Ported tables: pool 7 and 9 ft (both pocket styles),
    snooker (compact, full), Chinese 8-ball (heyball) and carom. Bumper pool (its posts and cups) is
-   not ported yet: setTable("bumper") traps. */
+   bumper pool's table (1g) is ported; its rules and CPU live with the rules. */
 import Foundation
 
 private typealias M = JSMath
@@ -37,6 +37,10 @@ public let POCKET_STYLES: [String: PocketStyle] = [
 ]
 public let CUSH_W = 0.05, POCKET_LIP = 0.02, SIDE_SKIM = 0.008, ESCAPE_R = 0.16, RACK_GAP = 0.0002
 public let CUP_V = 1.0
+/* bumper pool (1g): the rectangle's bed, the posts' radius, the cups; the octagon (40 in across the flats) */
+public let BUMPER_SIZE = [1.219, 0.838], BUMPER_R = 0.0254
+public let CUP_IN = 0.15, CUP_R = 0.041, CUP_LIP = 0.006
+public let OCTA_F = 1.016, OCTA_CUP_IN = 0.12, OCTA_POSTS = [0.17, 0.16]
 public let CAROM_SIZE = [2.84, 1.42], HEYBALL_SIZE = [2.54, 1.26]
 public let SNOOKER_SIZES: [String: [Double]] = ["full": [3.569, 1.778], "compact": [3.569 * 5 / 6, 1.778 * 5 / 6]]
 public let SNK_BAULK = 0.737, SNK_D = 0.292, SNK_BLACK_IN = 0.324, SNK_APEX = 0.001
@@ -74,7 +78,8 @@ public final class Ball {
 }
 
 /* tab.hits: [kind, v, extra] (extra: the pocket index of a 'pocket') */
-public struct Hit: Equatable, Sendable { public let kind: String; public let v: Double; public let extra: Int? }
+/* a hit [kind, v, extra]: extra the pocket's index, or (tag) a string: 'post' on a bumper post's 'rail' */
+public struct Hit: Equatable, Sendable { public let kind: String; public let v: Double; public let extra: Int?; public var tag: String? = nil }
 
 public final class Tab {
   public var balls: [Ball], cue: Int, t = 0.0, steps = 0, first: Int? = nil, railAfter = false, crossed = false
@@ -105,8 +110,9 @@ public final class Sim {
   public private(set) var CPU_MOUTH_N: [[Double]] = []
   public private(set) var JAW_ARCS: [[Double]] = [], JAW_RAD = [0.0, 0.0]
   public private(set) var D_R = 0.0, SPOTS: [Int: [Double]] = [:]
-  /* bumper pool's posts: always empty until 1g is ported */
-  let BUMPERS: [[Double]] = []
+  /* bumper pool (1g): the posts [x, y] (radius BUMPER_R), empty on every other table; the bumper table's shape
+     ('octagon' | 'rect', kept for later bumper tables) and, on the octagon, the noses as inward lines [nx, ny, c] */
+  public private(set) var BUMPERS: [[Double]] = [], BUMPER_SHAPE = "octagon", BED_LINES: [[Double]]? = nil
 
   public init() { setTable("7") }
 
@@ -153,11 +159,12 @@ public final class Sim {
     }
   }
   func buildTable() {
-    JAW_ARCS = []; JAW_RAD = [0, 0]; SPOTS = [:]; D_R = 0
+    BED_LINES = nil; JAW_ARCS = []; JAW_RAD = [0, 0]; SPOTS = [:]; D_R = 0
     let ph = physOf(TABLE)
     BALL_R = ph.R; MU_ROLL = ph.roll; CUE_RATIO = ph.cue; CUSH_MU = ph.mu; RAIL_E = ph.e; MU_SP = ph.sp
     if TABLE == "carom" { buildCarom(); return }
-    precondition(TABLE != "bumper", "FeltSim: bumper pool is not ported yet")
+    if TABLE == "bumper" { buildBumper(); return }
+    BUMPERS = []
     let snk = TABLE == "snooker", hey = TABLE == "heyball"
     let st = POCKET_STYLES[snk ? "snooker" : hey ? "heyball" : POCKETS_STYLE]!
     let size = snk ? SNOOKER_SIZES[SNOOKER_SIZE]! : hey ? HEYBALL_SIZE : TABLE_SIZES[TABLE]!
@@ -182,15 +189,16 @@ public final class Sim {
     if snk { buildSnooker(st) }
     if hey { roundJaws(st) }
   }
-  /* size "7" | "9" | "snooker" | "carom" | "heyball"; shape: the snooker size ("full" | "compact") */
+  /* size "7" | "9" | "bumper" | "snooker" | "carom" | "heyball"; shape: the snooker size ("full" | "compact"), else
+     the bumper table's ("rect", anything else "octagon"), kept for later tables */
   @discardableResult public func setTable(_ size: String, _ shape: String? = nil) -> String {
     if size == "snooker" {
       if let s = shape { SNOOKER_SIZE = s == "full" ? "full" : "compact" }
       TABLE = "snooker"
-    } else if size == "bumper" || size == "carom" || size == "heyball" {
-      TABLE = size
     } else {
-      POOL_TABLE = size == "9" ? "9" : "7"; TABLE = POOL_TABLE
+      if let s = shape { BUMPER_SHAPE = s == "rect" ? "rect" : "octagon" }
+      if size == "bumper" || size == "carom" || size == "heyball" { TABLE = size }
+      else { POOL_TABLE = size == "9" ? "9" : "7"; TABLE = POOL_TABLE }
     }
     buildTable()
     return TABLE
@@ -200,6 +208,85 @@ public final class Sim {
     buildTable()
     return POCKETS_STYLE
   }
+  // MARK: 1g. bumper pool's table
+
+  /* the rectangle (BUMPER_SHAPE 'rect'): four noses with no gaps, two cups, twelve posts */
+  func buildBumper() {
+    if BUMPER_SHAPE == "octagon" { buildOcta(); return }
+    TL = BUMPER_SIZE[0]; TW = BUMPER_SIZE[1]
+    HEAD_X = TL / 2; FOOT = [TL / 2, TW / 2]
+    let c = CUSH_W, cx = TL / 2, cy = TW / 2, a = 0.19, b = 0.15
+    MOUTHS = []; RUBBERS = []
+    CUSH = [[0, 0, TL, 0], [TL, 0, TL, TW], [TL, TW, 0, TW], [0, TW, 0, 0]]
+    CUSHION_POLYS = [[[-c, -c], [0, 0], [TL, 0], [TL + c, -c]], [[TL + c, -c], [TL, 0], [TL, TW], [TL + c, TW + c]],
+      [[TL + c, TW + c], [TL, TW], [0, TW], [-c, TW + c]], [[-c, TW + c], [0, TW], [0, 0], [-c, -c]]]
+    POCKETS = [[CUP_IN, cy], [TL - CUP_IN, cy]]
+    POCKET_R = [CUP_R, CUP_R]; SKIMS = [0, 0]; HOLE_IN = 0
+    POCKET_AIM = POCKETS.map { $0 }
+    CPU_MOUTH_N = [[1, 0], [-1, 0]]
+    BUMPERS = [[cx - a, cy], [cx + a, cy], [cx, cy - b], [cx, cy + b],
+      [cx - a / 2, cy - b / 2], [cx + a / 2, cy - b / 2], [cx - a / 2, cy + b / 2], [cx + a / 2, cy + b / 2]]
+    for (px, sg) in [(CUP_IN, 1.0), (TL - CUP_IN, -1.0)] { BUMPERS.append([px + sg * 0.07, cy - 0.05]); BUMPERS.append([px + sg * 0.07, cy + 0.05]) }
+  }
+  /* the octagon d outside the nose line, clockwise from the top flat's left end, in the OCTA_F square */
+  public func octagon(_ d: Double) -> [[Double]] {
+    let c = OCTA_F / 2, h = c + d, t = h * (2.0.squareRoot() - 1)
+    return [[c - t, c - h], [c + t, c - h], [c + h, c - t], [c + h, c + t], [c + t, c + h], [c - t, c + h], [c - h, c + t], [c - h, c - t]]
+  }
+  /* the octagonal table (the default). As the page's, SKIMS and HOLE_IN are left as the last table set them */
+  func buildOcta() {
+    TL = OCTA_F; TW = OCTA_F
+    HEAD_X = TL / 2; FOOT = [TL / 2, TW / 2]
+    let N = octagon(0), E = octagon(CUSH_W), cx = TL / 2, cy = TW / 2, a = OCTA_POSTS[0], b = OCTA_POSTS[1]
+    MOUTHS = []; RUBBERS = []
+    CUSH = N.indices.map { i in [N[i][0], N[i][1], N[(i + 1) % 8][0], N[(i + 1) % 8][1]] }
+    CUSHION_POLYS = N.indices.map { i in [E[i], N[i], N[(i + 1) % 8], E[(i + 1) % 8]] }
+    BED_LINES = CUSH.map { q in
+      let ax = q[0], ay = q[1], bx = q[2], by = q[3], l = M.hypot(bx - ax, by - ay), nx = (ay - by) / l, ny = (bx - ax) / l
+      return [nx, ny, nx * ax + ny * ay]
+    }
+    POCKETS = [[OCTA_CUP_IN, cy], [TL - OCTA_CUP_IN, cy]]
+    POCKET_R = [CUP_R, CUP_R]
+    POCKET_AIM = POCKETS.map { $0 }
+    CPU_MOUTH_N = [[1, 0], [-1, 0]]
+    BUMPERS = [[cx - a, cy], [cx + a, cy], [cx, cy - b], [cx, cy + b],
+      [cx - a / 2, cy - b / 2], [cx + a / 2, cy - b / 2], [cx - a / 2, cy + b / 2], [cx + a / 2, cy + b / 2]]
+    for (px, sg) in [(OCTA_CUP_IN, 1.0), (TL - OCTA_CUP_IN, -1.0)] { BUMPERS.append([px + sg * 0.07, cy - 0.05]); BUMPERS.append([px + sg * 0.07, cy + 0.05]) }
+  }
+  /* on the octagon: (x, y) is at least d inside every cushion's nose line */
+  public func bedIn(_ x: Double, _ y: Double, _ d: Double) -> Bool {
+    for l in BED_LINES! where !(l[0] * x + l[1] * y - l[2] >= d) { return false }
+    return true
+  }
+  /* the cup T seen in each cushion's mirror [mx, my, k]; the rectangle's four in its own order (k absent) */
+  public func bumperBanks(_ T: [Double]) -> [[Double]] {
+    let R = BALL_R
+    guard let BL = BED_LINES else { return [[2 * R - T[0], T[1]], [2 * (TL - R) - T[0], T[1]], [T[0], 2 * R - T[1]], [T[0], 2 * (TW - R) - T[1]]] }
+    return BL.enumerated().map { k, l in let d = 2 * (l[0] * T[0] + l[1] * T[1] - l[2] - R); return [T[0] - d * l[0], T[1] - d * l[1], Double(k)] }
+  }
+  /* one step of a moving ball against the posts and the cups; true when it dropped */
+  func bumperStep(_ tab: Tab, _ b: Ball) -> Bool {
+    let D = BALL_R + BUMPER_R
+    for p in BUMPERS {
+      var nx = b.x - p[0], ny = b.y - p[1]
+      let d2 = nx * nx + ny * ny
+      if d2 >= D * D || d2 < 1e-24 { continue }
+      let d = d2.squareRoot()
+      nx /= d; ny /= d
+      b.x = p[0] + nx * D; b.y = p[1] + ny * D
+      let v = rail(b, nx, ny)
+      if v != 0 { if tab.first != nil { tab.railAfter = true }; tab.hits.append(Hit(kind: "rail", v: v, extra: nil, tag: "post")) }
+    }
+    let v = M.hypot(b.vx, b.vy)
+    if (b.z ?? 0) > 0 { return false }
+    for k in 0..<POCKETS.count {
+      let p = POCKETS[k], r = POCKET_R[k] - CUP_LIP * M.min(1, v / CUP_V)
+      let dx = b.x - p[0], dy = b.y - p[1]
+      if dx * dx + dy * dy < r * r { pot(tab, b, k, v); return true }
+    }
+    return false
+  }
+
   func buildSnooker(_ st: PocketStyle) {
     let s = TL / SNOOKER_SIZES["full"]![0], y = TW / 2
     HEAD_X = SNK_BAULK * s; D_R = SNK_D * s
@@ -519,8 +606,9 @@ public final class Sim {
     let cushTop = cushionTop()
     for b in B {
       if !b.on { continue }
+      if !BUMPERS.isEmpty && !b.still && bumperStep(tab, b) { continue }
       if let fr = tab.frozen, (fr[b.n] ?? 0) != 0, !b.still { thaw(tab, b) }
-      if b.x < lo || b.x > TL - lo || b.y < edge || b.y > TW - edge {
+      if BED_LINES != nil ? !bedIn(b.x, b.y, lo) : b.x < lo || b.x > TL - lo || b.y < edge || b.y > TW - edge {
         let fly = (b.z ?? 0) > 0, over = fly && b.z! >= cushTop
         var k = 0
         while !over && k < CUSH.count {
@@ -542,12 +630,14 @@ public final class Sim {
             if v != 0 { if tab.first != nil { tab.railAfter = true }; tab.hits.append(Hit(kind: "jaw", v: v, extra: nil)) }
           }
         }
-        let off = b.x < 0 || b.x > TL || b.y < 0 || b.y > TW
+        let off = BED_LINES != nil ? !bedIn(b.x, b.y, 0) : b.x < 0 || b.x > TL || b.y < 0 || b.y > TW
         if fly { if off && !overMouth(b) { offTable(tab, b); continue }; moving = true; continue }
         var hole = -1, near = -1, nd = Double.infinity
         for k in 0..<POCKETS.count {
           let p = POCKETS[k], dx = b.x - p[0], dy = b.y - p[1], d2 = dx * dx + dy * dy
-          let r = SKIMS[k] != 0 ? POCKET_R[k] - SKIMS[k] * M.min(1, M.hypot(b.vx, b.vy) / CUP_V) : POCKET_R[k]
+          /* SKIMS may be shorter than POCKETS (the octagon keeps the last table's: after carom, none): undefined, no skim */
+          let sk = k < SKIMS.count ? SKIMS[k] : 0
+          let r = sk != 0 ? POCKET_R[k] - sk * M.min(1, M.hypot(b.vx, b.vy) / CUP_V) : POCKET_R[k]
           if d2 < r * r { hole = k; break }
           let m = POCKET_AIM[k], ex = b.x - m[0], ey = b.y - m[1], e2 = ex * ex + ey * ey
           if e2 < nd { nd = e2; near = k }
