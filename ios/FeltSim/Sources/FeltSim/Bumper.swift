@@ -124,3 +124,123 @@ extension RulesEngine {
     return n
   }
 }
+
+/* the CPU at bumper pool (cpuBumper): geometry proposes (the straight line and the banks to the far cup, at a ladder
+   of powers, and a fan all round), the physics decides (bRun, judged and scored by bValue), the best refined, the
+   finalists re-run mis-hit and scored on the mean. Every draw in the page's order. */
+public struct BumperProfile: Sendable {
+  public let sims: Int, fan: Int, ladder: [Double], refine: Int, robust: Int, noise: Double, pnoise: Double, strikers: Int
+  public static func level(_ lv: String) -> BumperProfile {
+    switch lv {
+    case "easy": return BumperProfile(sims: 26, fan: 8, ladder: [1.1, 1.7], refine: 6, robust: 0, noise: 0.03, pnoise: 0.08, strikers: 1)
+    case "hard": return BumperProfile(sims: 150, fan: 20, ladder: [0.85, 1.2, 1.7, 2.4], refine: 50, robust: 3, noise: 0.004, pnoise: 0.015, strikers: 3)
+    case "hint": return BumperProfile(sims: 30, fan: 12, ladder: [1.2, 1.8], refine: 6, robust: 0, noise: 0, pnoise: 0, strikers: 1)
+    default: return BumperProfile(sims: 70, fan: 14, ladder: [0.9, 1.3, 1.9], refine: 20, robust: 2, noise: 0.011, pnoise: 0.04, strikers: 2)
+    }
+  }
+}
+let CPU_BT = 5.0
+
+extension CPU {
+  /* the cue speed that rolls a ball about d metres, as a power */
+  func bPowerFor(_ d: Double) -> Double { s.powerFor((2 * s.MU_ROLL * G * M.max(0.05, d)).squareRoot() * 1.4) }
+  func bRun(_ g: Game, _ shot: BShot) -> (r: ShotResult, minD: Double) {
+    let tab = s.strike(s.newTable(toBalls(g.balls), cue: shot.ball), shot.angle, shot.power, Spin(x: 0, y: 0)), T = s.POCKETS[1 - g.turn]
+    let b = tab.balls.first { $0.n == shot.ball }!, cap = Int((CPU_BT / SIM_DT).rounded())
+    var minD = M.hypot(b.x - T[0], b.y - T[1]), live = true, i = 0
+    while live && i < cap {
+      live = s.stepTable(tab)
+      if b.on { minD = M.min(minD, M.hypot(b.x - T[0], b.y - T[1])) }
+      tab.hits.removeAll(keepingCapacity: true)
+      i += 1
+    }
+    if live { for o in tab.balls { o.vx = 0; o.vy = 0; o.wx = 0; o.wy = 0; o.wz = 0 }; tab.end = "rest" }
+    return (s.resultOf(tab), b.on ? minD : 0)
+  }
+  /* in the shadow of cup k's guard pair: near by distance, but no straight line in */
+  func bShadow(_ b: GBall, _ k: Int) -> Bool {
+    let T = s.POCKETS[k], N = s.CPU_MOUTH_N[k], u = (b.x - T[0]) * N[0] + (b.y - T[1]) * N[1], w = abs((b.x - T[0]) * N[1] - (b.y - T[1]) * N[0])
+    return u > 0.05 && u < 0.22 && w < 0.07
+  }
+  func bValue(_ g: Game, _ j: Game, _ minD: Double) -> Double {
+    let me = g.turn
+    if let w = j.winner { return w == me ? 10000 : -10000 }
+    let vd = j.verdict!
+    var v = (vd.foul != nil ? -500.0 : 0) + 400 * Double(vd.potted.count) + (j.turn == me ? 150 : 0)
+    for b in j.balls {
+      if !b.on { continue }
+      let p = bOwner(b.n), T = s.POCKETS[1 - p], d = M.min(1, M.hypot(b.x - T[0], b.y - T[1]))
+      if p == me { v -= (b.n == B_MARK[me] ? 120 : 60) * d + (s.BED_LINES != nil && bShadow(b, 1 - p) ? 90 : 0) }
+      else { v += 60 * d - (d < 0.2 ? 120 : 0) }
+    }
+    return v - (vd.potted.isEmpty ? 300 * M.min(minD, 0.5) : 0)
+  }
+  struct BShot { var angle: Double, power: Double, ball: Int }
+  final class BRec { let shot: BShot; let value: Double; var mean = 0.0; init(_ s: BShot, _ v: Double) { shot = s; value = v } }
+
+  public func cpuBumper(_ g: Game, seed: Double, level: String) -> CPUShot {
+    let L = BumperProfile.level(level), rnd = cpuRng(seed * 2654435761 + 7), me = g.turn, T = s.POCKETS[1 - me]
+    func gauss() -> Double { (rnd() + rnd() + rnd() - 1.5) * 2 }
+    func play(_ sh: BShot, _ intent: (String, Double)) -> CPUShot {
+      let a = sh.angle + gauss() * L.noise
+      let p = clamp(s.powerFor(s.speedOf(sh.power) * (1 + gauss() * L.pnoise)), 0, 1)
+      return CPUShot(angle: a, power: p, spin: Spin(x: 0, y: 0), place: nil, call: nil, intent: intent, ball: sh.ball, first: nil)
+    }
+    var balls = E.bumperStrikers(g, me).compactMap { n in g.balls.first { $0.n == n } }.filter { $0.on }
+    if balls.isEmpty { return CPUShot(angle: 0, power: 0.2, spin: Spin(x: 0, y: 0), place: nil, call: nil, intent: ("bumper", 0), ball: g.striker, first: nil) }
+    /* the marked ball first, then the rest nearest the cup first */
+    let dT = { (b: GBall) in M.hypot(b.x - T[0], b.y - T[1]) }
+    let cmp = { (a: GBall, b: GBall) -> Double in
+      let k = Double((b.n == B_MARK[me] ? 1 : 0) - (a.n == B_MARK[me] ? 1 : 0))
+      return k != 0 ? k : dT(a) - dT(b)
+    }
+    balls = stableSorted(balls) { cmp($0, $1) < 0 }
+    var recs: [BRec] = []
+    var sims = 0
+    func sim(_ sh: BShot) -> BRec {
+      let o = bRun(g, sh), j = E.judge(g, RuleShot(o.r))
+      sims += 1
+      let r = BRec(sh, bValue(g, j, o.minD)); recs.append(r); return r
+    }
+    /* A: lines and fans, the likeliest first */
+    var cands: [(pri: Double, shot: BShot)] = []
+    for b in balls.prefix(L.strikers) {
+      var lines: [[Double]] = [[T[0], T[1], 0]]
+      for m in s.bumperBanks(T) { lines.append([m[0], m[1], 1]) }
+      for l in lines {
+        let x = l[0], y = l[1], bank = l[2], d = M.hypot(x - b.x, y - b.y)
+        for f in L.ladder { cands.append((-d - bank * 0.2 - abs(f - 1.2) * 0.1, BShot(angle: M.atan2(y - b.y, x - b.x), power: bPowerFor(d * f + 0.2), ball: b.n))) }
+      }
+      let off = rnd() * 2 * Double.pi / Double(L.fan)
+      for i in 0..<L.fan {
+        let pri = -3 - rnd(), pw = bPowerFor(1.4 + rnd() * 1.6)
+        cands.append((pri, BShot(angle: off + Double(i) * 2 * Double.pi / Double(L.fan), power: pw, ball: b.n)))
+      }
+    }
+    cands = stableSorted(cands) { $0.pri > $1.pri }
+    let mis = s.BED_LINES != nil ? 4 : 2, budgetA = Swift.max(4, L.sims - L.refine - mis * L.robust)
+    for c in cands { if sims >= budgetA { break }; _ = sim(c.shot) }
+    /* B: refine the best three by keeping what scores better */
+    var top = Array(stableSorted(recs) { $0.value > $1.value }.prefix(3))
+    var i = 0
+    while i < L.refine && !top.isEmpty {
+      let j = i % top.count, base = top[j], step = 0.03 / Double(1 + i / top.count)
+      let a = base.shot.angle + (rnd() - 0.5) * 2 * step
+      let p = clamp(base.shot.power * (1 + (rnd() - 0.5) * 0.3), 0.02, 1)
+      let r = sim(BShot(angle: a, power: p, ball: base.shot.ball))
+      if r.value > base.value { top[j] = r }
+      i += 1
+    }
+    /* C: the finalists mis-hit, scored on the mean; on the octagon also a little soft and a little firm */
+    let best = stableSorted(recs) { $0.value > $1.value }
+    for r in best { r.mean = r.value }
+    for r in best.prefix(L.robust) {
+      var sum = r.value
+      for k in [1.0, -1] { var sh = r.shot; sh.angle = r.shot.angle + k * M.max(L.noise, 0.003) * (mis > 2 ? 2.5 : 1.5); sum += sim(sh).value }
+      if mis > 2 { for k in [1.0, -1] { var sh = r.shot; sh.power = clamp(s.powerFor(s.speedOf(r.shot.power) * (1 + k * M.max(L.pnoise, 0.01) * 1.5)), 0, 1); sum += sim(sh).value } }
+      r.mean = sum / Double(1 + mis)
+    }
+    let pick = best.prefix(Swift.max(1, L.robust)).reduce(best[0]) { a, b in b.mean > a.mean ? b : a }
+    return play(pick.shot, ("bumper", pick.mean >= 400 ? 0.8 : 0.3))
+  }
+}

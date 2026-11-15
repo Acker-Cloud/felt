@@ -559,6 +559,7 @@ public final class CPU {
   }
 
   public func cpuShot(_ g: Game, seed: Double, level: String) -> CPUShot {
+    if g.kind == "bumper" { return cpuBumper(g, seed: seed, level: level) }
     if g.kind == "carom" { return cpuCarom(g, seed: seed, level: level) }
     let L = CPUProfile.record(level, kind: g.kind)
     let rnd = cpuRng(seed * 2654435761 + 1), me = g.turn

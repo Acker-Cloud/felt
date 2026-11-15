@@ -373,7 +373,6 @@ function build() {
      cpuOption wherever a choice is pending; the state is game gi after step k (k -1: its opening) */
   const cpu = [];
   games.forEach((G, gi) => {
-    if (G.kind === 'bumper') return;   /* bumper's CPU: not yet in the fixtures */
     setT([G.table, G.shape || null, 'regulation']);
     const R0 = G.kind === 'carom' || G.kind === 'snooker' ? null : S.newGame(G.kind, { rules: { ruleset: G.ruleset, call: { mode: G.mode }, race: G.race === null ? undefined : G.race } }).rules;
     const at = k => { const o = JSON.parse(JSON.stringify(k < 0 ? G.g0 : G.steps[k].out)); return R0 ? Object.assign(o, { rules: R0 }) : o; };
