@@ -476,12 +476,17 @@ struct TableCanvas: View {
     let left = spans.filter { ($0[0] + $0[1]) / 2 < len / 2 }.sorted { $0[1] > $1[1] }, right = spans.filter { ($0[0] + $0[1]) / 2 >= len / 2 }.sorted { $0[0] < $1[0] }
     /* upright the screen's left is the table's y = 0 side; on its side, x = 0 */
     /* practice has no seats (hudSolo: turnChip hidden) */
-    let seats: [(Int, [Double]?)] = g.mode == "practice" ? [] : [(0, left.first), (1, right.first)]
+    /* hudSolo: practice has no seats; a trick shot and a drill one, lit, its number engraved: the try ("Try 3") or the
+       shot of how many ("Shot 2/4") */
+    let soloNum: String? = g.mode == "trick" ? model.trick.map { String($0.attempts + (model.trickRes == nil ? 1 : 0)) }
+      : g.mode == "drill" ? model.drill.flatMap { D in drillById(D.id).map { "\(min(D.js.count + (D.beat || model.drillRes != nil ? 0 : 1), $0.shots))/\($0.shots)" } } : nil
+    let seats: [(Int, [Double]?)] = g.mode == "practice" ? [] : soloNum != nil ? [(0, left.first)] : [(0, left.first), (1, right.first)]
     let next = model.railNext()
     for (p, span) in seats {
       guard let span else { continue }
-      let lit = p == g.turn
+      let lit = p == g.turn || soloNum != nil
       var items: [(kind: String, n: Int, text: String)] = []
+      if let t = soloNum { items.append(("num", 0, t)) } else {
       let on = g.balls.filter { $0.on && $0.n > 0 }.map { $0.n }.sorted()
       let nx = lit ? next : nil
       switch g.kind {
@@ -503,6 +508,7 @@ struct TableCanvas: View {
           if let nx { items.append(("ball", nx, "")) }
           else if !on.contains(where: { model.engine.groupOf($0) == gr }) { items.append(("ball", 8, "")) }
         } else if let nx { items.append(("ball", nx, "")) }
+      }
       }
       if items.isEmpty { items.append(("pip", 0, "")) }
       /* each item's width, then laid out centred in the gap */

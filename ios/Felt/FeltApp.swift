@@ -1576,6 +1576,8 @@ struct DrillResultView: View {
         Text("\(res.total) of 100" + (res.tier > 0 ? ", \(DRILL_TIERS[res.tier].lowercased())" : "")).font(.title2.bold())
         Text((res.was == nil ? "Your first score on this drill." : res.total > res.was! ? "A new best, up from \(res.was!)." : "Best: \(res.was!).")
              + (nextT.map { " \(DRILL_TIERS[drillTier(d, $0)]) at \($0)." } ?? " Gold, the top medal.")).font(.subheadline).foregroundStyle(.secondary)
+        /* #drillCareer */
+        if let c = res.career { Text(c).font(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("drillCareer") }
         HStack(spacing: 6) {
           ForEach(0..<d.shots, id: \.self) { i in
             let s = i < js.count ? js[i].s : nil
@@ -1587,7 +1589,7 @@ struct DrillResultView: View {
         }
         Button { model.startDrill(d.id) } label: { Text("Again").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("drillAgain")
-        Button("Back to Drills", action: back).frame(maxWidth: .infinity, minHeight: 44).foregroundStyle(.primary)
+        Button(model.onDrillDone != nil ? "Back to Career" : "Back to Drills", action: back).frame(maxWidth: .infinity, minHeight: 44).foregroundStyle(.primary)
       }
       .padding(20)
       .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))

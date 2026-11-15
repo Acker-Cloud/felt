@@ -233,7 +233,7 @@ final class TableModel {
     rec.n += 1; rec.best = max(rec.best, total); rec.hist.append((total, Rec.today()))
     if rec.hist.count > DrillStore.HIST { rec.hist.removeFirst(rec.hist.count - DrillStore.HIST) }
     all[d.id] = rec; DrillStore.all = all
-    drillRes = DrillResult(total: total, was: was, tier: drillTier(d, total))
+    drillRes = DrillResult(total: total, was: was, tier: drillTier(d, total), career: onDrillDone?(d.id, total))
     sound.cue(drillTier(d, total) > 0 ? "win" : "foul")
   }
   func startDrill(_ id: String) { guard drillById(id) != nil else { return }; drill = DrillSession(id: id); rerack() }
@@ -372,7 +372,9 @@ final class TableModel {
   var trickRes: TrickRes? = nil
   /* a drill session (startDrill): the shot, its layout, each shot's judgement, the beat after a shot; the result */
   struct DrillSession { var id: String, i = 0, js: [DrillJ] = [], S: DrillShot? = nil, beat = false }
-  struct DrillResult { var total: Int, was: Int?, tier: Int }
+  struct DrillResult { var total: Int, was: Int?, tier: Int, career: String? = nil }
+  /* a drill the career's Practice launched: its score goes to Career.practice, and the words come back for the result */
+  @ObservationIgnored var onDrillDone: ((String, Int) -> String)? = nil
   var drill: DrillSession? = nil
   var drillRes: DrillResult? = nil
   static let DRILL_BEAT = 0.9

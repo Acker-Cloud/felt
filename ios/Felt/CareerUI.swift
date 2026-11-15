@@ -31,6 +31,16 @@ import SwiftUI
     }
     if let id = E.listSlots().first(where: { $0["active"] == true && $0["status"] != "corrupt" })?["id"]?.str { E.load(id) }
   }
+  /* the career's practice session (cvSave after Career.practice): the result's words */
+  func practice(_ id: String, _ score: Int) -> String {
+    let r = E.practice(id, score)
+    guard r["ok"] == true else { return "Not recorded in your career: \(r["why"]?.str ?? "").".replacingOccurrences(of: "..", with: ".") }
+    E.save(); touch()
+    let ms = r["milestone"]?.str
+    return "Recorded in your career\(ms.map { ": \($0) mastery" } ?? ""). Best there \(r["mastery"]?["best"]?.i ?? score)."
+  }
+  /* calendar().practiceToday */
+  var practiceToday: Int { let me = E.S["me"]!; return me["pdDay"] == E.S["day"] ? (me["pd"]?.i ?? 0) : 0 }
   private func flush() { if let d = try? JSONEncoder().encode(E.store) { try? d.write(to: url, options: .atomic) } }
   var loaded: Bool { E.S != .null }
   /* noteLookOwn: every item a career owns unlocks its look anywhere (Settings' My Look) */
@@ -84,22 +94,30 @@ struct CareerView: View {
   @Bindable var store: CareerStore
   @State private var playing: PlayTerms? = nil
   @State private var page: String? = nil
-  struct PlayTerms: Identifiable { let id = UUID(); let game: TableGame; let tm: TableModel.TMatch }
+  @State private var drillPlay: String? = nil
+  struct PlayTerms: Identifiable { let id = UUID(); let game: TableGame; let tm: TableModel.TMatch?; var drill: String? = nil }
   var body: some View {
     Group {
-      if store.loaded { CareerHub(store: store) { if let m = store.match() { playing = PlayTerms(game: m.game, tm: m.tm) } } }
+      if store.loaded { CareerHub(store: store, play: { if let m = store.match() { playing = PlayTerms(game: m.game, tm: m.tm) } }, onPractice: { page = "practice" }) }
       else { CareerSlots(store: store) }
     }
     .navigationTitle(store.loaded ? (store.E.S["profile"]?["name"]?.str ?? "Career") : "Career")
     /* a test hook: `-felt-career-play` opens the next match on the table */
     .navigationDestination(item: $page) { p in
-      switch p { case "stats": CareerStats(store: store); case "shop": CareerShop(store: store); case "sponsors": CareerSponsors(store: store); default: CareerRankings(store: store) }
+      switch p { case "stats": CareerStats(store: store); case "shop": CareerShop(store: store); case "sponsors": CareerSponsors(store: store)
+      case "practice": CareerPractice(store: store) { drillPlay = $0 }
+      default: CareerRankings(store: store) }
     }
     /* a test hook: `-felt-career-page rankings|stats|shop|sponsors` opens that page */
     .onAppear { let a = ProcessInfo.processInfo.arguments; if let i = a.firstIndex(of: "-felt-career-page"), i + 1 < a.count, page == nil { page = a[i + 1] } }
     .onAppear { if ProcessInfo.processInfo.arguments.contains("-felt-career-play"), playing == nil, let m = store.match() { playing = PlayTerms(game: m.game, tm: m.tm) } }
+    /* a test hook: `-felt-career-drill id` plays that drill as the career's practice */
+    .onAppear { let a = ProcessInfo.processInfo.arguments; if let i = a.firstIndex(of: "-felt-career-drill"), i + 1 < a.count, drillPlay == nil, store.loaded { drillPlay = a[i + 1] } }
+    .fullScreenCover(item: Binding(get: { drillPlay.map { PlayTerms(game: .nine, tm: nil, drill: $0) } }, set: { if $0 == nil { drillPlay = nil } })) { p in
+      TableScreen(model: { let m = TableModel(game: .nine, drill: p.drill); m.onDrillDone = { id, total in store.practice(id, total) }; return m }())
+    }
     .fullScreenCover(item: $playing) { p in
-      TableScreen(model: { let m = TableModel(game: p.game, match: p.tm); m.onReport = { _, a, b, f in store.report(a, b, f) }; return m }())
+      TableScreen(model: { let m = TableModel(game: p.game, match: p.tm!); m.onReport = { _, a, b, f in store.report(a, b, f) }; return m }())
     }
   }
 }
@@ -168,6 +186,7 @@ struct CareerSlots: View {
 struct CareerHub: View {
   @Bindable var store: CareerStore
   let play: () -> Void
+  var onPractice: () -> Void = {}
   var body: some View {
     let _ = store.rev
     let E = store.E, S = E.S, me = S["me"]!, tier = me["tier"]!.i, day = S["day"]!.i
@@ -232,6 +251,11 @@ struct CareerHub: View {
         NavigationLink("Stats") { CareerStats(store: store) }
         NavigationLink("Shop") { CareerShop(store: store) }
         NavigationLink("Sponsors") { CareerSponsors(store: store) }
+        /* cvPractice: Practice Drills, the sessions played today */
+        Button { onPractice() } label: {
+          VStack(alignment: .leading, spacing: 2) { Text("Practice Drills").foregroundStyle(.primary); Text("\(store.practiceToday) of 3 sessions today").font(.footnote).foregroundStyle(.secondary) }
+        }
+        .accessibilityIdentifier("cvPractice")
       }
       Section("News") { ForEach(Array(S["news"]!.a.suffix(8).reversed().enumerated()), id: \.offset) { _, n in Text(n[1]!.s).font(.footnote) } }
       Section { Button("Switch Career") { E.save(); E.S = .null; store.touch() }.foregroundStyle(.secondary) }
@@ -356,5 +380,34 @@ struct CareerSponsors: View {
       }
     }
     .navigationTitle("Sponsors")
+  }
+}
+
+/* PAGES.practice: three sessions a day; each drill (the career's DRILLS) with its skill, shots and mastery, Play */
+struct CareerPractice: View {
+  @Bindable var store: CareerStore
+  let play: (String) -> Void
+  var body: some View {
+    let done = store.practiceToday, mas = store.E.S["me"]?["mas"], names = CareerStore.T("SKILL_NAMES")
+    List {
+      Section {} footer: { Text("Each drill is played on the table and scored from your shots; the score is recorded here when it ends. Three sessions a day; practice never moves the clock. Mastery is a record; skills grow a little.") }
+      Section {
+        ForEach(Array(CareerStore.T("DRILLS").a.enumerated()), id: \.offset) { _, d in
+          let id = d["id"]!.s, m = mas?[id], best = m?["best"]?.i ?? 0, lv = m?["lv"]?.i ?? 0, lib = drillById(id)
+          HStack {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(d["name"]!.s).font(.body.weight(.semibold))
+              Text("\(names[d["skill"]!.s]?.str ?? ""). \(lib.map { "\($0.shots) shots. " } ?? "")Best \(best)" + (lv > 0 ? ", \(["bronze", "silver", "gold"][lv - 1])" : "")).font(.footnote).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Play") { play(id) }.buttonStyle(.borderless).bold().foregroundStyle(.white).disabled(done >= 3 || lib == nil)
+              .accessibilityLabel("Play \(d["name"]!.s)").accessibilityIdentifier("drill-" + id)
+          }
+          .frame(minHeight: 44)
+        }
+      }
+    }
+    .navigationTitle("Practice")
+    .onAppear { store.touch() }
   }
 }
