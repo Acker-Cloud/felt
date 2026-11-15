@@ -224,6 +224,11 @@ struct TableCanvas: View {
      gliding (LOUPE_GLIDE_MS) when it must move; it fades in and out over LOUPE_FADE_MS */
   static let LOUPE_MAG = 3.0, LOUPE_FADE_MS = 90.0, LOUPE_GLIDE_MS = 60.0
   func loupeStep(_ m: Mapper) -> (L: (x: Double, y: Double, r: Double), a: Double, C: CGPoint, h: AimHit, P: FeltSim.Preview)? {
+    let s = model.sim, a0 = m.pt(0, 0), b0 = m.pt(s.TL, s.TW)
+    return loupeStep(pt: { m.pt($0, $1) }, rect: (Double(min(a0.x, b0.x)), Double(max(a0.x, b0.x)), Double(min(a0.y, b0.y)), Double(max(a0.y, b0.y))), rp: s.BALL_R * m.k)
+  }
+  /* pt: table to screen (top-down the fitted view, in 3D the camera); rect: [left, right, top, bottom] it must stay inside */
+  func loupeStep(pt: (Double, Double) -> CGPoint, rect: (Double, Double, Double, Double), rp: Double) -> (L: (x: Double, y: Double, r: Double), a: Double, C: CGPoint, h: AimHit, P: FeltSim.Preview)? {
     let now = model.now * 1000
     let gi = Prefs.guide == "off" ? nil : model.guide()
     let on = gi != nil && model.rolling == nil && !model.cpuTurn && model.fineAim
@@ -232,14 +237,13 @@ struct TableCanvas: View {
     model.loupeA = on ? min(1, model.loupeA + dt / Self.LOUPE_FADE_MS) : max(0, model.loupeA - dt / Self.LOUPE_FADE_MS)
     if !on { if model.loupeA == 0 { model.loupe = nil }; if gi == nil || model.loupeA == 0 { return nil } }
     guard let (h, P) = gi, let c = model.cue else { return nil }
-    let s = model.sim, a0 = m.pt(0, 0), b0 = m.pt(s.TL, s.TW)
-    let tl = Double(min(a0.x, b0.x)), tr = Double(max(a0.x, b0.x)), tt = Double(min(a0.y, b0.y)), tb = Double(max(a0.y, b0.y))
-    let r = min(72, max(56, min(tr - tl, tb - tt) * 0.2)), rp = s.BALL_R * m.k
-    let dx = JSMath.cos(model.aim), dy = JSMath.sin(model.aim), C = m.pt(c.x + dx * h.t, c.y + dy * h.t), cue = m.pt(c.x, c.y)
+    let tl = rect.0, tr = rect.1, tt = rect.2, tb = rect.3
+    let r = min(72, max(56, min(tr - tl, tb - tt) * 0.2))
+    let dx = JSMath.cos(model.aim), dy = JSMath.sin(model.aim), C = pt(c.x + dx * h.t, c.y + dy * h.t), cue = pt(c.x, c.y)
     var lines: [(CGPoint, CGPoint, Double)] = [(cue, C, 8)]
-    if let o = P.obj, o.count > 1 { for i in 1..<o.count { lines.append((m.pt(o[i - 1][0], o[i - 1][1]), m.pt(o[i][0], o[i][1]), 4)) } }
-    if P.cue.count > 1 { for i in 1..<P.cue.count { lines.append((m.pt(P.cue[i - 1][0], P.cue[i - 1][1]), m.pt(P.cue[i][0], P.cue[i][1]), 2)) } }
-    let balls = model.balls.filter { $0.on }.map { b -> (CGPoint, Double) in (m.pt(b.x, b.y), b.n == model.cueN ? 16 : 1) }
+    if let o = P.obj, o.count > 1 { for i in 1..<o.count { lines.append((pt(o[i - 1][0], o[i - 1][1]), pt(o[i][0], o[i][1]), 4)) } }
+    if P.cue.count > 1 { for i in 1..<P.cue.count { lines.append((pt(P.cue[i - 1][0], P.cue[i - 1][1]), pt(P.cue[i][0], P.cue[i][1]), 2)) } }
+    let balls = model.balls.filter { $0.on }.map { b -> (CGPoint, Double) in (pt(b.x, b.y), b.n == model.cueN ? 16 : 1) }
     /* loupePlace */
     let mx = (tl + tr) / 2, my = (tt + tb) / 2, mg = 4.0, cx = Double(C.x), cy = Double(C.y)
     func seg(_ x: Double, _ y: Double, _ a: CGPoint, _ b: CGPoint) -> Double {

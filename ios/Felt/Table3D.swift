@@ -53,6 +53,23 @@ fragment float4 fxF(FxOut i [[stage_in]], constant FxU &u [[buffer(1)]]) {
   if (a < 0.002) discard_fragment();
   return float4(u.col.rgb * a, a);
 }
+struct LensU { float4 box; float r; float pad; float sc; float a; };
+struct LensOut { float4 pos [[position]]; float2 vq; };
+vertex LensOut lensV(uint id [[vertex_id]], constant float2 *q [[buffer(0)]], constant LensU &u [[buffer(1)]]) { LensOut o; o.vq = q[id]; o.pos = float4(u.box.xy + q[id] * u.box.zw, 0.0, 1.0); return o; }
+fragment float4 lensF(LensOut i [[stage_in]], constant LensU &u [[buffer(1)]], texture2d<float> T [[texture(0)]], sampler s [[sampler(0)]]) {
+  float2 p = i.vq * (u.r + u.pad);
+  float d = length(p), w = max(fwidth(d), 1e-4), ds = length(p + float2(0.0, 3.0 * u.sc));
+  float inside = clamp(u.r - d + 0.5 * w, 0.0, w) / w;
+  float2 uv = p / u.r * 0.5 + 0.5; uv.y = 1.0 - uv.y;
+  float3 c = T.sample(s, uv).rgb;
+  float bright = clamp(0.625 * u.sc + 0.5 - abs(d - u.r) / w, 0.0, 1.0) * 0.85, darkR = clamp(1.5 * u.sc + 0.5 - abs(d - u.r - 0.5 * u.sc) / w, 0.0, 1.0) * 0.45;
+  float4 col = float4(c * inside, inside);
+  col = darkR * float4(0.0, 0.0, 0.0, 1.0) + (1.0 - darkR) * col;
+  col = bright * float4(1.0) + (1.0 - bright) * col;
+  float sh = 0.55 * (1.0 - smoothstep(u.r - 4.0 * u.sc, u.r + 14.0 * u.sc, ds)) * (1.0 - col.a);
+  col = float4(col.rgb, col.a + sh);
+  return col * u.a;
+}
 struct CardIn { float3 p [[attribute(0)]]; float2 uv [[attribute(1)]]; float4 c [[attribute(2)]]; };
 struct CardOut { float4 pos [[position]]; float2 v; float4 vc; };
 vertex CardOut cardV(CardIn i [[stage_in]], constant float4x4 &M [[buffer(1)]]) { CardOut o; o.v = i.uv; o.vc = i.c; o.pos = M * float4(i.p, 1.0); return o; }
@@ -138,6 +155,7 @@ private func rgb(_ s: String) -> SIMD3<Float> { let c = RGBA(css: s); return SIM
 struct MeshU { var L: SIMD3<Float>; var E: SIMD3<Float>; var lit: Float; var alpha: Float }
 struct MeshV { var M: simd_float4x4; var W: simd_float4x4 }
 struct OverU { var M: simd_float4x4; var VP: SIMD2<Float> }
+struct LensU { var box: SIMD4<Float>; var r: Float; var pad: Float; var sc: Float; var a: Float }
 struct FxU { var V: simd_float4x4; var P: simd_float4x4; var C: SIMD3<Float>; var ext: Float; var kind: Float; var rad: Float; var lw: Float; var col: SIMD4<Float> }
 struct ShU { var M: simd_float4x4; var S: SIMD3<Float>; var ext: Float; var A: SIMD2<Float>; var B: SIMD2<Float>; var R: Float; var grow: Float; var ao: Float; var ca: Float }
 struct BallU {
@@ -151,6 +169,7 @@ struct BallU {
 @MainActor final class Renderer3D: NSObject, MTKViewDelegate {
   let model: TableModel
   let device: MTLDevice, queue: MTLCommandQueue
+  var lensP: MTLRenderPipelineState!
   var fxP: MTLRenderPipelineState!, noDepth: MTLDepthStencilState!
   var cardP: MTLRenderPipelineState!, cards: (tex: MTLTexture, at: [String: [Double]])?
   var overP: MTLRenderPipelineState!, cueBuf: (key: String, b: MTLBuffer, n: Int)?
@@ -258,6 +277,7 @@ struct BallU {
     cv.layouts[0].stride = 36
     cardP = try pipe("cardV", "cardF", cv, blend: true, premul: true)
     fxP = try pipe("fxV", "fxF", nil, blend: true, add: true)
+    lensP = try pipe("lensV", "lensF", nil, blend: true, premul: true)
     let nd = MTLDepthStencilDescriptor(); nd.depthCompareFunction = .always; nd.isDepthWriteEnabled = false
     noDepth = device.makeDepthStencilState(descriptor: nd)
     let A = V3Room.cardAtlas()
@@ -344,13 +364,70 @@ struct BallU {
     guard let G = geometry(), let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
           let cb = queue.makeCommandBuffer() else { return }
     pass.colorAttachments[0].clearColor = MTLClearColor(red: 0.02, green: 0.016, blue: 0.016, alpha: 1)
-    guard let e = cb.makeRenderCommandEncoder(descriptor: pass) else { return }
     let s = model.sim, R = s.BALL_R, W = Double(view.bounds.width), H = Double(view.bounds.height)
     let box = V3.Box(left: 0, top: 0, width: W, height: H)
     let now = CACurrentMediaTime() * 1000
     update(now)
     let C = pose(box, now)
     model.v3Cam = (C, box)
+    let sc = Double(view.contentScaleFactor)
+    /* the fine-aim loupe (v3Loupe): the same eye, looking at the ghost ball's middle, LOUPE_MAG times closer, rendered
+       into a small target first (the room, the cue, the lamp and the flashes left out) */
+    let tc = TableCanvas(model: model, look: Look.of(model.dress, game: model.game))
+    let st = model.rolling == nil ? tc.loupeStep(pt: { x, y in V3.proj(C, box, x, y, R).map { CGPoint(x: $0[0], y: $0[1]) } ?? CGPoint(x: -1e5, y: -1e5) },
+                                                 rect: (0, W, 0, H), rp: R * C.F / max(0.05, V3.dot(V3.sub([self.px, self.py, -R], C.Er), C.f))) : nil
+    var lensTex: MTLTexture? = nil
+    if let st, let c = model.cue {
+      let n = max(8, Int((2 * st.L.r * sc).rounded())), gx = c.x + cos(model.aim) * st.h.t, gy = c.y + sin(model.aim) * st.h.t
+      let Cl = V3.mats(C.E, [gx, gy, R], 2 * st.L.r, 2 * st.L.r, C.F * TableCanvas.LOUPE_MAG)
+      if let (tex, lp) = loupeTarget(n), let le = cb.makeRenderCommandEncoder(descriptor: lp) {
+        scene(le, Cl, G, full: false, sc: sc, vp: (Double(n), Double(n)), size: CGSize(width: 2 * st.L.r, height: 2 * st.L.r), ghostC: C)
+        le.endEncoding()
+        lensTex = tex
+      }
+    }
+    guard let e = cb.makeRenderCommandEncoder(descriptor: pass) else { return }
+    scene(e, C, G, full: true, sc: sc, vp: (Double(view.drawableSize.width), Double(view.drawableSize.height)), size: view.bounds.size, ghostC: C)
+    /* the lens on the view: a quad round the circle, out to the shadow's reach */
+    if let st, let lt = lensTex {
+      let pad = 16.0, Wp = Double(view.drawableSize.width), Hp = Double(view.drawableSize.height), x = st.L.x * sc, y = Hp - st.L.y * sc, ext = (st.L.r + pad) * sc
+      var lu = LensU(box: SIMD4<Float>(Float(x / Wp * 2 - 1), Float(y / Hp * 2 - 1), Float(ext / Wp * 2), Float(ext / Hp * 2)), r: Float(st.L.r * sc), pad: Float(pad * sc), sc: Float(sc), a: Float(st.a))
+      var q = quad
+      e.setDepthStencilState(noDepth); e.setRenderPipelineState(lensP)
+      e.setVertexBytes(&q, length: 32, index: 0); e.setVertexBytes(&lu, length: MemoryLayout<LensU>.stride, index: 1); e.setFragmentBytes(&lu, length: MemoryLayout<LensU>.stride, index: 1)
+      e.setFragmentTexture(lt, index: 0); e.setFragmentSamplerState(sampler, index: 0)
+      e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+    }
+    e.endEncoding()
+    cb.present(drawable)
+    cb.commit()
+  }
+  /* the loupe's target: an n x n MSAA colour and depth, resolved into a texture the lens samples */
+  var lfb: (n: Int, msaa: MTLTexture, tex: MTLTexture, depth: MTLTexture)?
+  func loupeTarget(_ n: Int) -> (MTLTexture, MTLRenderPassDescriptor)? {
+    if lfb?.n != n {
+      let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: n, height: n, mipmapped: false)
+      d.usage = [.renderTarget, .shaderRead]; d.storageMode = .private
+      guard let tex = device.makeTexture(descriptor: d) else { return nil }
+      d.textureType = .type2DMultisample; d.sampleCount = 4; d.usage = [.renderTarget]
+      guard let ms = device.makeTexture(descriptor: d) else { return nil }
+      let dd = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .depth32Float, width: n, height: n, mipmapped: false)
+      dd.textureType = .type2DMultisample; dd.sampleCount = 4; dd.usage = [.renderTarget]; dd.storageMode = .private
+      guard let dep = device.makeTexture(descriptor: dd) else { return nil }
+      lfb = (n, ms, tex, dep)
+    }
+    let p = MTLRenderPassDescriptor()
+    p.colorAttachments[0].texture = lfb!.msaa; p.colorAttachments[0].resolveTexture = lfb!.tex
+    p.colorAttachments[0].loadAction = .clear; p.colorAttachments[0].storeAction = .multisampleResolve
+    p.colorAttachments[0].clearColor = MTLClearColor(red: 0.02, green: 0.016, blue: 0.016, alpha: 1)
+    p.depthAttachment.texture = lfb!.depth; p.depthAttachment.loadAction = .clear; p.depthAttachment.storeAction = .dontCare; p.depthAttachment.clearDepth = 1
+    return (lfb!.tex, p)
+  }
+  /* v3Scene: the table, its balls, shadows, overlays and flashes through camera C; full: the room, the cue and the lamp too
+     (the main view; the loupe leaves them and the flashes out) */
+  func scene(_ e: MTLRenderCommandEncoder, _ C: V3.Cam, _ G: (key: String, tex: MTLTexture, planes: MTLBuffer, nBed: Int, nTop: Int, mesh: MTLBuffer, nFaces: Int, nPosts: Int, bounce: [Double], outline: [[Double]]),
+             full: Bool, sc: Double, vp: (Double, Double), size: CGSize, ghostC: V3.Cam) {
+    let s = model.sim, R = s.BALL_R
     let M = glToMetal(C.M), P = glToMetal(C.P), Vm = m4(C.V)
     var Mv = M
     e.setDepthStencilState(depthOn)
@@ -374,7 +451,7 @@ struct BallU {
     }
     /* the room round it: the wall and the floor, opaque, after the table's solid parts, no depth writes */
     roomFor(G)
-    if let Rm = room, Rm.key == G.key {
+    if full, let Rm = room, Rm.key == G.key {
       e.setDepthStencilState(depthRead)
       e.setRenderPipelineState(texP)
       var r0: Float = 0
@@ -456,12 +533,12 @@ struct BallU {
       e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
     /* the overlays (the guide's strokes, premultiplied), laid on the bed */
-    let sc = Double(view.contentScaleFactor), m2 = Mapper(size: view.bounds.size, TL: s.TL, TW: s.TW)
+    let m2 = Mapper(size: size, TL: s.TL, TW: s.TW)
     let sink = Sink3D(C, s: s, m: m2, scale: sc, topH: R * 1.42)
     if model.rolling == nil { TableCanvas(model: model, look: Look.of(model.dress, game: model.game)).drawGuide(sink, m2) }
     if !sink.rib.v.isEmpty, let ob = device.makeBuffer(bytes: sink.rib.v, length: sink.rib.v.count * 4) {
       e.setRenderPipelineState(overP)
-      var ou = OverU(M: M, VP: SIMD2<Float>(Float(view.drawableSize.width / 2), Float(view.drawableSize.height / 2)))
+      var ou = OverU(M: M, VP: SIMD2<Float>(Float(vp.0 / 2), Float(vp.1 / 2)))
       e.setVertexBuffer(ob, offset: 0, index: 0); e.setVertexBytes(&ou, length: MemoryLayout<OverU>.stride, index: 1)
       e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: sink.rib.v.count / V3Ribbons.OVF)
     }
@@ -472,7 +549,7 @@ struct BallU {
     e.setFragmentTexture(numTex, index: 0); e.setFragmentSamplerState(sampler, index: 0)
     let toV = { (p: [Double]) -> SIMD3<Float> in let V = C.V; return SIMD3<Float>((0..<3).map { Float(V[$0] * p[0] + V[4 + $0] * p[1] + V[8 + $0] * p[2] + V[12 + $0]) }) }
     let Vi = simd_float3x3(f3(C.r), f3(C.u), -f3(C.f))
-    let painter = model.ballPainter(upright: true, scale: view.contentScaleFactor)
+    let painter = model.ballPainter(upright: true, scale: CGFloat(sc))
     for (o, _) in vis {
       let p = painter.paintOf(o.n), m = model.orient[o.n] ?? IDENT, Cw = [o.x, o.y, -o.z]
       func cap(_ i: Int) -> (SIMD4<Float>, SIMD3<Float>) {
@@ -490,7 +567,7 @@ struct BallU {
     }
     /* the hit flashes (drawFx's, the same timing and colours) as billboards at the contact, added over the balls */
     let tn = model.now
-    let fx = model.effects.filter { tn - $0.t < $0.d }
+    let fx = full ? model.effects.filter { tn - $0.t < $0.d } : []
     if !fx.isEmpty {
       e.setDepthStencilState(noDepth)
       e.setRenderPipelineState(fxP)
@@ -499,7 +576,7 @@ struct BallU {
         let u = min(1, max(0, (tn - f.t) / f.d)), a = min(1, f.v / 3) * (1 - u) * (1 - u)
         let rail = f.kind == "rail", rad = rail ? R * 2.2 : R * (f.kind == "cue" ? 0.25 + 0.5 * u : 0.3 + 1.1 * u)
         let col: SIMD4<Float> = rail ? [190 / 255, 1, 220 / 255, Float(0.2 * a)] : f.kind == "cue" ? [170 / 255, 205 / 255, 1, Float(0.6 * a)] : [1, 1, 1, Float(0.5 * a)]
-        var fu = FxU(V: Vm, P: P, C: f3([f.x, f.y, -R]), ext: Float(rad * 1.15 + 0.004), kind: rail ? 1 : 0, rad: Float(rad), lw: Float(0.75 * Double(view.drawableSize.width) / max(1, C.W)), col: col)
+        var fu = FxU(V: Vm, P: P, C: f3([f.x, f.y, -R]), ext: Float(rad * 1.15 + 0.004), kind: rail ? 1 : 0, rad: Float(rad), lw: Float(0.75 * vp.0 / max(1, C.W)), col: col)
         e.setVertexBytes(&fu, length: MemoryLayout<FxU>.stride, index: 1); e.setFragmentBytes(&fu, length: MemoryLayout<FxU>.stride, index: 1)
         e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
       }
@@ -516,7 +593,7 @@ struct BallU {
       e.setDepthStencilState(depthOn)
     }
     /* the cue: behind the ball on the aim, raised a little at least (it clears the rails), pulled back by power */
-    if model.rolling == nil, !model.cpuThinking, let c = model.cue, let cb = cue3() {
+    if full, model.rolling == nil, !model.cpuThinking, let c = model.cue, let cb = cue3() {
       let rest = R + 0.012, back = 0.27
       var gap = rest + back * min(1, max(0, model.power))
       if let st = model.stroke {
@@ -535,7 +612,7 @@ struct BallU {
       e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: cb.n)
     }
     /* this table's lamp, faded out as the camera rises to it (so it never hangs between the camera and the bed) */
-    if let Rm = room, Rm.key == G.key {
+    if full, let Rm = room, Rm.key == G.key {
       let u = min(1, max(0, (C.E[2] - (Rm.G.lampZ - 0.3)) / 0.28)), a = 1 - u * u * (3 - 2 * u)
       if a > 0.01 {
         e.setRenderPipelineState(meshP)
@@ -545,9 +622,6 @@ struct BallU {
         e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: Rm.G.nLamp)
       }
     }
-    e.endEncoding()
-    cb.present(drawable)
-    cb.commit()
   }
 }
 
