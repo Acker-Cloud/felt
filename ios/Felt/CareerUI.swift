@@ -964,6 +964,8 @@ struct CareerHub: View {
       CareerBracket(store: store, id: id)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-calendar") {
       if ProcessInfo.processInfo.arguments.contains("-felt-career-event"), let id = nm["event"]?.str { CareerEvent(store: store, id: id) } else { CareerCalendar(store: store) }
+    } else if ProcessInfo.processInfo.arguments.contains("-felt-career-stats") {
+      CareerStats(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-records") {
       CareerRecords(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-options") {
@@ -1032,31 +1034,100 @@ struct CareerRankings: View {
 }
 
 /* the player's numbers: all games, then each game played */
+/* PAGES.stats: Career over Stats; the card (Matches, Won, Win rate; Titles, Finals, Prize money); Play (racks, breaks,
+   break and run, run outs, accuracy, called shots, safeties, fouls, streak, best run); By Game; Skills (each value over
+   its meter); the purity note; the ladder record; Records and Hall of Fame */
 struct CareerStats: View {
   @Bindable var store: CareerStore
   var body: some View {
-    let st = store.E.stats()
+    let _ = store.rev
+    let E = store.E, s = E.stats(), a = s["all"]!, ins = EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)
+    let fr = a["foulsPerRack"]!, st = a["streak"]!.i
     List {
-      block("All Games", st["all"]!)
-      ForEach(st["byDisc"]!.keys, id: \.self) { d in block(CareerStore.gameName(d), st["byDisc"]![d]!) }
-      Section { NavigationLink("Records and Hall of Fame") { CareerRecords(store: store) }.accessibilityIdentifier("cvRecords") }
+      CareerTitle(kick: "Career", title: "Stats")
+      Section {
+        VStack(spacing: 12) {
+          HStack(alignment: .top) { fact("Matches", "\(a["matches"]!.i)"); fact("Won", "\(a["won"]!.i)"); fact("Win Rate", a["winPct"]!["d"]!.d != 0 ? "\(JV.numberString(a["winPct"]!["pct"]!.d))%" : "-") }
+          HStack(alignment: .top) { fact("Titles", "\(a["titles"]!.i)"); fact("Finals", "\(a["finals"]!.i)"); fact("Prize Money", CareerWords.crWords(a["prize"]!.d)) }
+        }
+        .padding(.vertical, 6)
+      }
+      Section {
+        row("Racks Won", nil, pw(a["racks"]!["pct"]!))
+        row("Legal Breaks", nil, pw(a["legalBreak"]!))
+        row("Break and Run", nil, pw(a["breakAndRun"]!))
+        row("Run Outs", nil, pw(a["runout"]!))
+        row("Shot Accuracy", "Balls potted of shots taken", pw(a["shotAccuracy"]!))
+        row("Called Shots Made", nil, pw(a["calledShot"]!))
+        row("Safeties That Worked", "Counted in simulated matches", pw(a["safety"]!))
+        row("Fouls", nil, "\(a["fouls"]!.i), " + (fr["d"]!.d != 0 ? String(format: "%.2f a rack", a["fouls"]!.d / fr["d"]!.d) : "no racks yet"))
+        row("Streak", nil, st > 0 ? "Won \(st)" : st < 0 ? "Lost \(-st)" : "None")
+        row("Best Winning Run", nil, "\(a["bestStreak"]!.i)")
+      } header: { CareerPageHead(t: "Play") }
+      .listRowInsets(ins)
+      let by = s["byDisc"]!.keys
+      if !by.isEmpty {
+        Section {
+          ForEach(by, id: \.self) { d in
+            let x = s["byDisc"]![d]!, ti = x["titles"]!.i
+            row(titleCaseWords(CareerStore.gameName(d)), "\(ti) title\(ti == 1 ? "" : "s"), \(pw(x["racks"]!["pct"]!)) racks", "\(x["won"]!.i)-\(x["lost"]!.i)")
+          }
+        } header: { CareerPageHead(t: "By Game") }
+        .listRowInsets(ins)
+      }
+      Section {
+        ForEach(CareerStore.T("SKILLS").a.map { $0.s }, id: \.self) { k in
+          let v = Int((s["skills"]![k]?.d ?? 0).rounded())
+          HStack {
+            Text(CareerStore.T("SKILL_NAMES")[k]?.str ?? k).font(.system(size: 17))
+            Spacer()
+            VStack(alignment: .trailing, spacing: 3) {
+              Text("\(v)").font(.system(size: 13, weight: .semibold)).monospacedDigit()
+              ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.12))
+                Capsule().fill(Color(rgb: 0x3d, 0xdc, 0x84)).frame(width: 96 * CGFloat(min(100, max(0, v))) / 100)
+              }
+              .frame(width: 96, height: 4)
+            }
+            .accessibilityElement(children: .ignore).accessibilityLabel("\(v) of 100")
+          }
+        }
+      } header: { CareerPageHead(t: "Skills") } footer: {
+        Text(truthy(E.S["me"]!["opt"]?["purity"]) ? "Simulation purity is on: skills are a record of your play and decide only the matches the model settles."
+             : "Skills grow from matches and drills. Under Options: what they change in your own play.").font(.system(size: 13))
+      }
+      .listRowInsets(ins)
+      if let lg = s["legacy"], lg != .null {
+        Section {
+          row("Carried Over", "\(lg["beaten"]?.a.count ?? 0) of 8 beaten, \(lg["won"]!.i) of \(lg["played"]!.i) matches won", lg["played"]!.d != 0 ? "\(JV.numberString(lg["winPct"]!["pct"]!.d))%" : "")
+        } header: { CareerPageHead(t: "Ladder Record") }
+        .listRowInsets(ins)
+      }
+      Section { NavigationLink { CareerRecords(store: store) } label: { Text("Records and Hall of Fame").font(.system(size: 17)) }.accessibilityIdentifier("cvRecords") }
+        .listRowInsets(ins)
     }
-    .navigationTitle("Stats")
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
   }
-  func pctWords(_ p: JV) -> String { p["d"]!.d != 0 ? "\(p["n"]!.i) of \(p["d"]!.i), \(JV.numberString(p["pct"]!.d))%" : "None yet" }
-  @ViewBuilder func block(_ title: String, _ b: JV) -> some View {
-    Section(title) {
-      row("Matches", "\(b["won"]!.i)-\(b["lost"]!.i)")
-      row("Win Rate", pctWords(b["winPct"]!))
-      row("Racks", pctWords(b["racks"]!["pct"]!))
-      row("Titles", "\(b["titles"]!.i)")
-      row("Shot Accuracy", pctWords(b["shotAccuracy"]!))
-      row("Safeties", pctWords(b["safety"]!))
-      row("Break and Run", pctWords(b["breakAndRun"]!))
-      row("Best Streak", "\(b["bestStreak"]!.i)")
+  /* pctWords */
+  private func pw(_ p: JV) -> String { p["d"]!.d != 0 ? "\(p["n"]!.i) of \(p["d"]!.i), \(JV.numberString(p["pct"]!.d))%" : "none yet" }
+  private func fact(_ k: String, _ v: String) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(k).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+      Text(v).font(.system(size: 17, weight: .bold)).monospacedDigit()
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+  private func row(_ t: String, _ sub: String?, _ v: String) -> some View {
+    HStack {
+      VStack(alignment: .leading, spacing: 1) {
+        Text(t).font(.system(size: 17))
+        if let sub { Text(sub).font(.system(size: 15)).foregroundStyle(.secondary) }
+      }
+      Spacer()
+      Text(v).font(.system(size: 15)).foregroundStyle(.secondary).monospacedDigit().multilineTextAlignment(.trailing)
     }
   }
-  func row(_ k: String, _ v: String) -> some View { HStack { Text(k); Spacer(); Text(v).foregroundStyle(.secondary) } }
 }
 
 /* the shop: each item's price or lock, Buy, and Equip for what is owned; a checkmark on what is worn */
