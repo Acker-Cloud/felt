@@ -23,8 +23,8 @@ public enum V3 {
 
   public static func sub(_ a: [Double], _ b: [Double]) -> [Double] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
   public static func dot(_ a: [Double], _ b: [Double]) -> Double { a[0] * b[0] + a[1] * b[1] + a[2] * b[2] }
-  static func cross(_ a: [Double], _ b: [Double]) -> [Double] { [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] }
-  static func norm(_ a: [Double]) -> [Double] { var l = M.hypot(a[0], a[1], a[2]); if l == 0 { l = 1 }; return [a[0] / l, a[1] / l, a[2] / l] }
+  public static func cross(_ a: [Double], _ b: [Double]) -> [Double] { [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] }
+  public static func norm(_ a: [Double]) -> [Double] { var l = M.hypot(a[0], a[1], a[2]); if l == 0 { l = 1 }; return [a[0] / l, a[1] / l, a[2] / l] }
   static func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { Swift.max(lo, Swift.min(hi, v)) }
 
   /* the matrices for an eye E and a target T on a W x H box; Fo: a focal length of its own, centred (the loupe's) */
@@ -137,5 +137,78 @@ public enum V3 {
     let t = (-z - C.Er[2]) / dir[2]
     if t <= 0 { return nil }
     return [C.Er[0] + dir[0] * t, C.Er[1] + dir[1] * t]
+  }
+}
+
+/* 4o's overlays: the 2D view's strokes laid on the bed as ribbons (v3Line, v3Strip, v3Push, v3PathZ): each polyline at one
+   height, cut at the near plane, dashed as the bed measures it, then one mitred ribbon per run. A vertex: P (3), the point
+   before and after it on its line (3 + 3: the joins are mitred in screen space), [side, width device px] (2), rgba (4) */
+public struct V3Ribbons {
+  public static let OVF = 15
+  public var v: [Float] = []
+  let C: V3.Cam
+  public init(_ C: V3.Cam) { self.C = C }
+  func depth(_ P: [Double]) -> Double { V3.dot(V3.sub(P, C.Er), C.f) - V3.NEAR * 2 }
+  mutating func push(_ P: [Double], _ Q: [Double], _ N: [Double], _ s: Double, _ w: Double, _ c: [Double]) {
+    v += [P[0], P[1], P[2], Q[0], Q[1], Q[2], N[0], N[1], N[2], s, w, c[0], c[1], c[2], c[3]].map { Float($0) }
+  }
+  mutating func strip(_ P: [[Double]], _ closed: Bool, _ w: Double, _ c: [Double]) {
+    let n = P.count
+    if n < 2 { return }
+    func at(_ i: Int) -> [Double] { closed ? P[((i % n) + n) % n] : P[Swift.max(0, Swift.min(n - 1, i))] }
+    let last = closed ? n : n - 1
+    for i in 0..<last {
+      let A = at(i), B = at(i + 1), Ap = closed || i > 0 ? at(i - 1) : A, Bn = closed || i + 2 < n ? at(i + 2) : B
+      push(A, Ap, B, -1, w, c); push(A, Ap, B, 1, w, c); push(B, A, Bn, 1, w, c)
+      push(A, Ap, B, -1, w, c); push(B, A, Bn, 1, w, c); push(B, A, Bn, -1, w, c)
+    }
+  }
+  /* v3PathZ: a closed path round a pocket (or outside the bed) sits on the rail tops, the rest on the bed */
+  public static func pathZ(_ s: Sim, _ pts: [[Double]], _ closed: Bool, topH: Double) -> Double {
+    if !closed || pts.isEmpty { return 0.0012 }
+    var mx = 0.0, my = 0.0
+    for p in pts { mx += p[0]; my += p[1] }
+    mx /= Double(pts.count); my /= Double(pts.count)
+    let atPocket = s.POCKETS.indices.contains { JSMath.hypot(mx - s.POCKETS[$0][0], my - s.POCKETS[$0][1]) < s.POCKET_R[$0] * 1.6 }
+    let inside = s.BED_LINES.map { L in L.allSatisfy { $0[0] * mx + $0[1] * my - $0[2] >= 0 } } ?? (mx >= 0 && mx <= s.TL && my >= 0 && my <= s.TW)
+    return inside && !atPocket ? 0.0012 : topH + 0.0012
+  }
+  /* v3Line: table points at height z, width w device px, dash in metres (nil: solid) */
+  public mutating func line(_ pts: [[Double]], _ w: Double, _ c: [Double], dash: [Double]? = nil, closed: Bool = false, z: Double = 0.0012) {
+    if pts.count < 2 { return }
+    let P = pts.map { [$0[0], $0[1], -z] }, ring = closed ? P + [P[0]] : P
+    var runs: [[[Double]]] = [], cur: [[Double]] = []
+    for i in ring.indices {
+      let B = ring[i], db = depth(B)
+      if i > 0 {
+        let A = ring[i - 1], da = depth(A)
+        if (da > 0) != (db > 0) { let t = da / (da - db); cur.append((0..<3).map { A[$0] + (B[$0] - A[$0]) * t }); if db <= 0 { runs.append(cur); cur = [] } }
+      }
+      if db > 0 { cur.append(B) }
+    }
+    if !cur.isEmpty { runs.append(cur) }
+    let whole = closed && runs.count == 1 && runs[0].count == ring.count
+    for run in runs {
+      let r = whole ? Array(run.dropLast()) : run
+      guard let dash, dash.contains(where: { $0 > 0 }) else { strip(r, whole, w, c); continue }
+      /* dashes along the run, measured on the bed as the 2D view measures them */
+      let pl = whole ? r + [r[0]] : r
+      var k = 0, left = dash[0], on = true, piece = [pl[0]]
+      for i in 1..<pl.count {
+        var a = pl[i - 1]
+        let b = pl[i]
+        var L = JSMath.hypot(b[0] - a[0], b[1] - a[1])
+        while L > 1e-9 {
+          let st = Swift.min(L, left), q = (0..<3).map { a[$0] + (b[$0] - a[$0]) * st / L }
+          if on { piece.append(q) }
+          a = q; L -= st; left -= st
+          if left <= 1e-9 {
+            if on && piece.count > 1 { strip(piece, false, w, c) }
+            k = (k + 1) % dash.count; left = dash[k] > 0 ? dash[k] : 1e-3; on = !on; piece = [a]
+          }
+        }
+      }
+      if on && piece.count > 1 { strip(piece, false, w, c) }
+    }
   }
 }

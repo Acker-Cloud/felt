@@ -105,7 +105,7 @@ func drawCue(_ ctx: inout GraphicsContext, _ m: Mapper, game: String, dress: Dre
 }
 
 /* cueParts: the cue's bands from the tip back, the tip in its chalk */
-private func cueParts(_ C: CueLook, _ tip: String, _ G: CueGeo) -> [(Double, Double, String)] {
+func cueParts(_ C: CueLook, _ tip: String, _ G: CueGeo) -> [(Double, Double, String)] {
   if G.pool {
     return [(0, 0.005, tip), (0.005, 0.027, G.ferCol), (0.74, 0.744, C.metal), (0.744, 0.752, C.joint), (0.752, 0.756, C.metal),
             (0.756, 1.0, C.fore), (1.0, 1.006, C.metal), (1.006, 1.262, C.wrap), (1.262, 1.268, C.metal), (1.268, 1.45, C.sleeve), (1.33, 1.338, C.ring), (1.45, CueGeo.CUE_LEN, C.cap)]

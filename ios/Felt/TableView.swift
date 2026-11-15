@@ -145,23 +145,15 @@ struct TableCanvas: View {
      paths, the object ball's solid line and the cue ball's dashed one, each over a faint dark
      under-stroke so it reads on any cloth (strokeLine, guideRing). Practice has no rules: any first
      contact is legal, and only the cue ball's pot is not. */
-  private func drawGuide(_ ctx: inout GraphicsContext, _ m: Mapper) {
+  private func drawGuide(_ ctx: inout GraphicsContext, _ m: Mapper) { drawGuide(Sink2D(ctx: ctx, m: m), m) }
+  func drawGuide(_ sink: GuideSink, _ m: Mapper) {
     if Prefs.guide == "off" { return }
     guard let c = model.cue, let (h, P) = model.guide() else { return }
     let s = model.sim, R = s.BALL_R, rp = R * m.k, dx = JSMath.cos(model.aim), dy = JSMath.sin(model.aim)
     let gx = c.x + dx * h.t, gy = c.y + dy * h.t, ov = look.ovMin
     let wa = { (a: Double) in Color.white.opacity(max(a, ov)) }, white = { (a: Double) in Color.white.opacity(a) }
-    func path(_ pts: [[Double]]) -> Path { var p = Path(); for (i, q) in pts.enumerated() { i == 0 ? p.move(to: m.pt(q[0], q[1])) : p.addLine(to: m.pt(q[0], q[1])) }; return p }
-    func strokeLine(_ pts: [[Double]], _ col: Color, _ w: Double, _ dash: [CGFloat] = []) {
-      let p = path(pts)
-      ctx.stroke(p, with: .color(.black.opacity(0.22)), style: StrokeStyle(lineWidth: w + 2, lineCap: .round, lineJoin: .round, dash: dash))
-      ctx.stroke(p, with: .color(col), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round, dash: dash))
-    }
-    func ring(_ x: Double, _ y: Double, _ r: Double, _ col: Color, _ w: Double, fill: Color? = nil) {
-      let q = m.pt(x, y), p = Path(ellipseIn: CGRect(x: q.x - r, y: q.y - r, width: 2 * r, height: 2 * r))
-      if let f = fill { ctx.fill(p, with: .color(f)) }
-      ctx.stroke(p, with: .color(col), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round))
-    }
+    func strokeLine(_ pts: [[Double]], _ col: Color, _ w: Double, _ dash: [CGFloat] = []) { sink.line(pts, col, w, dash) }
+    func ring(_ x: Double, _ y: Double, _ r: Double, _ col: Color, _ w: Double, fill: Color? = nil, ghost: Bool = false) { sink.ring(x, y, r, col, w, fill: fill, ghost: ghost) }
     func trimStart(_ pts: [[Double]], _ d0: Double) -> [[Double]] {
       var d = d0
       for i in 1..<max(1, pts.count) {
@@ -183,7 +175,7 @@ struct TableCanvas: View {
       legal = !wrong && !kitchen
     }
     if h.t > 2 * R { strokeLine([[c.x + dx * R, c.y + dy * R], [gx - dx * R, gy - dy * R]], wa(0.5), 1.25) }
-    ring(gx, gy, rp, legal ? white(0.9) : look.illegal, 1.5, fill: white(0.08))
+    ring(gx, gy, rp, legal ? white(0.9) : look.illegal, 1.5, fill: white(0.08), ghost: true)
     if let f = first, !legal { ring(f.x, f.y, rp + 3, look.illegal, 2) }
     if legal, let obj = P.obj, obj.count > 1 {
       let o = trimStart(obj, R), end = obj[obj.count - 1]
@@ -211,7 +203,7 @@ struct TableCanvas: View {
     }
     if P.cuePot >= 0 && P.cuePot < s.POCKETS.count { ring(s.POCKETS[P.cuePot][0], s.POCKETS[P.cuePot][1], s.POCKET_R[P.cuePot] * m.k, cueCol, 2) }
     /* drawJumpArc: the flight lifted up the screen by its height, a dot at each landing */
-    if P.air.count > 1 {
+    if P.air.count > 1, let ctx = sink.ctx {
       var p = Path(), lands: [CGPoint] = []
       for (i, a) in P.air.enumerated() {
         let q = m.pt(a[0], a[1]), y = q.y - a[2] * m.k
@@ -484,5 +476,50 @@ struct TableCanvas: View {
               with: .radialGradient(Gradient(colors: [col, .clear]), center: p, startRadius: r * 0.4, endRadius: r * 1.9))
       g.stroke(Path(ellipseIn: CGRect(x: p.x - r * 1.15, y: p.y - r * 1.15, width: r * 2.3, height: r * 2.3)), with: .color(col), lineWidth: w)
     }
+  }
+}
+
+/* where the guide is drawn: the 2D canvas, or the 3D view's recorder (4o's V3R: the strokes laid on the bed as ribbons,
+   the ghost ball a faint ball, the jump's arc left out) */
+protocol GuideSink: AnyObject {
+  var ctx: GraphicsContext? { get }
+  func line(_ pts: [[Double]], _ col: Color, _ w: Double, _ dash: [CGFloat])
+  func ring(_ x: Double, _ y: Double, _ r: Double, _ col: Color, _ w: Double, fill: Color?, ghost: Bool)
+}
+final class Sink2D: GuideSink {
+  var g: GraphicsContext
+  let m: Mapper
+  init(ctx: GraphicsContext, m: Mapper) { g = ctx; self.m = m }
+  var ctx: GraphicsContext? { g }
+  func line(_ pts: [[Double]], _ col: Color, _ w: Double, _ dash: [CGFloat]) {
+    var p = Path(); for (i, q) in pts.enumerated() { i == 0 ? p.move(to: m.pt(q[0], q[1])) : p.addLine(to: m.pt(q[0], q[1])) }
+    g.stroke(p, with: .color(.black.opacity(0.22)), style: StrokeStyle(lineWidth: w + 2, lineCap: .round, lineJoin: .round, dash: dash))
+    g.stroke(p, with: .color(col), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round, dash: dash))
+  }
+  func ring(_ x: Double, _ y: Double, _ r: Double, _ col: Color, _ w: Double, fill: Color?, ghost: Bool) {
+    let q = m.pt(x, y), p = Path(ellipseIn: CGRect(x: q.x - r, y: q.y - r, width: 2 * r, height: 2 * r))
+    if let f = fill { g.fill(p, with: .color(f)) }
+    g.stroke(p, with: .color(col), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round))
+  }
+}
+func rgbaOf(_ c: Color) -> [Double] { var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0; UIColor(c).getRed(&r, green: &g, blue: &b, alpha: &a); return [r, g, b, a].map { Double($0) } }
+final class Sink3D: GuideSink {
+  var rib: V3Ribbons
+  let s: Sim, m: Mapper, C: V3.Cam, scale: Double, topH: Double
+  var ghost: (x: Double, y: Double, col: [Double])? = nil
+  init(_ C: V3.Cam, s: Sim, m: Mapper, scale: Double, topH: Double) { rib = V3Ribbons(C); self.C = C; self.s = s; self.m = m; self.scale = scale; self.topH = topH }
+  var ctx: GraphicsContext? { nil }
+  func line(_ pts: [[Double]], _ col: Color, _ w: Double, _ dash: [CGFloat]) {
+    let d = dash.isEmpty ? nil : dash.map { Double($0) / m.k }
+    rib.line(pts, (w + 2) * scale, [0, 0, 0, 0.22], dash: d)
+    rib.line(pts, w * scale, rgbaOf(col), dash: d)
+  }
+  func ring(_ x: Double, _ y: Double, _ r: Double, _ col: Color, _ w: Double, fill: Color?, ghost g: Bool) {
+    if g { let c = rgbaOf(col); ghost = (x, y, c[0] > 0.85 && c[1] > 0.85 && c[2] > 0.85 ? [0.96, 0.96, 0.93] : c); return }
+    /* the arc cut to about 2.5 device px a chord at its distance */
+    let rm = r / m.k, dd = Swift.max(0.05, V3.dot(V3.sub([x, y, 0], C.Er), C.f)), px = 2 * Double.pi * rm * C.F / dd * scale
+    let n = Swift.max(12, Swift.min(256, Int((px / 2.5).rounded(.up))))
+    let pts = (0..<n).map { i -> [Double] in let a = Double(i) / Double(n) * 2 * Double.pi; return [x + rm * cos(a), y + rm * sin(a)] }
+    rib.line(pts, w * scale, rgbaOf(col), closed: true, z: V3Ribbons.pathZ(s, pts, true, topH: topH))
   }
 }

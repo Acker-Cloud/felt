@@ -19,7 +19,33 @@ fragment float4 texF(TexOut i [[stage_in]], texture2d<float> T [[texture(0)]], s
 }
 struct MeshIn { float3 p [[attribute(0)]]; float3 n [[attribute(1)]]; float4 c [[attribute(2)]]; };
 struct MeshOut { float4 pos [[position]]; float4 vc; float3 vn; float3 vp; };
-vertex MeshOut meshV(MeshIn i [[stage_in]], constant float4x4 &M [[buffer(1)]]) { MeshOut o; o.vc = i.c; o.vn = i.n; o.vp = i.p; o.pos = M * float4(i.p, 1.0); return o; }
+struct MeshV { float4x4 M; float4x4 W; };
+vertex MeshOut meshV(MeshIn i [[stage_in]], constant MeshV &u [[buffer(1)]]) {
+  MeshOut o; float4 w = u.W * float4(i.p, 1.0); o.vc = i.c; o.vn = float3x3(u.W[0].xyz, u.W[1].xyz, u.W[2].xyz) * i.n; o.vp = w.xyz; o.pos = u.M * w; return o;
+}
+struct OverIn { float3 P [[attribute(0)]]; float3 Q [[attribute(1)]]; float3 N [[attribute(2)]]; float2 sw [[attribute(3)]]; float4 c [[attribute(4)]]; };
+struct OverOut { float4 pos [[position]]; float4 vc; float vs; float vw; };
+struct OverU { float4x4 M; float2 VP; };
+vertex OverOut overV(OverIn i [[stage_in]], constant OverU &u [[buffer(1)]]) {
+  OverOut o; float4 p = u.M * float4(i.P, 1.0);
+  o.vc = i.c; o.vs = i.sw.x; o.vw = i.sw.y;
+  if (i.sw.y <= 0.0) { o.pos = p; return o; }
+  float4 q = u.M * float4(i.Q, 1.0), n = u.M * float4(i.N, 1.0);
+  float2 sp = p.xy / p.w * u.VP, t0 = sp - q.xy / q.w * u.VP, t1 = n.xy / n.w * u.VP - sp;
+  bool h0 = dot(t0, t0) > 1e-8, h1 = dot(t1, t1) > 1e-8;
+  t0 = h0 ? normalize(t0) : float2(0.0); t1 = h1 ? normalize(t1) : float2(0.0);
+  if (!h0) t0 = t1; if (!h1) t1 = t0;
+  float2 n0 = float2(-t0.y, t0.x), n1 = float2(-t1.y, t1.x), m = n0 + n1;
+  m = dot(m, m) > 1e-8 ? normalize(m) : n1;
+  float hw = i.sw.y * 0.5 + 1.0, l = hw / max(dot(m, n1), 0.4);
+  p.xy += m * l * i.sw.x / u.VP * p.w;
+  o.pos = p; return o;
+}
+fragment float4 overF(OverOut i [[stage_in]]) {
+  float a = 1.0;
+  if (i.vw > 0.0) { float d = abs(i.vs) * (i.vw * 0.5 + 1.0); a = clamp(i.vw * 0.5 + 0.5 - d, 0.0, 1.0); }
+  return float4(i.vc.rgb * i.vc.a * a, i.vc.a * a);
+}
 struct MeshU { float3 L; float3 E; float lit; float alpha; };
 fragment float4 meshF(MeshOut i [[stage_in]], constant MeshU &u [[buffer(0)]]) {
   if (u.lit < 0.5) return float4(i.vc.rgb, i.vc.a * u.alpha);
@@ -84,6 +110,8 @@ private func f3(_ v: [Double]) -> SIMD3<Float> { SIMD3<Float>(Float(v[0]), Float
 private func rgb(_ s: String) -> SIMD3<Float> { let c = RGBA(css: s); return SIMD3<Float>(Float(c.r), Float(c.g), Float(c.b)) }
 
 struct MeshU { var L: SIMD3<Float>; var E: SIMD3<Float>; var lit: Float; var alpha: Float }
+struct MeshV { var M: simd_float4x4; var W: simd_float4x4 }
+struct OverU { var M: simd_float4x4; var VP: SIMD2<Float> }
 struct ShU { var M: simd_float4x4; var S: SIMD3<Float>; var ext: Float; var A: SIMD2<Float>; var B: SIMD2<Float>; var R: Float; var grow: Float; var ao: Float; var ca: Float }
 struct BallU {
   var V: simd_float4x4; var P: simd_float4x4; var Vi: simd_float3x3; var C: SIMD3<Float>; var Cv: SIMD3<Float>; var R: Float
@@ -95,6 +123,7 @@ struct BallU {
 @MainActor final class Renderer3D: NSObject, MTKViewDelegate {
   let model: TableModel
   let device: MTLDevice, queue: MTLCommandQueue
+  var overP: MTLRenderPipelineState!, cueBuf: (key: String, b: MTLBuffer, n: Int)?
   var texP: MTLRenderPipelineState!, meshP: MTLRenderPipelineState!, shadowP: MTLRenderPipelineState!, ballP: MTLRenderPipelineState!
   var depthOn: MTLDepthStencilState!, depthRead: MTLDepthStencilState!
   var sampler: MTLSamplerState!
@@ -110,11 +139,11 @@ struct BallU {
   }
   func build() throws {
     let lib = try device.makeLibrary(source: SHADERS, options: nil)
-    func pipe(_ v: String, _ f: String, _ vd: MTLVertexDescriptor?, blend: Bool) throws -> MTLRenderPipelineState {
+    func pipe(_ v: String, _ f: String, _ vd: MTLVertexDescriptor?, blend: Bool, premul: Bool = false) throws -> MTLRenderPipelineState {
       let p = MTLRenderPipelineDescriptor()
       p.vertexFunction = lib.makeFunction(name: v); p.fragmentFunction = lib.makeFunction(name: f); p.vertexDescriptor = vd
       p.colorAttachments[0].pixelFormat = .bgra8Unorm; p.depthAttachmentPixelFormat = .depth32Float; p.rasterSampleCount = 4
-      if blend { let c = p.colorAttachments[0]!; c.isBlendingEnabled = true; c.sourceRGBBlendFactor = .sourceAlpha; c.destinationRGBBlendFactor = .oneMinusSourceAlpha; c.sourceAlphaBlendFactor = .sourceAlpha; c.destinationAlphaBlendFactor = .oneMinusSourceAlpha }
+      if blend { let c = p.colorAttachments[0]!; c.isBlendingEnabled = true; c.sourceRGBBlendFactor = premul ? .one : .sourceAlpha; c.destinationRGBBlendFactor = .oneMinusSourceAlpha; c.sourceAlphaBlendFactor = .sourceAlpha; c.destinationAlphaBlendFactor = .oneMinusSourceAlpha }
       return try device.makeRenderPipelineState(descriptor: p)
     }
     let tv = MTLVertexDescriptor()
@@ -128,6 +157,10 @@ struct BallU {
     meshP = try pipe("meshV", "meshF", mv, blend: true)
     shadowP = try pipe("shadowV", "shadowF", nil, blend: true)
     ballP = try pipe("ballV", "ballF", nil, blend: true)
+    let ov = MTLVertexDescriptor()
+    for (i, (f, o)) in [(MTLVertexFormat.float3, 0), (.float3, 12), (.float3, 24), (.float2, 36), (.float4, 44)].enumerated() { ov.attributes[i].format = f; ov.attributes[i].offset = o; ov.attributes[i].bufferIndex = 0 }
+    ov.layouts[0].stride = 60
+    overP = try pipe("overV", "overF", ov, blend: true, premul: true)
     let dd = MTLDepthStencilDescriptor(); dd.depthCompareFunction = .lessEqual; dd.isDepthWriteEnabled = true
     depthOn = device.makeDepthStencilState(descriptor: dd)
     dd.isDepthWriteEnabled = false
@@ -149,6 +182,40 @@ struct BallU {
     return geo
   }
 
+  /* v3Cue: a lathe of the look's parts from the tip (x 0) to the butt, 24 sides; four inlaid points round the forearm */
+  func cue3() -> (key: String, b: MTLBuffer, n: Int)? {
+    let G = CueGeo.of(game: model.game.table.2), (CU, tipCol) = CueLook.of(model.dress), key = "\(model.game.table.2)|\(model.dress)"
+    if let c = cueBuf, c.key == key { return c }
+    let parts = cueParts(CU, tipCol, G), LEN = G.len, SH0 = G.pool ? 0.027 : G.ferrule, SH1 = G.joint ?? (G.sleeve?[0] ?? 0.74), S = 24
+    var cuts = Set([0.0, LEN])
+    var x = 0.03; while x < SH1 { cuts.insert(x); x += 0.06 }
+    for p in parts { cuts.insert(p.0); cuts.insert(p.1) }
+    let pts: [Double]? = CU.pts != nil && G.pts != nil ? rgbaOf(css(CU.pts!)) : nil
+    if pts != nil, let gp = G.pts { for i in 0...8 { cuts.insert(gp[0] + (gp[1] - gp[0]) * Double(i) / 8) } }
+    let xs = cuts.filter { $0 >= 0 && $0 <= LEN }.sorted(), s0 = rgbaOf(css(CU.shaft[0])), s1 = rgbaOf(css(CU.shaft[1]))
+    func colAt(_ x: Double) -> [Double] {
+      var c: [Double]? = nil
+      for (a, b, k) in parts where x >= a && x < b { c = rgbaOf(css(k)) }
+      if let c { return c }
+      let u = min(1, max(0, (x - SH0) / (SH1 - SH0)))
+      return (0..<4).map { s0[$0] + (s1[$0] - s0[$0]) * u }
+    }
+    var out: [Float] = []
+    for i in 0..<(xs.count - 1) {
+      let x0 = xs[i], x1 = xs[i + 1], cx = colAt((x0 + x1) / 2), r0 = G.r(x0), r1 = G.r(x1), xm = (x0 + x1) / 2
+      var ptW = 0.0
+      if pts != nil, let gp = G.pts, xm >= gp[0] && xm < gp[1] { ptW = (xm - gp[0]) / (gp[1] - gp[0]) * Double.pi / 4.4 }
+      for j in 0..<S {
+        let a0 = Double(j) / Double(S) * 2 * Double.pi, a1 = Double(j + 1) / Double(S) * 2 * Double.pi, am = (a0 + a1) / 2
+        let off = abs((am + Double.pi / 4).truncatingRemainder(dividingBy: Double.pi / 2) - Double.pi / 4), c = ptW > 0 && off < ptW ? pts! : cx
+        func v(_ x: Double, _ r: Double, _ a: Double) { out += [Float(x), Float(r * cos(a)), Float(r * sin(a)), 0, Float(cos(a)), Float(sin(a)), Float(c[0]), Float(c[1]), Float(c[2]), 1] }
+        v(x0, r0, a0); v(x1, r1, a0); v(x1, r1, a1); v(x0, r0, a0); v(x1, r1, a1); v(x0, r0, a1)
+      }
+    }
+    guard let b = device.makeBuffer(bytes: out, length: out.count * 4) else { return nil }
+    cueBuf = (key, b, out.count / 10)
+    return cueBuf
+  }
   func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
   func draw(in view: MTKView) {
     guard let G = geometry(), let pass = view.currentRenderPassDescriptor, let drawable = view.currentDrawable,
@@ -175,7 +242,8 @@ struct BallU {
     let lamp = [s.TL / 2, s.TW / 2, -BallPainter.LAMP_H]
     if G.nFaces + G.nPosts > 0 {
       e.setRenderPipelineState(meshP)
-      e.setVertexBuffer(G.mesh, offset: 0, index: 0); e.setVertexBytes(&Mv, length: 64, index: 1)
+      var mv = MeshV(M: M, W: matrix_identity_float4x4)
+      e.setVertexBuffer(G.mesh, offset: 0, index: 0); e.setVertexBytes(&mv, length: MemoryLayout<MeshV>.stride, index: 1)
       var u = MeshU(L: f3(lamp), E: f3(C.Er), lit: 0, alpha: 1)
       e.setFragmentBytes(&u, length: MemoryLayout<MeshU>.stride, index: 0); e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: G.nFaces)
       if G.nPosts > 0 { u.lit = 1; e.setFragmentBytes(&u, length: MemoryLayout<MeshU>.stride, index: 0); e.drawPrimitives(type: .triangle, vertexStart: G.nFaces, vertexCount: G.nPosts) }
@@ -198,6 +266,16 @@ struct BallU {
       e.setVertexBytes(&u, length: MemoryLayout<ShU>.stride, index: 1); e.setFragmentBytes(&u, length: MemoryLayout<ShU>.stride, index: 1)
       e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
+    /* the overlays (the guide's strokes, premultiplied), laid on the bed */
+    let sc = Double(view.contentScaleFactor), m2 = Mapper(size: view.bounds.size, TL: s.TL, TW: s.TW)
+    let sink = Sink3D(C, s: s, m: m2, scale: sc, topH: R * 1.42)
+    if model.rolling == nil { TableCanvas(model: model, look: Look.of(model.dress, game: model.game)).drawGuide(sink, m2) }
+    if !sink.rib.v.isEmpty, let ob = device.makeBuffer(bytes: sink.rib.v, length: sink.rib.v.count * 4) {
+      e.setRenderPipelineState(overP)
+      var ou = OverU(M: M, VP: SIMD2<Float>(Float(view.drawableSize.width / 2), Float(view.drawableSize.height / 2)))
+      e.setVertexBuffer(ob, offset: 0, index: 0); e.setVertexBytes(&ou, length: MemoryLayout<OverU>.stride, index: 1)
+      e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: sink.rib.v.count / V3Ribbons.OVF)
+    }
     /* the balls */
     e.setDepthStencilState(depthOn)
     e.setRenderPipelineState(ballP)
@@ -218,6 +296,35 @@ struct BallU {
                     num: Float(o.n > 0 && o.n < 16 ? o.n : 0), Lv: toV(lamp), bounce: f3(G.bounce), alpha: 1, rim: painter.rim3(o.n) ? 1 : 0)
       e.setVertexBytes(&u, length: MemoryLayout<BallU>.stride, index: 1); e.setFragmentBytes(&u, length: MemoryLayout<BallU>.stride, index: 1)
       e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+    }
+    /* the guide's ghost ball: a faint ball where the cue ball will meet, white or the illegal colour (V3_GHOST_A) */
+    if let gh = sink.ghost, V3.dot(V3.sub([gh.x, gh.y, -R], C.Er), C.f) > V3.NEAR + R {
+      e.setDepthStencilState(depthRead)
+      let Cw = [gh.x, gh.y, -R], none = (SIMD4<Float>(0, 2, 0, 0), SIMD3<Float>(0, 0, 0))
+      var u = BallU(V: Vm, P: P, Vi: Vi, C: f3(Cw), Cv: toV(Cw), R: Float(R), Ax0: [1, 0, 0], Ax1: [0, 1, 0], Ax2: [0, 0, 1], base: f3(gh.col), cap0: none.0, cap1: none.0, cap2: none.0,
+                    capC0: none.1, capC1: none.1, capC2: none.1, num: 0, Lv: toV(lamp), bounce: f3(G.bounce), alpha: 0.34, rim: 0)
+      e.setVertexBytes(&u, length: MemoryLayout<BallU>.stride, index: 1); e.setFragmentBytes(&u, length: MemoryLayout<BallU>.stride, index: 1)
+      e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+      e.setDepthStencilState(depthOn)
+    }
+    /* the cue: behind the ball on the aim, raised a little at least (it clears the rails), pulled back by power */
+    if model.rolling == nil, !model.cpuThinking, let c = model.cue, let cb = cue3() {
+      let rest = R + 0.012, back = 0.27
+      var gap = rest + back * min(1, max(0, model.power))
+      if let st = model.stroke {
+        let u = min(1, max(0, (st.t0.map { model.now - $0 } ?? 0) / TableModel.STROKE_MS)), g0 = rest + back * min(1, max(0, st.power))
+        gap = g0 + (R - g0) * u * u
+      }
+      let sp = model.spin, el = Swift.max(sp.e, 5 * Double.pi / 180), a = model.aim, dx = cos(a), dy = sin(a)
+      let qx = c.x - dx * R + (-dy) * sp.x * R * 0.5, qy = c.y - dy * R + dx * sp.x * R * 0.5, qz = R + sp.y * R * 0.5, back3 = gap - R
+      let ax = [-dx * cos(el), -dy * cos(el), -sin(el)], tip = [qx + ax[0] * back3, qy + ax[1] * back3, -qz + ax[2] * back3]
+      let side = [-dy, dx, 0.0], up = V3.norm(V3.cross(ax, side))
+      var mv = MeshV(M: M, W: m4([ax[0], ax[1], ax[2], 0, side[0], side[1], side[2], 0, up[0], up[1], up[2], 0, tip[0], tip[1], tip[2], 1]))
+      var u = MeshU(L: f3(lamp), E: f3(C.Er), lit: 1, alpha: 1)
+      e.setRenderPipelineState(meshP)
+      e.setVertexBuffer(cb.b, offset: 0, index: 0); e.setVertexBytes(&mv, length: MemoryLayout<MeshV>.stride, index: 1)
+      e.setFragmentBytes(&u, length: MemoryLayout<MeshU>.stride, index: 0)
+      e.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: cb.n)
     }
     e.endEncoding()
     cb.present(drawable)
