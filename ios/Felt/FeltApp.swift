@@ -24,6 +24,21 @@ struct Home: View {
   @State private var intro = IntroModel()
   @State private var titleRect = CGRect.zero
   @State private var statsPath: String? = nil
+  /* a practice session's layout (startPractice) */
+  @State private var practicing: PracticeGo? = nil
+  struct PracticeGo: Identifiable { let layout: String; var id: String { layout } }
+  /* Solo: Practice (#pracSheet, 5s) */
+  private var soloSection: some View {
+    Section {
+      NavigationLink { PracticePicker { practicing = PracticeGo(layout: $0) } } label: {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Practice").font(.body.weight(.semibold))
+          Text("No opponent, no fouls, undo any shot").font(.footnote).foregroundStyle(.secondary)
+        }.frame(minHeight: 44, alignment: .leading)
+      }
+      .accessibilityIdentifier("solo-practice")
+    } header: { Text("Solo") }
+  }
   /* #leftNote: a game left by closing the app counted as a loss, once, until OK or LEFT_MS */
   @State private var leftNote = false
   @State private var booted = false
@@ -89,6 +104,7 @@ struct Home: View {
         } header: { Text("Modes") } footer: {
           Text("Watch the CPU play itself, each player at its own level.")
         }
+        soloSection
       }
       .navigationTitle("").navigationBarTitleDisplayMode(.inline)
       .navigationDestination(isPresented: $showCareer) { CareerView(store: career) }
@@ -115,6 +131,8 @@ struct Home: View {
       if let i = a.firstIndex(of: "-felt-setup"), i + 1 < a.count { setupGame = TableGame(rawValue: a[i + 1]) }
       /* `-felt-stats [kind]`: Stats open, or a game's page */
       if let i = a.firstIndex(of: "-felt-stats") { statsPath = i + 1 < a.count && !a[i + 1].hasPrefix("-") ? a[i + 1] : "all" }
+      /* `-felt-practice 8|9|heyball|scatter|empty`: a practice session */
+      if let i = a.firstIndex(of: "-felt-practice"), i + 1 < a.count { practicing = PracticeGo(layout: a[i + 1]) }
       /* `-felt-career`: the career's screen open */
       if a.contains("-felt-career") { showCareer = true }
       if a.contains("-felt-tourney") { store.start(Tourney.make(kind: "9", ruleset: nil, size: 8, fmt: "single", race: 3, field: "mixed", seed: 11)); showTourney = true }
@@ -155,6 +173,7 @@ struct Home: View {
         TableScreen(model: { let m = TableModel(game: g, tourney: t); m.onReport = { store.report($0, $1, $2, $3) }; return m }())
       }
     }
+    .fullScreenCover(item: $practicing) { p in TableScreen(model: TableModel(game: p.layout == "9" ? .nine : p.layout == "heyball" ? .heyball : .eight, practice: p.layout)) }
     .fullScreenCover(item: $party) { p in TableScreen(model: TableModel(game: p.game, party: (p.names, p.ruleset))) }
   }
 }
@@ -198,6 +217,7 @@ struct TableScreen: View {
       }
     }
     .background(Color(rgb: 9, 9, 10).ignoresSafeArea())
+    .overlay(alignment: .topTrailing) { if model.prac != nil && !model.paused { PracticeTools(model: model).padding(.top, 8).padding(.trailing, 12) } }
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
     .onDisappear { model.abandonCpuGame() }
     .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
@@ -358,6 +378,8 @@ struct TableScreen: View {
     }
     if !g.sweep || g.maybeTap(t) {
       let p = g.p0, (x, y) = m.table(p), reach = max(14, 1.3 * s.BALL_R * m.k)
+      /* free table editing (5s): a tap drops or takes off a ball */
+      if model.prac?.edit == true { model.editAt(x, y); return }
       var best: Ball? = nil, bd = reach
       for o in model.balls where o.on && o.n != model.cueN {
         let q = m.pt(o.x, o.y), d = JSMath.hypot(Double(q.x - p.x), Double(q.y - p.y))
@@ -1218,5 +1240,74 @@ struct BallDot: View {
       .frame(width: d, height: d)
     }
     .accessibilityHidden(true)
+  }
+}
+
+/* #pracSheet: the practice racks, each a session of its own */
+struct PracticePicker: View {
+  let go: (String) -> Void
+  static let ROWS: [(String, String, String, Int?, String?)] = [("8", "8-Ball Rack", "Break and run", 8, nil), ("9", "9-Ball Rack", "The diamond", 9, nil),
+    ("heyball", "Chinese 8-Ball Rack", "Its own table, snooker's pockets", 8, nil), ("scatter", "Free Table", "Seven balls, scattered", nil, "scatter"), ("empty", "Empty Table", "Tap the cloth to drop balls", nil, "cue")]
+  var body: some View {
+    List {
+      Section {
+        ForEach(Self.ROWS, id: \.0) { r in
+          Button { go(r.0) } label: {
+            HStack(spacing: 12) {
+              if let n = r.3 { BallDot(n: n).frame(width: 30, height: 30) }
+              else if r.4 == "cue" { Circle().fill(Color(rgb: 0xf6, 0xf4, 0xec)).frame(width: 30, height: 30).accessibilityHidden(true) }
+              else { HStack(spacing: 2) { ForEach([1, 5, 9], id: \.self) { BallDot(n: $0).frame(width: 12, height: 12) } }.frame(width: 30, height: 30) }
+              VStack(alignment: .leading, spacing: 2) {
+                Text(r.1).font(.body.weight(.semibold)).foregroundStyle(.primary)
+                Text(r.2).font(.footnote).foregroundStyle(.secondary)
+              }
+            }.frame(minHeight: 44, alignment: .leading)
+          }
+          .accessibilityIdentifier("prac-" + r.0)
+        }
+      } footer: { Text("No opponent and no fouls: it is always your shot. Undo any shot, take ball in hand when you like.") }
+    }
+    .navigationTitle("Practice")
+  }
+}
+
+/* #soloCtl and #tools: Undo (dimmed with nothing to undo), the tools button (lit while ball in hand or editing) and its
+   strip (Ball in Hand, Reset Rack, Add / Remove Balls on a free table), Done Editing while editing */
+struct PracticeTools: View {
+  let model: TableModel
+  var body: some View {
+    let P = model.prac!, hand = model.g?.hand ?? false, aiming = model.rolling == nil && model.stroke == nil
+    VStack(alignment: .trailing, spacing: 8) {
+      HStack(spacing: 8) {
+        Button { model.undo() } label: { icon("arrow.uturn.backward") }
+          .opacity(P.undo.isEmpty ? 0.5 : 1).accessibilityLabel("Undo the last shot").accessibilityIdentifier("undo")
+        Button { model.prac?.tools.toggle() } label: { icon("slider.horizontal.3", on: P.edit || hand) }
+          .accessibilityLabel("Practice tools: ball in hand, reset, edit").accessibilityValue(P.tools ? "expanded" : "collapsed").accessibilityIdentifier("tools")
+      }
+      if P.tools && aiming {
+        VStack(alignment: .trailing, spacing: 6) {
+          tool("Ball in Hand", on: hand) { model.toggleHand(); model.prac?.tools = false }
+          tool("Reset Rack") { model.resetRack() }
+          if model.freeTable { tool("Add / Remove Balls", on: P.edit) { model.setEdit(!P.edit) } }
+        }
+      }
+      if P.edit && aiming { tool("Done Editing") { model.setEdit(false) } }
+    }
+    .disabled(!aiming)
+  }
+  func icon(_ name: String, on: Bool = false) -> some View {
+    Image(systemName: name).font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44)
+      .foregroundStyle(on ? Color.black : Color(rgb: 0xec, 0xec, 0xee))
+      .background(RoundedRectangle(cornerRadius: 12).fill(on ? Color(rgb: 0xec, 0xec, 0xee) : Color(rgb: 0x1b, 0x1b, 0x1d).opacity(0.9)))
+      .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
+  }
+  func tool(_ t: String, on: Bool = false, _ act: @escaping () -> Void) -> some View {
+    Button(action: act) {
+      Text(t).font(.subheadline.weight(.semibold)).padding(.horizontal, 14).frame(minHeight: 44)
+        .foregroundStyle(on ? Color.black : Color(rgb: 0xec, 0xec, 0xee))
+        .background(Capsule().fill(on ? Color(rgb: 0xec, 0xec, 0xee) : Color(rgb: 0x1b, 0x1b, 0x1d).opacity(0.92)))
+        .overlay(Capsule().strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
+    }
+    .accessibilityAddTraits(on ? .isSelected : [])
   }
 }

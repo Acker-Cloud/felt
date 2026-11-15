@@ -154,6 +154,77 @@ final class TableModel {
     /* a career match (careerTerms): its event's calls and table, the event's own words */
     var call: CallConfig? = nil, spec: (table: String, shape: String?, pockets: String)? = nil, career = false, dress: Dress? = nil }
   private(set) var tmatch: TMatch?
+  /* settleSolo's practice: practiceJudge, the session's numbers, its words and cues */
+  private func settlePractice(_ before: Game, _ shot: RuleShot) {
+    if prac != nil { pushUndo(before) }
+    let next = engine.practiceJudge(before, shot), v = next.verdict!
+    potCount += v.potted.count
+    g = next; rolling = nil; spin = Spin(); v3Top2d = false
+    syncBalls()
+    guard var P = prac else { return }
+    P.shots += 1; P.pots += v.potted.count; if !v.potted.isEmpty { P.potting += 1 }
+    prac = P
+    if v.scratch { flashDue = ("Scratch", "Ball in hand anywhere", 1.3); msg = "Scratch. Ball in hand anywhere."; sound.cue("foul") }
+    else if v.cleared == true && !v.potted.isEmpty {
+      flashDue = ("Table cleared", "\(P.shots) shots, \(P.shots > 0 ? Int((100 * Double(P.potting) / Double(P.shots)).rounded()) : 0)% potting", 1.8)
+      msg = "Table cleared. Reset the rack or undo to go again."; sound.cue("win")
+    } else { msg = v.potted.isEmpty ? "Your shot." : "The \(v.potted.map(String.init).joined(separator: " and the ")) down. Your shot." }
+    aimAtNearest()
+  }
+  /* pushUndo: the layout before a shot, a reset or an edit */
+  private func pushUndo(_ gm: Game) {
+    guard var P = prac else { return }
+    P.undo.append(gm)
+    if P.undo.count > TableModel.UNDO_MAX { P.undo.removeFirst() }
+    prac = P
+  }
+  var canSolo: Bool { prac != nil && rolling == nil && stroke == nil }
+  /* undo: the layout before the last shot (or reset, or edit), cue ball and ball in hand included */
+  func undo() {
+    guard canSolo, var P = prac, let last = P.undo.popLast() else { return }
+    P.tools = false; prac = P
+    g = last; syncBalls(); aimAtNearest()
+    flashDue = ("Undone", "", 0.7); msg = "Undone. Your shot."
+  }
+  func resetRack() {
+    guard canSolo, let P = prac, let gm = g else { return }
+    pushUndo(gm)
+    var n = engine.newPractice(P.layout, seed: P.seed)
+    if gm.hand { n.hand = true; n.inHand = "table" }
+    g = n; prac?.tools = false
+    syncBalls(); randomOrient(); aimAtNearest()
+    flashDue = ("Reset", TableModel.PRACTICE_NAMES[P.layout] ?? "", 0.9)
+  }
+  /* the ball-in-hand toggle: on, the cue ball moves anywhere before every shot; off, it stays put (a rack's opening shot
+     goes back to the kitchen) */
+  func toggleHand() {
+    guard canSolo, var gm = g else { return }
+    gm.hand.toggle()
+    gm.inHand = gm.hand ? "table" : gm.breakShot ? "kitchen" : nil
+    g = gm; syncBalls()
+    msg = gm.hand ? "Ball in hand: drag the cue ball anywhere." : "Your shot."
+  }
+  func setEdit(_ on: Bool) {
+    guard freeTable else { return }
+    prac?.edit = on; prac?.tools = false
+    if on { flashDue = ("Add and remove balls", "Tap the cloth to drop the next ball, tap a ball to take it off", 1.8) }
+    msg = on ? "Editing: tap the cloth to drop the next ball, tap a ball to take it off." : "Your shot."
+  }
+  /* editAt: a tap in edit mode takes an object ball off, or drops the next number on free cloth */
+  func editAt(_ x: Double, _ y: Double) {
+    guard canSolo, let gm = g else { return }
+    let hit = gm.balls.first { $0.on && $0.n > 0 && JSMath.hypot($0.x - x, $0.y - y) < sim.BALL_R * 1.5 }
+    let n = hit.map { engine.removeBall(gm, $0.n) } ?? engine.addBall(gm, x, y)
+    guard let n else {
+      let full = engine.onTable(gm).count >= 15
+      flashDue = (full ? "All fifteen are out" : "No room there", full ? "" : "Keep clear of balls, cushions and pockets", 0.9)
+      return
+    }
+    pushUndo(gm)
+    let added = hit == nil ? engine.onTable(n).first { !engine.onTable(gm).contains($0) } : nil
+    g = n; syncBalls(); aimAtNearest()
+    msg = hit.map { "Took the \($0.n) off." } ?? "Dropped the \(added ?? 0)."
+  }
   /* audit F5: a CPU quick game the player has shot in (cpuGameLive) */
   @ObservationIgnored private var begun = false
   var cpuGameLive: Bool { begun && cpuLevel != nil && exhib == nil && tmatch == nil && g?.mode == nil && g?.winner == nil }
@@ -187,7 +258,14 @@ final class TableModel {
   @ObservationIgnored private var cpuBusy = false
   private(set) var cpuThinking = false
 
-  init(game: TableGame, cpu: String? = nil, exhib: [String]? = nil, exhibArch: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil, match: TMatch? = nil) {
+  /* practice (page 5s): the session's layout and seed, the undo stack (UNDO_MAX), its numbers, editing and the tools strip */
+  struct Practice { var layout: String, seed: UInt32, undo: [Game] = [], shots = 0, pots = 0, potting = 0, edit: Bool, tools = false }
+  static let UNDO_MAX = 50
+  var prac: Practice? = nil
+  static let PRACTICE_NAMES = ["8": "8-Ball Rack", "9": "9-Ball Rack", "heyball": "Chinese 8-Ball Rack", "scatter": "Free Table", "empty": "Empty Table"]
+  var freeTable: Bool { prac.map { $0.layout == "scatter" || $0.layout == "empty" } ?? false }
+
+  init(game: TableGame, cpu: String? = nil, practice: String? = nil, exhib: [String]? = nil, exhibArch: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil, match: TMatch? = nil) {
     self.game = game
     /* tourneyPlay: the player's next match, the opponent's level, the lag from the tournament's seed */
     var tm: TMatch? = match
@@ -196,7 +274,16 @@ final class TableModel {
       tm = TMatch(m: m, foe: foe.name, level: foe.level ?? "medium", arch: foe.arch, need: pts ? 1 : t.race, points: pts, race: t.race,
                       lag: cpuRng(Double(CareerLib.seedOf([String(t.seed), "lag", String(m)])))() < 0.5 ? 0 : 1, ruleset: t.ruleset)
     }
-    cpuLevel = tm?.level ?? (exhib == nil && party == nil ? cpu : nil)
+    cpuLevel = practice != nil ? nil : tm?.level ?? (exhib == nil && party == nil ? cpu : nil)
+    /* startPractice: a fresh seed, editing on for the empty table */
+    if let l = practice {
+      var P = Practice(layout: l, seed: UInt32.random(in: 0...0x7fffffff), edit: l == "empty")
+      /* test hooks: `-felt-seed n` the scatter's seed, `-felt-tools` the tools strip open */
+      let a = ProcessInfo.processInfo.arguments
+      if let i = a.firstIndex(of: "-felt-seed"), i + 1 < a.count, let n = UInt32(a[i + 1]) { P.seed = n }
+      if a.contains("-felt-tools") { P.tools = true }
+      prac = P
+    }
     self.exhib = exhib
     self.exhibArch = exhibArch
     self.party = party.map { Party(names: $0.names, wins: $0.names.map { _ in 0 }, ruleset: $0.ruleset) }
@@ -233,6 +320,14 @@ final class TableModel {
   func rerack() {
     abandonCpuGame()
     rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], [], [], []]; potCount = 0; banner = nil
+    if let P = prac {
+      g = engine.newPractice(P.layout, seed: P.seed)
+      syncBalls()
+      if P.edit { flashDue = ("Empty table", "Tap the cloth to drop a ball, tap a ball to take it off", 2.2); msg = "Empty table: tap the cloth to drop a ball, tap a ball to take it off." }
+      else { flashDue = ("Practice", "No fouls: it is always your shot", 1.5); msg = "Your shot." }
+      randomOrient(); aimAtNearest()
+      return
+    }
     if let k = rulesKind {
       /* newGame with the settings' rules, snooker's frames and carom's race and cushions */
       g = tmatch != nil ? tourneyGame(k) : k == "snooker" ? engine.snookerGame(frames: Prefs.snookerFrames, first: 0)
@@ -399,6 +494,7 @@ final class TableModel {
     gBefore = g
     guard let before = g else { return }
     let shot = RuleShot(r)
+    if before.mode == "practice" { settlePractice(before, shot); return }
     let shooter = before.turn, next = engine.judge(before, shot)
     potCount += next.verdict?.potted.count ?? 0
     if let gm0 = gBefore, gm0.turn < 4 { pottedBy[gm0.turn] += next.verdict?.potted.filter { $0 > 0 } ?? [] }
@@ -870,7 +966,8 @@ final class TableModel {
   /* railNext (6b2): the ball to play next on a human's turn while aiming. 9, 10 and rotation: the ball on; 8-ball,
      Chinese 8-ball and 14.1: the ball the aim meets first when it is a legal target */
   func railNext() -> Int? {
-    guard let gm = g, gm.winner == nil, rolling == nil, stroke == nil, !cpuTurn, POCKET_KINDS.contains(gm.kind) else { return nil }
+    /* none in practice (or any solo mode) */
+    guard let gm = g, gm.mode == nil, gm.winner == nil, rolling == nil, stroke == nil, !cpuTurn, POCKET_KINDS.contains(gm.kind) else { return nil }
     let lt = engine.legalTargets(gm)
     if !is8(gm.kind) && gm.kind != "straight" { return lt.first }
     guard let c = cue else { return nil }

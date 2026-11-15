@@ -442,7 +442,8 @@ struct TableCanvas: View {
     spans = spans.flatMap { $0[0] < len / 2 && $0[1] > len / 2 ? [[$0[0], len / 2], [len / 2, $0[1]]] : [$0] }
     let left = spans.filter { ($0[0] + $0[1]) / 2 < len / 2 }.sorted { $0[1] > $1[1] }, right = spans.filter { ($0[0] + $0[1]) / 2 >= len / 2 }.sorted { $0[0] < $1[0] }
     /* upright the screen's left is the table's y = 0 side; on its side, x = 0 */
-    let seats: [(Int, [Double]?)] = [(0, left.first), (1, right.first)]
+    /* practice has no seats (hudSolo: turnChip hidden) */
+    let seats: [(Int, [Double]?)] = g.mode == "practice" ? [] : [(0, left.first), (1, right.first)]
     let next = model.railNext()
     for (p, span) in seats {
       guard let span else { continue }
