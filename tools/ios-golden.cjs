@@ -30,10 +30,14 @@ function loadFd() {
   const pw = [['clamp(power, 0, 1) ** POWER_EXP', 'Math.pow(clamp(power, 0, 1), POWER_EXP)'],
     ['clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1) ** (1 / POWER_EXP)', 'Math.pow(clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1), 1 / POWER_EXP)']];
   for (const [a, b] of pw) { if (!src.includes(a)) throw new Error('ios-golden: sim changed, update the pow rewrite: ' + a); src = src.replace(a, b); }
+  /* the career engine's constants, which its IIFE keeps to itself: read out through lib, in this copy only */
+  const libAt = '    lib: { hashStr, seedOf,';
+  if (!src.includes(libAt)) throw new Error('ios-golden: Career.lib moved');
+  src = src.replace(libAt, '    lib: { __data: () => ({ ATTRS, ARCH, WEIGHTS, BRK_ADV, SPECIALIST: [...SPECIALIST], NAT, NICKS, AV_COLS, POP }), hashStr, seedOf,');
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -79,7 +83,7 @@ function build() {
   for (let i = 0; i < 6000; i++) {
     const s = 10 ** (Math.floor(rnd() * 9) - 6), x = (rnd() - 0.5) * 2 * s * (i % 3 === 0 ? 30 : 1), y = rnd() * s * 5, p = i % 5 === 0 ? rnd() * 3 : 1.7, c = rnd() * 2 - 1;
     lines.push([x, y, p, c, F.sin(x), F.cos(x), F.tan(x), F.atan(x), F.acos(c), F.exp(-y * 1.088), F.exp(x), F.pow(y, p), F.pow(y, 1 / p),
-      Math.hypot(x, y), Math.hypot(x, y, c), F.atan2(c, x), F.asin(c), F.tanh(x), F.atanh(c * 0.999), F.log1p(y - 0.3), F.expm1(x)].map(hx).join(' '));
+      Math.hypot(x, y), Math.hypot(x, y, c), F.atan2(c, x), F.asin(c), F.tanh(x), F.atanh(c * 0.999), F.log1p(y - 0.3), F.expm1(x), F.log(y + 1e-3), F.log(Math.abs(x) + 0.5)].map(hx).join(' '));
   }
   const math = lines.join('\n') + '\n';
 
@@ -391,7 +395,60 @@ function build() {
     /* every option state too */
     G.steps.forEach((st, k) => { if (st.out.option && st.out.winner === null) cpu.push({ gi, k, level: 'medium', option: S.cpuOption(at(k), 'medium') }); });
   });
-  return { math, golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
+  /* the career library (quick tournament, 6f): generated players, the match model, brackets played through. Its
+     own stream. CareerData.swift is the page's constants as Swift, written from the page */
+  const L = S.Career.lib, D = L.__data();
+  let cseed = 777;
+  const crnd = () => { cseed = (Math.imul(cseed, 1103515245) + 12345) >>> 0; return cseed / 4294967296; };
+  const names = new Set(), players = [];
+  for (const id of [...Array(80).keys()].map(i => i + 1).concat([301, 302, 303, 304, 305])) players.push(L.genPlayer(4242, id, names));
+  const P = p => ({ at: p.base, pref: p.disc });
+  const DISCS = ['8', '9', '10', 'straight', 'rotation', 'snooker', 'carom', 'bumper', 'heyball'];
+  const models = [];
+  for (let i = 0; i < 300; i++) {
+    const a = players[Math.floor(crnd() * players.length)], b = players[Math.floor(crnd() * players.length)], disc = DISCS[Math.floor(crnd() * DISCS.length)];
+    const race = disc === 'straight' ? [25, 50, 100][i % 3] : disc === 'carom' ? [5, 10, 15][i % 3] : 1 + (i % 7), seed = Math.floor(crnd() * 4294967296);
+    const adj = i % 4 === 0 ? Math.round((crnd() - 0.5) * 16) : 0, m = L.playModel(Object.assign(P(a), { adj }), P(b), disc, race, seed);
+    models.push({ a: a.id, b: b.id, adj, disc, race, seed, s: m.s, first: m.first });
+  }
+  const brackets = [];
+  for (const fmt of ['single', 'double']) for (const n of [3, 4, 5, 8, 12, 16]) {
+    const T = L.makeBracket(fmt, n), f = [...Array(n).keys()].map(i => 100 + i), res = T.M.map(() => null), steps = [];
+    for (let guard = 0; guard < 200; guard++) {
+      const c = L.ctxOf(T, f, res), st = T.M.map((_, m) => L.outcome(c, m));
+      steps.push(st.map(o => [o.st, o.a === undefined ? -2 : o.a === null ? -1 : o.a, o.b === undefined ? -2 : o.b === null ? -1 : o.b, o.w === undefined ? -2 : o.w === null ? -1 : o.w]));
+      const ready = st.findIndex(o => o.st === 'ready');
+      if (ready < 0) break;
+      const aw = crnd() < 0.5;
+      res[ready] = aw ? [2, Math.floor(crnd() * 2)] : [Math.floor(crnd() * 2), 2];
+    }
+    brackets.push({ fmt, n, M: T.M.map(x => ({ a: x.a, b: x.b, br: x.br, rd: x.rd, dep: x.dep, st: x.st === undefined ? null : x.st, el: x.el === undefined ? null : x.el, fin: !!x.fin, cond: x.cond || null, of: x.of === undefined ? null : x.of })), steps, res });
+  }
+  const career = JSON.stringify({ seed: 4242, players, models, brackets, hashes: ['', 'a', 'felt', 'Zhao|9|p'].map(x => [x, L.hashStr(x)]) });
+  const q = v => JSON.stringify(v);
+  const careerData = `/* GENERATED by tools/ios-golden.cjs from index.html's career engine (its constants, sim 1 career region).
+   Do not edit: change the page and re-run the tool; tests/ios-check.cjs fails while this is stale. */
+public enum CareerData {
+  public static let ATTRS: [String] = ${q(D.ATTRS)}
+  public static let ARCH: [(id: String, name: String, d: [String: Double])] = [
+${D.ARCH.map(a => `    (${q(a.id)}, ${q(a.name)}, [${Object.entries(a.d).map(([k, v]) => `${q(k)}: ${v}`).join(', ') || ':'}]),`).join('\n')}
+  ]
+  /* rating weights by discipline, each in the page's key order (the sum's order) */
+  public static let WEIGHTS: [String: [(String, Double)]] = [
+${Object.entries(D.WEIGHTS).map(([k, w]) => `    ${q(k)}: [${Object.entries(w).map(([a, v]) => `(${q(a)}, ${v})`).join(', ')}],`).join('\n')}
+  ]
+  public static let BRK_ADV: [String: Double] = [${Object.entries(D.BRK_ADV).map(([k, v]) => `${q(k)}: ${v}`).join(', ')}]
+  public static let SPECIALIST: Set<String> = ${q(D.SPECIALIST)}
+  public static let POP = ${D.POP}
+  /* nationalities: id, name, first and family names, cities, weight, leanings (in the page's key order) */
+  public static let NAT: [(id: String, name: String, first: [String], last: [String], cities: [String], w: Double, lean: [(String, Double)])] = [
+${D.NAT.map(n => `    (${q(n.id)}, ${q(n.name)}, ${q(n.first)}, ${q(n.last)}, ${q(n.cities)}, ${n.w}, [${Object.entries(n.lean).map(([k, v]) => `(${q(k)}, ${v})`).join(', ')}]),`).join('\n')}
+  ]
+  public static let NICKS: [String] = ${q(D.NICKS)}
+  public static let AV_COLS: [String] = ${q(D.AV_COLS)}
+}
+`;
+  return { math, career, careerData, golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
 }
 /* tests/ios-check.cjs rebuilds both in memory and requires the committed files to match */
 module.exports = { build, OUT, loadFd };
@@ -402,6 +459,8 @@ if (require.main === module) {
   fs.writeFileSync(path.join(OUT, 'golden.json'), b.golden);
   fs.writeFileSync(path.join(OUT, 'rules.json'), b.rules);
   fs.writeFileSync(path.join(OUT, 'cpu.json'), b.cpu);
+  fs.writeFileSync(path.join(OUT, 'career.json'), b.career);
+  fs.writeFileSync(path.join(__dirname, '..', 'ios', 'FeltSim', 'Sources', 'FeltSim', 'CareerData.swift'), b.careerData);
   const steps = b.cases.reduce((a, c) => a + c.result.steps, 0);
   console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${b.games.length} games (${b.games.reduce((a, g) => a + g.steps.length, 0)} judgements), ${b.cpuCases.length} CPU decisions, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);
 }

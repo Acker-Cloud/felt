@@ -443,6 +443,42 @@ public enum JSMath {
   }
   private static let LN2_HI = 0x1.62e42feep-1, LN2_LO = 0x1.a39ef35793c76p-33
   private static let LP = [0x1.5555555555593p-1, 0x1.999999997fa04p-2, 0x1.2492494229359p-2, 0x1.c71c51d8e78afp-3, 0x1.7466496cb03dep-3, 0x1.39a09d078c69fp-3, 0x1.2f112df3e5244p-3]
+  /* e_log.c: __ieee754_log (FdLibm.java's Log) */
+  public static func log(_ x0: Double) -> Double {
+    var x = x0, hx = hi(x), k: Int32 = 0
+    let lx = lo(x)
+    if hx < 0x0010_0000 {
+      if ((hx & SIGNIF) | lx) == 0 { return -.infinity }
+      if hx < 0 { return .nan }
+      k -= 54; x *= 0x1.0p54; hx = hi(x)
+    }
+    if hx >= 0x7ff0_0000 { return x + x }
+    k += (hx >> 20) - 1023
+    hx &= 0x000f_ffff
+    var i = (hx &+ 0x95f64) & 0x10_0000
+    x = withHi(x, hx | (i ^ 0x3ff0_0000))
+    k += i >> 20
+    let f = x - 1.0
+    if (0x000f_ffff & (2 &+ hx)) < 3 {
+      if f == 0.0 { if k == 0 { return 0.0 }; let dk = Double(k); return dk * LN2_HI + dk * LN2_LO }
+      let R = f * f * (0.5 - 0.33333333333333333 * f)
+      if k == 0 { return f - R }
+      let dk = Double(k); return dk * LN2_HI - ((R - dk * LN2_LO) - f)
+    }
+    let s = f / (2.0 + f), dk = Double(k), z = s * s
+    i = hx &- 0x6147a
+    let w = z * z, j = 0x6b851 &- hx
+    let t1 = w * (LP[1] + w * (LP[3] + w * LP[5])), t2 = z * (LP[0] + w * (LP[2] + w * (LP[4] + w * LP[6])))
+    i |= j
+    let R = t2 + t1
+    if i > 0 {
+      let hfsq = 0.5 * f * f
+      if k == 0 { return f - (hfsq - s * (hfsq + R)) }
+      return dk * LN2_HI - ((hfsq - (s * (hfsq + R) + dk * LN2_LO)) - f)
+    }
+    if k == 0 { return f - s * (f - R) }
+    return dk * LN2_HI - ((s * (f - R) - dk * LN2_LO) - f)
+  }
   public static func log1p(_ x: Double) -> Double {
     var hfsq: Double, f = 0.0, c = 0.0, s: Double, z: Double, R: Double, u: Double, k: Int32 = 1, hu: Int32 = 0
     let hx = hi(x), ax = hx & SIGNIF

@@ -24,6 +24,10 @@ check('ios goldens match the current sim (re-run node tools/ios-golden.cjs and s
 check('ios math fixture matches tools/fdlibm.cjs', math === b.math);
 check('ios rules goldens match the current rules (sim 1e)', rules === b.rules, rules ? '' : 'rules.json missing');
 check('ios CPU goldens match the current CPU (sim 1f)', cpu === b.cpu, cpu ? '' : 'cpu.json missing');
+/* the career library (the quick tournament's brackets, match model and players) and its constants, generated as Swift */
+const careerData = (() => { try { return fs.readFileSync(path.join(__dirname, '..', 'ios', 'FeltSim', 'Sources', 'FeltSim', 'CareerData.swift'), 'utf8'); } catch { return null; } })();
+check('ios career goldens and CareerData.swift match the career engine', read('career.json') === b.career && careerData === b.careerData,
+  read('career.json') === b.career ? 'CareerData.swift is stale' : 'career.json is stale');
 check('the goldens cover every ported table and pot balls', b.tables.length === 10 && b.cases.length >= 150 && b.cases.some(c => c.result.potted.length > 3)
   && ['octagon', 'rect'].every(sh => b.cases.some(c => c.table === 'bumper' && c.shape === sh && c.result.potted.length)), `${b.tables.length} tables, ${b.cases.length} shots`);
 check('the rules goldens play bumper pool to a win on both shapes, with a foul\'s penalty ball', ['octagon', 'rect'].every(sh => b.games.some(g => g.kind === 'bumper' && g.shape === sh

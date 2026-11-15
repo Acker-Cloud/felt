@@ -396,6 +396,42 @@ function log1p(x) {
   if (k === 0) return f - (hfsq - s * (hfsq + R));
   return k * LN2HI - ((hfsq - (s * (hfsq + R) + (k * LN2LO + c))) - f);
 }
+/* e_log.c: __ieee754_log (FdLibm.java's Log), the career engine's gauss and levelOf */
+function log(x) {
+  let hx = hi(x), k = 0;
+  const lx = lo(x);
+  if (hx < 0x00100000) {
+    if (((hx & SIGNIF) | lx) === 0) return -Infinity;
+    if (hx < 0) return NaN;
+    k -= 54; x *= 2 ** 54; hx = hi(x);
+  }
+  if (hx >= EXP_BITS) return x + x;
+  k += (hx >> 20) - 1023;
+  hx &= 0x000fffff;
+  let i = (hx + 0x95f64) & 0x100000;
+  x = withHi(x, hx | (i ^ 0x3ff00000));
+  k += i >> 20;
+  const f = x - 1.0;
+  if ((0x000fffff & (2 + hx)) < 3) {
+    if (f === 0.0) { if (k === 0) return 0.0; const dk = k; return dk * LN2HI + dk * LN2LO; }
+    const R = f * f * (0.5 - 0.33333333333333333 * f);
+    if (k === 0) return f - R;
+    const dk = k; return dk * LN2HI - ((R - dk * LN2LO) - f);
+  }
+  const s = f / (2.0 + f), dk = k, z = s * s;
+  i = hx - 0x6147a;
+  const w = z * z, j = 0x6b851 - hx;
+  const t1 = w * (LP[1] + w * (LP[3] + w * LP[5])), t2 = z * (LP[0] + w * (LP[2] + w * (LP[4] + w * LP[6])));
+  i |= j;
+  const R = t2 + t1;
+  if (i > 0) {
+    const hfsq = 0.5 * f * f;
+    if (k === 0) return f - (hfsq - s * (hfsq + R));
+    return dk * LN2HI - ((hfsq - (s * (hfsq + R) + dk * LN2LO)) - f);
+  }
+  if (k === 0) return f - s * (f - R);
+  return dk * LN2HI - ((s * (f - R) - dk * LN2LO) - f);
+}
 const Q = [-hf(0x111111111110f4, -57), hf(0x1a01a019fe5585, -62), -hf(0x14ce199eaadbb7, -66), hf(0x10cfca86e65239, -70), -hf(0x1afdb76e09c32d, -75)];
 function expm1(x) {
   let y, hi_, lo_, c = 0, t, e, hxs, hfx, r1, k;
@@ -466,7 +502,7 @@ function atanh(x) {
 function fdMath(base = Math) {
   const M = Object.create(null);
   for (const k of Object.getOwnPropertyNames(base)) M[k] = base[k];
-  Object.assign(M, { sin, cos, tan, atan, acos, exp, pow, asin, atan2, tanh, atanh, log1p, expm1 });
+  Object.assign(M, { sin, cos, tan, atan, acos, exp, pow, asin, atan2, tanh, atanh, log1p, expm1, log });
   return M;
 }
-module.exports = { sin, cos, tan, atan, acos, exp, pow, asin, atan2, tanh, atanh, log1p, expm1, fdMath };
+module.exports = { sin, cos, tan, atan, acos, exp, pow, asin, atan2, tanh, atanh, log1p, expm1, log, fdMath };
