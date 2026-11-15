@@ -303,3 +303,25 @@ extension CareerEngine {
   }
   public func weekOfDay(_ day: Int) -> Int { weekOf(day) }
 }
+
+/* Career.rivals(), headToHead(id) and player(id), as the page's: the rivals by rivalList, each with its head-to-head
+   (S.h2h: won, lost, finals won, finals lost, upsets, upset by, close, streak, last season) */
+extension CareerEngine {
+  public func rivals() -> [JV] {
+    rivalList(10).map { id in
+      let h = S["h2h"]![String(id)]!
+      return ["id": .n(id), "name": cardOf(id)["name"]!, "score": .n(rivalScore(h)), "won": h[0]!, "lost": h[1]!, "finalsWon": h[2]!, "finalsLost": h[3]!,
+              "upsets": h[4]!, "upsetBy": h[5]!, "close": h[6]!, "streak": h[7]!, "lastSeason": h[8] ?? .null]
+    }
+  }
+  public func headToHead(_ id: Int) -> JV {
+    guard let h = S["h2h"]![String(id)] else { return .null }
+    return ["won": h[0]!, "lost": h[1]!, "finalsWon": h[2]!, "finalsLost": h[3]!, "upsets": h[4]!, "upsetBy": h[5]!, "close": h[6]!, "streak": h[7]!]
+  }
+  public func player(_ id: Int) -> JV {
+    guard id == Self.HUMAN || S["pop"]!["m"]![String(id)] != nil else { return .null }
+    var c = cardOf(id)
+    c["ai"] = id == Self.HUMAN ? .null : aiProfileOf(id)
+    return c
+  }
+}

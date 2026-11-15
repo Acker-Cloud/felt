@@ -27,6 +27,15 @@ import SwiftUI
         if let ev = E.S["cal"]!.a.first(where: { $0["start"]!.i > day && E.eligibility($0).isEmpty }) { E.enter(ev["id"]!.s) }
         if E.advance(week: true) == "match" { break }
       }
+      /* `-felt-career-rivals`: 40 steps on (a due match simulated, else an eligible event entered and a week) */
+      if ProcessInfo.processInfo.arguments.contains("-felt-career-rivals") {
+        for _ in 0..<40 {
+          if E.nextMatch() != .null { E.simMatch(); continue }
+          let day = E.S["day"]!.i
+          if let ev = E.S["cal"]!.a.first(where: { $0["start"]!.i > day && E.eligibility($0).isEmpty }) { E.enter(ev["id"]!.s) }
+          E.advance(week: true)
+        }
+      }
       return
     }
     if let id = E.listSlots().first(where: { $0["active"] == true && $0["status"] != "corrupt" })?["id"]?.str { E.load(id) }
@@ -440,6 +449,152 @@ struct CareerBracket: View {
   }
 }
 
+/* PAGES.rivals: Rivalry Objectives (the open ones, each its words and pay), then the rivals (won and lost, finals, at
+   the hill; the streak), each opening the player's page */
+struct CareerRivals: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, rv = E.rivals(), obj = E.S["obj"]!.a.filter { !truthy($0["done"]) }
+    List {
+      CareerTitle(kick: "Career", title: "Rivals")
+      if !obj.isEmpty {
+        Section {
+          ForEach(Array(obj.enumerated()), id: \.offset) { _, o in
+            HStack(alignment: .firstTextBaseline) {
+              Text(o["text"]?.str ?? "").font(.system(size: 17)).fixedSize(horizontal: false, vertical: true)
+              Spacer(minLength: 12)
+              Text(CareerWords.crWords(o["pay"]?.d ?? 0)).font(.system(size: 15)).foregroundStyle(.secondary).monospacedDigit()
+            }
+          }
+        } header: { CareerPageHead(t: "Rivalry Objectives") }
+        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+      }
+      Section {
+        if rv.isEmpty { Text("Rivals come from meeting the same players again: finals, upsets and close matches count most.").font(.system(size: 15)).foregroundStyle(.secondary) }
+        ForEach(Array(rv.enumerated()), id: \.offset) { _, r in
+          let fw = r["finalsWon"]!.i, fl = r["finalsLost"]!.i, cl = r["close"]!.i, st = r["streak"]!.i
+          NavigationLink { CareerPlayer(store: store, id: r["id"]!.i) } label: {
+            HStack {
+              VStack(alignment: .leading, spacing: 1) {
+                Text(r["name"]!.s).font(.system(size: 17))
+                Text("Won \(r["won"]!.i), lost \(r["lost"]!.i)" + (fw + fl > 0 ? ", finals \(fw)-\(fl)" : "") + (cl > 0 ? ", \(cl) at the hill" : ""))
+                  .font(.system(size: 15)).foregroundStyle(.secondary).lineLimit(1)
+              }
+              Spacer()
+              Text(st > 0 ? "W\(st)" : st < 0 ? "L\(-st)" : "").font(.system(size: 15)).foregroundStyle(.secondary).monospacedDigit()
+            }
+          }
+        }
+      } header: { CareerPageHead(t: "Rivals") }
+      .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+    }
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+  }
+}
+/* setHead(kick, title): the page's kicker over its large title, as the list's first row */
+struct CareerTitle: View {
+  let kick: String, title: String
+  var body: some View {
+    Section {
+      VStack(alignment: .leading, spacing: 2) {
+        Text(kick).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+        Text(title.replacingOccurrences(of: "-", with: "\u{2011}")).font(.system(size: 28, weight: .bold)).accessibilityLabel(title).accessibilityAddTraits(.isHeader)
+      }
+      .padding(.top, 6).listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)).listRowBackground(Color.clear)
+    }
+  }
+}
+struct CareerPageHead: View {
+  let t: String
+  var body: some View { Text(t).font(.system(size: 13)).foregroundStyle(.secondary).textCase(nil) }
+}
+/* PAGES.player: the card (avatar, name and nickname, nation, town and age; Rating, Tier, Titles; Plays, As a CPU,
+   Record), Head to Head (matches, finals, upsets), Attributes (each a value over its meter) */
+struct CareerPlayer: View {
+  @Bindable var store: CareerStore
+  let id: Int
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, p = E.player(id), h = E.headToHead(id), names = CareerStore.T("ATTR_NAMES")
+    let dim = Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)
+    List {
+      CareerTitle(kick: p == .null ? "Player" : p["archName"]?.str ?? "Player", title: p == .null ? "Not Found" : p["name"]!.s)
+      if p == .null { Section { Text("No such player.").foregroundStyle(.secondary) } }
+      else {
+        Section {
+          VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+              CareerWords.avatar(p["name"]!.s, p["avatar"])
+              VStack(alignment: .leading, spacing: 1) {
+                Text(p["name"]!.s + (p["nick"]?.str.flatMap { $0.isEmpty ? nil : " \"\($0)\"" } ?? "")).font(.system(size: 17, weight: .semibold))
+                Text("\(CareerWords.natName(p["nat"]!.s)), \(p["town"]?.str ?? ""), age \(p["age"]?.i ?? 0)").font(.system(size: 13)).foregroundStyle(dim)
+              }
+            }
+            HStack(alignment: .top) { fact("Rating", "\(p["rating"]?.i ?? 0)"); fact("Tier", "\(p["tier"]?.i ?? 0)"); fact("Titles", "\(p["titles"]?.i ?? 0)") }
+            VStack(spacing: 6) {
+              line("Plays", "\(CareerStore.gameName(p["disc"]?.str ?? "")), \(p["hand"]?.str ?? "") handed")
+              line("As a CPU", p["ai"]?["level"]?.str ?? "-")
+              line("Record", "\(p["w"]?.i ?? 0)-\(p["l"]?.i ?? 0)")
+            }
+          }
+          .padding(.vertical, 6)
+        }
+        if h != .null {
+          Section {
+            row("Matches", "\(h["won"]!.i)-\(h["lost"]!.i)")
+            row("Finals", "\(h["finalsWon"]!.i)-\(h["finalsLost"]!.i)")
+            HStack {
+              VStack(alignment: .leading, spacing: 1) {
+                Text("Upsets").font(.system(size: 17))
+                Text("You beat a stronger player / a weaker one beat you").font(.system(size: 15)).foregroundStyle(.secondary)
+              }
+              Spacer()
+              Text("\(h["upsets"]!.i) / \(h["upsetBy"]!.i)").font(.system(size: 15)).foregroundStyle(.secondary).monospacedDigit()
+            }
+          } header: { CareerPageHead(t: "Head to Head") }
+          .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+        }
+        Section {
+          ForEach(CareerData.ATTRS, id: \.self) { k in
+            let v = p["attrs"]?[k]?.i ?? 0
+            HStack {
+              Text(names[k]?.str ?? k).font(.system(size: 17))
+              Spacer()
+              VStack(alignment: .trailing, spacing: 3) {
+                Text("\(v)").font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                ZStack(alignment: .leading) {
+                  Capsule().fill(Color.white.opacity(0.12))
+                  Capsule().fill(Color(rgb: 0x3d, 0xdc, 0x84)).frame(width: 96 * CGFloat(min(100, max(0, v))) / 100)
+                }
+                .frame(width: 96, height: 4)
+              }
+              .accessibilityElement(children: .ignore).accessibilityLabel("\(v) of 100")
+            }
+          }
+        } header: { CareerPageHead(t: "Attributes") }
+        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+      }
+    }
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+  }
+  private func fact(_ k: String, _ v: String) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(k).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+      Text(v).font(.system(size: 17, weight: .bold)).monospacedDigit()
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+  private func line(_ k: String, _ v: String) -> some View {
+    HStack { Text(k).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)); Spacer(); Text(v) }.font(.system(size: 15))
+  }
+  private func row(_ k: String, _ v: String) -> some View {
+    HStack { Text(k).font(.system(size: 17)); Spacer(); Text(v).font(.system(size: 15)).foregroundStyle(.secondary).monospacedDigit() }
+  }
+}
+
 struct CareerHubGroups: View {
   @Bindable var store: CareerStore
   var onPractice: () -> Void
@@ -466,6 +621,7 @@ struct CareerHubGroups: View {
     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
     Section {
       NavigationLink { CareerStats(store: store) } label: { row("Stats and Records", "\(st["won"]?.i ?? 0) won of \(st["matches"]?.i ?? 0)") }
+      NavigationLink { CareerRivals(store: store) } label: { row("Rivals", "Head to head") }
       NavigationLink { CareerSponsors(store: store) } label: { row("Sponsors and Offers", "\(sponsors) contract(s)", val: offers > 0 ? "\(offers) new" : nil) }
       NavigationLink { CareerShop(store: store) } label: { row("Shop", "Cosmetics only", val: CareerWords.crWords(me["money"]!.d)) }
       Button(action: onPractice) { row("Practice Drills", "\(store.practiceToday) of 3 sessions today", chevron: true) }.tint(.primary).accessibilityIdentifier("cvPractice")
@@ -552,6 +708,8 @@ struct CareerHub: View {
     /* `-felt-career-bracket`: the next match's event's bracket in place of the hub (a test hook) */
     if ProcessInfo.processInfo.arguments.contains("-felt-career-bracket"), let id = nm["event"]?.str {
       CareerBracket(store: store, id: id)
+    } else if ProcessInfo.processInfo.arguments.contains("-felt-career-rivals") {
+      if let r = ProcessInfo.processInfo.arguments.contains("-felt-career-player") ? E.rivals().first?["id"]?.i : nil { CareerPlayer(store: store, id: r) } else { CareerRivals(store: store) }
     } else {
     List {
       Section {
