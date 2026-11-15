@@ -73,7 +73,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf', 'newPractice', 'practiceJudge', 'scatter', 'addBall', 'removeBall', 'rng', 'canDrop', 'onTable'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -688,7 +688,46 @@ ${D.NAT.map(n => `    (${q(n.id)}, ${q(n.name)}, ${q(n.first)}, ${q(n.last)}, ${
         m: run.m.map(arr), rot: Array.from(run.rot[run.rot.length - 1]) });
     }
   }
-  return { math, career, careerData, jv, hero: JSON.stringify({ heroes }), v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
+  /* sim 1e+, practice: rng's draws, every layout's rack (the scatter by seed) on each pool table, practiceJudge on a
+     shot's result (a pot, a scratch, the table cleared, the toggle on), and the free table's editing (addBall over a
+     grid from the empty table, then removeBall) */
+  const practice = { draws: [], tables: [] };
+  {
+    const bits = v => hx(v), lay = bs => bs.map(b => [b.n, bits(b.x), bits(b.y), b.on]);
+    for (const sd of [1, 2, 42, 4000000000]) { const r = S.rng(sd); practice.draws.push([sd, ...Array.from({ length: 6 }, () => bits(r()))]); }
+    for (const T of [['7', null, 'regulation'], ['9', null, 'generous'], ['heyball', null, 'regulation']]) {
+      S.setPockets(T[2]); S.setTable(T[0], T[1]);
+      /* newGame moves the table (a heyball game to its own, any other off it), so each rack is laid where the page lays
+         it: Chinese 8-ball's on its table (beginSolo sets it), the rest on the pool tables */
+      const racks = [], hey = T[0] === 'heyball';
+      for (const [layout, seed] of hey ? [['heyball', 1]] : [['8', 1], ['9', 1], ['scatter', 1], ['scatter', 2], ['scatter', 42], ['scatter', 4000000000], ['empty', 1], ['nonsense', 3]]) {
+        S.setPockets(T[2]); S.setTable(T[0], T[1]);
+        const g = S.newPractice(layout, seed);
+        racks.push({ layout, seed, kind: g.kind, glayout: g.layout, inHand: g.inHand, breakShot: g.breakShot, balls: lay(g.balls) });
+      }
+      if (hey) { practice.tables.push({ table: T, racks, judged: [], edits: [] }); continue; }
+      /* the judge: from the scatter (seed 2) a pot of the 3, a scratch with a pot, everything down, and the toggle on */
+      const g0 = S.newPractice('scatter', 2), mv = g0.balls.map(b => Object.assign({}, b, { x: b.x + 0.01, vx: 0.5 }));
+      const judged = [];
+      for (const [potted, hand] of [[[3], false], [[0, 5], false], [g0.balls.filter(b => b.n > 0).map(b => b.n), false], [[], true]]) {
+        const g = Object.assign({}, g0, { hand, dry: 2 }), balls = mv.map(b => Object.assign({}, b, { on: !potted.includes(b.n) }));
+        const n = S.practiceJudge(g, { balls, potted });
+        judged.push({ potted, hand, inHand: n.inHand, dry: n.dry, shots: n.shots, turn: n.turn, breakShot: n.breakShot, v: [n.verdict.potted, n.verdict.scratch, n.verdict.cleared], balls: lay(n.balls) });
+      }
+      /* editing: drops over a grid from the empty table, then two removals and a bad one */
+      let g = S.newPractice('empty', 1);
+      const edits = [];
+      for (let i = 0; i < 6; i++) for (let j = 0; j < 4; j++) {
+        const x = S.TL * (0.04 + 0.18 * i), y = S.TW * (0.08 + 0.28 * j), n = S.addBall(g, x, y);
+        edits.push(['add', bits(x), bits(y), n ? S.onTable(n) : null]);
+        if (n) g = n;
+      }
+      for (const k of [3, 0, 99, 1]) { const n = S.removeBall(g, k); edits.push(['remove', k, n ? S.onTable(n) : null]); if (n) g = n; }
+      edits.push(['final', lay(g.balls)]);
+      practice.tables.push({ table: T, racks, judged, edits });
+    }
+  }
+  return { math, career, careerData, jv, practice: JSON.stringify(practice), hero: JSON.stringify({ heroes }), v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
 }
 /* tests/ios-check.cjs rebuilds both in memory and requires the committed files to match */
 module.exports = { build, OUT, loadFd };
@@ -703,6 +742,7 @@ if (require.main === module) {
   fs.writeFileSync(path.join(OUT, 'jv.json'), b.jv);
   fs.writeFileSync(path.join(OUT, 'v3.json'), b.v3);
   fs.writeFileSync(path.join(OUT, 'hero.json'), b.hero);
+  fs.writeFileSync(path.join(OUT, 'practice.json'), b.practice);
   fs.writeFileSync(path.join(__dirname, '..', 'ios', 'FeltSim', 'Sources', 'FeltSim', 'CareerData.swift'), b.careerData);
   const steps = b.cases.reduce((a, c) => a + c.result.steps, 0);
   console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${b.games.length} games (${b.games.reduce((a, g) => a + g.steps.length, 0)} judgements), ${b.cpuCases.length} CPU decisions, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);

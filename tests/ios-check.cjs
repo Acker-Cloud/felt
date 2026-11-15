@@ -29,6 +29,7 @@ const careerData = (() => { try { return fs.readFileSync(path.join(__dirname, '.
 check('ios JV goldens match V8 (Number#toString, JSON.stringify)', read('jv.json') === b.jv, read('jv.json') ? '' : 'jv.json missing');
 check('ios 3D camera goldens match the page (4o: poses, projection, overview)', read('v3.json') === b.v3, read('v3.json') ? 'v3.json is stale' : 'v3.json missing');
 check('ios hero goldens match the page (1n, 4m: the shots and their recorded rolls)', read('hero.json') === b.hero, read('hero.json') ? 'hero.json is stale' : 'hero.json missing');
+check('ios practice goldens match the page (1e+: the racks, the scatter, the judge, the editing)', read('practice.json') === b.practice, read('practice.json') ? 'practice.json is stale' : 'practice.json missing');
 check('ios career goldens and CareerData.swift match the career engine', read('career.json') === b.career && careerData === b.careerData,
   read('career.json') === b.career ? 'CareerData.swift is stale' : 'career.json is stale');
 check('the goldens cover every ported table and pot balls', b.tables.length === 10 && b.cases.length >= 150 && b.cases.some(c => c.result.potted.length > 3)

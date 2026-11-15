@@ -108,6 +108,8 @@ public struct Verdict: Equatable, Sendable {
   public var carom: CaromVerdict? = nil
   /* bumper pool's (sim 1g) */
   public var bumper: BumperVerdict? = nil
+  /* practice's: no object ball left on the table */
+  public var cleared: Bool? = nil
 }
 /* the opponent's balls that went down for them, the balls returned, the foul's penalty ball, the opening shot played */
 public struct BumperVerdict: Equatable, Sendable { public var gave: [Int], back: [Int], dropped: Int?, opening: Int }
@@ -157,6 +159,8 @@ public struct Game: Sendable {
   public var pushAvail = false, breaker = 0, calls: [CallRec] = []
   public var score: [Int]? = nil, race: Int? = nil, high: [Int]? = nil, run: Int? = nil
   public var mode: String? = nil
+  /* practice's (sim 1e+): its layout ('8', '9', 'heyball', 'scatter', 'empty'), the scatter's seed, the ball-in-hand toggle */
+  public var layout: String? = nil, seed: UInt32 = 0, hand = false
   /* snooker's frame (sim 1j): nil on the pocket games */
   public var snk: SnkState? = nil
   /* carom's (sim 1k): the shooter's cue ball, the cushions a point needs, innings per player */
