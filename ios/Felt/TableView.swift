@@ -103,6 +103,7 @@ struct TableCanvas: View {
       drawFx(&ctx, m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       ctx.scaleBy(x: sc, y: sc)
+      drawPotRail(&ctx, m, bp)
       drawRail(&ctx, m, bp)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       /* the cue (4f): pulled back by power while aiming, driven through during the stroke, carried a
@@ -356,6 +357,81 @@ struct TableCanvas: View {
       if S.brk > 0 {
         var e = ctx; e.addFilter(.shadow(color: edge, radius: 0.7))
         e.draw(Text(String(S.brk)).font(.system(size: ph * 0.78, weight: .bold, design: .rounded).monospacedDigit()).foregroundColor(ink), at: CGPoint(x: x + ph * 0.6, y: Double(c0.y)))
+      }
+    }
+  }
+
+  /* 6b3: the potted balls, each in a window of its own in the wood of the rails at the screen's left and right
+     (potPlan's slots: the gaps between the holes and sights, packed for POT_PER_RAIL, filling from the foot), 8-ball's
+     solids up the left and stripes up the right, the 8 up its potter's group's side; 9 and 10-ball in pot order up the
+     left, then the right. A dark recess (POT_RECESS) cut dark round its edge, the rail's true little ball in it, a rim
+     of light on a ball under 3:1 on the recess. */
+  private func drawPotRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter) {
+    guard let g = model.g, !model.potOrder.isEmpty else { return }
+    let s = model.sim, T = model.potGeometry(m), band = T.railBand, k = m.k
+    let wk = (band.rail - band.co) * k, mid = (band.co + band.rail) / 2
+    let a = m.pt(0, 0), b = m.pt(s.TL, s.TW)
+    let left = Double(min(a.x, b.x)), right = Double(max(a.x, b.x)), top = Double(min(a.y, b.y)), bottom = Double(max(a.y, b.y))
+    let sz = max(9, (wk - 2).rounded(.down)), ballD = sz - 3, POT_GAP = 3.0, PER = 8
+    /* the obstacles on screen: each pocket's hole and jaws (RAIL_PAD 4), each sight (POT_SIGHT_PAD 3) */
+    var holes: [[Double]] = []
+    func box(_ pts: [[Double]], _ pad: Double) {
+      let ps = pts.map { m.pt($0[0], $0[1]) }
+      holes.append([Double(ps.map(\.x).min()!), Double(ps.map(\.x).max()!), Double(ps.map(\.y).min()!), Double(ps.map(\.y).max()!), pad])
+    }
+    for (i, p) in s.POCKETS.enumerated() {
+      let r = s.POCKET_R[i]
+      var pts = [[p[0] - r, p[1]], [p[0] + r, p[1]], [p[0], p[1] - r], [p[0], p[1] + r]]
+      if s.MOUTHS.indices.contains(i) { for j in s.MOUTHS[i] { pts.append(j.p); pts.append(j.e) } }
+      box(pts, 4)
+    }
+    for q in T.railSights() { box([[q[0] - q[2], q[1] - q[3]], [q[0] + q[2], q[1] + q[3]]], 3) }
+    let sides: [[CGPoint]] = [left - mid * k, right + mid * k].map { cx in
+      var gaps = [[top, bottom]]
+      for h in holes {
+        if h[1] < cx - wk / 2 || h[0] > cx + wk / 2 { continue }
+        gaps = gaps.flatMap { [[$0[0], min($0[1], h[2] - h[4])], [max($0[0], h[3] + h[4]), $0[1]]] }.filter { $0[1] - $0[0] >= sz }
+      }
+      gaps.sort { $0[0] > $1[0] }
+      let cap = gaps.map { Int((($0[1] - $0[0] + POT_GAP) / (sz + POT_GAP)).rounded(.down)) }
+      var mm = 1
+      while mm < max(1, cap.max() ?? 1) && cap.reduce(0, { $0 + min(mm, $1) }) < PER { mm += 1 }
+      var slots: [CGPoint] = []
+      for (i, gp) in gaps.enumerated() {
+        let kk = min(mm, cap[i]), run = Double(kk) * sz + Double(kk - 1) * POT_GAP
+        for j in 0..<kk { slots.append(CGPoint(x: cx, y: (gp[0] + gp[1]) / 2 + run / 2 - sz / 2 - Double(j) * (sz + POT_GAP))) }
+      }
+      return slots
+    }
+    /* potSeats */
+    var seats: [(Int, CGPoint)] = []
+    if is8(g.kind) {
+      var n8 = [0, 0]
+      for n in model.potOrder {
+        var side = n > 8 ? 1 : 0
+        if n == 8 { side = g.groups[model.potBy[8] ?? 0] == "stripes" ? 1 : 0 }
+        if n8[side] < sides[side].count { seats.append((n, sides[side][n8[side]])); n8[side] += 1 }
+      }
+    } else {
+      for (i, n) in model.potOrder.enumerated() {
+        if i < sides[0].count { seats.append((n, sides[0][i])) } else if i - sides[0].count < sides[1].count { seats.append((n, sides[1][i - sides[0].count])) }
+      }
+    }
+    let recess = Color(rgb: 16, 11, 8), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85), f = model.scaleFactor
+    for (n, c) in seats {
+      if let t = model.potAt[n], model.now < t { continue }   /* still dropping into its pocket */
+      let rr = CGRect(x: c.x - sz / 2, y: c.y - sz / 2, width: sz, height: sz)
+      ctx.fill(Path(ellipseIn: rr), with: .color(recess))
+      ctx.stroke(Path(ellipseIn: rr), with: .color(edge), lineWidth: 1)
+      let (img, ix, iy) = bp.ballImage(n, Double(c.x) * f, Double(c.y) * f, ballD / 2 * f, bp.axesOf(IDENT, screen: true))
+      ctx.draw(Image(decorative: img, scale: f), in: CGRect(x: ix / f, y: iy / f, width: Double(img.width) / f, height: Double(img.height) / f))
+      /* a ball too dark for the recess (a solid under 3:1 on it) gets a rim of light */
+      let col = ballColor(n), lum = { (v: Int) -> Double in let x = Double(v) / 255; return x <= 0.03928 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
+      let L1 = 0.2126 * lum(col.0) + 0.7152 * lum(col.1) + 0.0722 * lum(col.2), L2 = 0.2126 * lum(16) + 0.7152 * lum(11) + 0.0722 * lum(8)
+      if n < 9 && (max(L1, L2) + 0.05) / (min(L1, L2) + 0.05) < 3 {
+        /* .rim: box-shadow 0 0 0 1px #77716b, a hairline of light just outside the ball */
+        let br = ballD / 2 + 0.5
+        ctx.stroke(Path(ellipseIn: CGRect(x: c.x - br, y: c.y - br, width: 2 * br, height: 2 * br)), with: .color(Color(rgb: 0x77, 0x71, 0x6b)), lineWidth: 1)
       }
     }
   }

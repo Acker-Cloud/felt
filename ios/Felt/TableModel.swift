@@ -138,6 +138,13 @@ final class TableModel {
     rolling = nil; inHand = game != .carom; potCount = 0; banner = nil
     if let k = rulesKind {
       g = engine.newGame(k)
+      /* a test hook: `-felt-pots "1,9,8"` starts the rack with those balls down (the potted windows) */
+      let a = ProcessInfo.processInfo.arguments
+      if let i = a.firstIndex(of: "-felt-pots"), i + 1 < a.count {
+        let ns = a[i + 1].split(separator: ",").compactMap { Int($0) }
+        for j in g!.balls.indices where ns.contains(g!.balls[j].n) { g!.balls[j].on = false }
+        if ns.contains(where: { $0 < 8 }) { g!.groups = ["solids", "stripes"] }
+      }
       syncBalls()
       msg = k == "snooker" ? "\(Words.dWords(0)). On a red." : k == "carom" ? "\(Words.nameOf(0)) to break: the red first." : "\(Words.nameOf(0)) to break."
       randomOrient(); aimAtNearest()
@@ -196,6 +203,7 @@ final class TableModel {
     self.now = now
     pots.removeAll { now - $0.t >= TableModel.POT_MS }
     if let b = banner, now >= b.until { banner = nil }
+    potTrack()
     effects.removeAll { now - $0.t >= $0.d }
     if let st = stroke {
       if st.t0 == nil { stroke = (st.power, now) } else if now - st.t0! >= TableModel.STROKE_MS { strikeNow(st.power, now) }
@@ -447,6 +455,20 @@ final class TableModel {
     }
   }
 
+
+  /* 6b3: the balls down in pot order, who potted each, and when (a pot's window waits for its drop) */
+  @ObservationIgnored private(set) var potOrder: [Int] = []
+  @ObservationIgnored private(set) var potBy: [Int: Int] = [:]
+  @ObservationIgnored private(set) var potAt: [Int: TimeInterval] = [:]
+  private func potTrack() {
+    guard let gm = g, ["8", "9", "10", "heyball"].contains(gm.kind) else { potOrder = []; return }
+    let src = rolling?.balls.map { ($0.n, $0.on) } ?? gm.balls.map { ($0.n, $0.on) }
+    let off = src.filter { !$0.1 && $0.0 >= 1 && $0.0 <= 15 }.map { $0.0 }
+    potOrder = potOrder.filter { off.contains($0) }
+    for n in off.filter({ !potOrder.contains($0) }).sorted() {
+      potOrder.append(n); potBy[n] = gm.turn; potAt[n] = rolling != nil ? now + TableModel.POT_MS : 0
+    }
+  }
 
   /* railNext (6b2): the ball to play next on a human's turn while aiming. 9, 10 and rotation: the ball on; 8-ball,
      Chinese 8-ball and 14.1: the ball the aim meets first when it is a legal target */
