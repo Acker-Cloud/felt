@@ -77,8 +77,8 @@ struct Home: View {
   /* a .tile: the game's rack art under its name and line (bottom left); a tap opens its setup */
   private func gameCard(_ g: TableGame) -> some View {
     NavigationLink { GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) }) } label: {
-      Color.clear.aspectRatio(1.7, contentMode: .fit)
-        .frame(maxWidth: .infinity)
+      Color.clear.aspectRatio(oneCol ? nil : 1.7, contentMode: .fit)
+        .frame(maxWidth: .infinity).frame(height: oneCol ? 84 : nil)
         .overlay {
           GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height, narrow = w <= 184, low: Double = narrow ? 48 : 52
@@ -96,7 +96,7 @@ struct Home: View {
             .onChange(of: geo.size) { _, n in art.want(g, n.width, n.height, low) }
           }
         }
-        .frame(height: g == .heyball ? art.rowH : nil)
+        .frame(height: g == .heyball && !oneCol ? art.rowH : nil)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.13), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.5), radius: 14, y: 8)
@@ -109,6 +109,11 @@ struct Home: View {
   /* #leftNote: a game left by closing the app counted as a loss, once, until OK or LEFT_MS */
   @State private var leftNote = false
   @State private var booted = false
+  @AppStorage("felt.settings.text") private var textSize = 100
+  private var oneCol: Bool {
+    let b = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds ?? .zero
+    return b.height > b.width && ((textSize == 115 && b.width <= 400) || (textSize == 130 && b.width <= 500))
+  }
   struct PartyGo: Identifiable { let game: TableGame, names: [String], ruleset: String; var id: String { ruleset + names.joined() } }
   struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var archs: [String] = ["allround", "allround"]; var id: String { game.rawValue + levels.joined() + archs.joined() } }
   var body: some View {
@@ -138,7 +143,8 @@ struct Home: View {
           .frame(minHeight: 44)
           HomeSect(title: "Games", top: 18)
           /* #playRow: the nine games as cards with their rack art, two to a row, the ninth a row wide */
-          let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+          /* text size Large on a phone 400 pt wide or less, Larger on one 500 pt or less, upright: one card to a row */
+          let cols = oneCol ? [GridItem(.flexible(), spacing: 12)] : [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
           LazyVGrid(columns: cols, spacing: 12) {
             ForEach(HomeArt.ORDER.filter { $0 != .heyball }) { g in gameCard(g) }
           }
@@ -201,6 +207,8 @@ struct Home: View {
       .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { store.markLive(); playingTourney = true } }
       .tint(.primary)
     }
+    /* Text Size: Large and Larger zoom everything but the table (a cover of its own, outside this transform) */
+    .modifier(Zoomed(z: CGFloat(textSize) / 100))
     /* a test hook, like the page's window.felt: `-felt-game "9-Ball"` opens that table */
     .onAppear {
       let a = ProcessInfo.processInfo.arguments
@@ -2665,5 +2673,19 @@ struct SoloRow: View {
     .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
     .contentShape(Rectangle())
     .overlay(alignment: .top) { Color.white.opacity(0.16).frame(height: 0.5).padding(.leading, 62) }
+  }
+}
+
+/* the page's CSS zoom on the sheets (data-text 115, 130): laid out at the size over z, then scaled by z from the top
+   left, so words, rows and gaps all grow and the content still fills the screen; 1 is the view itself */
+struct Zoomed: ViewModifier {
+  let z: CGFloat
+  func body(content: Content) -> some View {
+    if z == 1 { content }
+    else {
+      GeometryReader { g in
+        content.frame(width: g.size.width / z, height: g.size.height / z).scaleEffect(z, anchor: .topLeading)
+      }
+    }
   }
 }
