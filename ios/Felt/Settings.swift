@@ -82,18 +82,12 @@ enum Prefs {
 struct SettingsView: View {
   @AppStorage("felt.settings.rules8") private var rules8 = DEFAULT_RULESET["8"]!
   @AppStorage("felt.settings.rules9") private var rules9 = DEFAULT_RULESET["9"]!
-  @AppStorage("felt.settings.rules10") private var rules10 = DEFAULT_RULESET["10"]!
   @AppStorage("felt.settings.calls") private var calls = "official"
   @AppStorage("felt.settings.guide") private var guide = "full"
   @AppStorage("felt.settings.autoAim") private var autoAim = true
-  @AppStorage("felt.settings.table") private var table = "7"
-  @AppStorage("felt.settings.pockets") private var pockets = "regulation"
   @AppStorage("felt.settings.race141") private var race141 = 50
-  @AppStorage("felt.settings.snookerTable") private var snookerTable = "compact"
   @AppStorage("felt.settings.snookerFrames") private var snookerFrames = 1
-  @AppStorage("felt.settings.bumperTable") private var bumperTable = "octagon"
   @AppStorage("felt.settings.caromRace") private var caromRace = 10
-  @AppStorage("felt.settings.caromCush") private var caromCush = 3
   @AppStorage("felt.settings.sound") private var sound = true
   @AppStorage("felt.settings.haptics") private var haptics = true
   @AppStorage("felt.settings.dress") private var dressMode = "game"
@@ -106,56 +100,104 @@ struct SettingsView: View {
   @AppStorage("felt.settings.look.rail") private var lookRail = "walnut"
   @AppStorage("felt.settings.look.balls") private var lookBalls = "classic"
 
+  @AppStorage("felt.settings.stalemate") private var stalemate = false
+  /* the list (prefsList): a row per page (PREF_PAGES), its icon, name and line, pushed from the right. The page's
+     Accessibility page is not here: none of its settings (ball marks, high-contrast aim, text size, Space on the bar)
+     are ported yet */
   var body: some View {
     List {
       Section {
-        rules("8-Ball", "8", $rules8)
-        rules("9-Ball", "9", $rules9)
-        rules("10-Ball", "10", $rules10)
-        Picker("Called Shots", selection: $calls) {
-          Text("Off").tag("off"); Text("8-Ball Only").tag("eight"); Text("Official").tag("official"); Text("All").tag("all")
-        }
-      } header: { Text("Rules") } footer: { Text("Official calls what the rules call; All calls every shot.") }
-      Section {
-        Picker("Aim Guide", selection: $guide) { Text("Full").tag("full"); Text("Short").tag("short"); Text("Off").tag("off") }
-        Toggle("Auto Aim", isOn: $autoAim)
-      } header: { Text("Aiming") }
-      Section {
-        Picker("Pool Table", selection: $table) { Text("7 ft").tag("7"); Text("9 ft").tag("9") }.pickerStyle(.segmented)
-        Picker("Pockets", selection: $pockets) { Text("Regulation").tag("regulation"); Text("Generous").tag("generous") }.pickerStyle(.segmented)
-        Picker("Straight Pool Race", selection: $race141) { Text("25").tag(25); Text("50").tag(50); Text("100").tag(100); Text("150").tag(150) }
-      } header: { Text("Pool") } footer: { Text("8, 9, 10-ball, straight pool and rotation. Chinese 8-ball plays on its own table.") }
-      Section {
-        Picker("Table", selection: $snookerTable) { Text("10 ft").tag("compact"); Text("12 ft").tag("full") }.pickerStyle(.segmented)
-        Picker("Frames", selection: $snookerFrames) { Text("1 Frame").tag(1); Text("Best of 3").tag(3) }.pickerStyle(.segmented)
-      } header: { Text("Snooker") }
-      Section {
-        Picker("Table", selection: $bumperTable) { Text("Octagon").tag("octagon"); Text("Rectangle").tag("rect") }.pickerStyle(.segmented)
-      } header: { Text("Bumper Pool") }
-      Section {
-        Picker("Race", selection: $caromRace) { Text("5").tag(5); Text("10").tag(10); Text("15").tag(15) }.pickerStyle(.segmented)
-        Picker("Cushions", selection: $caromCush) { Text("One").tag(1); Text("Three").tag(3) }.pickerStyle(.segmented)
-      } header: { Text("Three-Cushion") }
-      /* Settings > Graphics: Table Dressing, and My Look's slots, each listing only what is unlocked; picking one switches
-         to My Look */
-      Section {
-        Picker("Table View", selection: $tableView) { Text("Top Down").tag("top"); Text("3D").tag("3d") }.pickerStyle(.segmented)
-        if tableView == "3d" { Picker("After the Shot", selection: $viewAfter) { Text("Pull Back").tag("pull"); Text("Top Down").tag("top"); Text("Stay").tag("stay") } }
-        Picker("Table Dressing", selection: $dressMode) { Text("By Game").tag("game"); Text("My Look").tag("mine") }.pickerStyle(.segmented)
-        look("Cloth", "cloth", $lookCloth)
-        look("Cue", "cue", $lookCue)
-        look("Chalk", "chalk", $lookChalk)
-        look("Rails", "rail", $lookRail)
-        look("Balls", "balls", $lookBalls)
-        Toggle("Opening Animation", isOn: $intro)
-      } header: { Text("Graphics") } footer: { Text("By Game dresses each game as itself: its cloth, rails, balls, cue and room. My Look wears your choices below on every game. Picking one switches to My Look. A career match wears what its player equipped.") }
-      Section {
-        Toggle("Sound", isOn: $sound)
-        Toggle("Haptics", isOn: $haptics)
-      } header: { Text("Sound") }
+        NavigationLink { page("Gameplay") { gameplay } } label: { PrefRow(icon: "circle.grid.2x1.fill", name: "Gameplay", line: "Rules, called shots, races, aim guide") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        NavigationLink { page("Controls") { controls } } label: { PrefRow(icon: "switch.2", name: "Controls", line: "Auto aim") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        NavigationLink { page("Graphics") { graphics } } label: { PrefRow(icon: "photo", name: "Graphics", line: "Cloth, camera, motion") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        NavigationLink { page("Audio and Haptics") { audio } } label: { PrefRow(icon: "speaker.wave.2.fill", name: "Audio and Haptics", line: "Sound, haptics") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        NavigationLink { page("About") { about } } label: { PrefRow(icon: "info.circle", name: "About", line: "This build") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+      } header: {
+        /* the page's header row: "Settings" in Title 1, by the back button */
+        Text("Settings").font(.system(size: 28, weight: .bold)).foregroundStyle(Color.white).textCase(nil).padding(.leading, -4).padding(.bottom, 6).accessibilityAddTraits(.isHeader)
+      }
     }
-    .navigationTitle("Settings")
+    .environment(\.defaultMinListRowHeight, 54)
+    .contentMargins(.top, 0, for: .scrollContent)
+    .navigationTitle("")
     .navigationBarTitleDisplayMode(.inline)
+    .tint(.primary)
+  }
+  private func page<C: View>(_ title: String, @ViewBuilder _ c: () -> C) -> some View {
+    List { c() }.navigationTitle(title).navigationBarTitleDisplayMode(.inline).tint(.primary)
+  }
+  /* ppGame: Default Rules, Races, Called Shots, Aim Guide */
+  @ViewBuilder private var gameplay: some View {
+    Section {
+      rules("8-Ball", "8", $rules8)
+      rules("9-Ball", "9", $rules9)
+      Toggle("House Re-Rack on a Stalemate (8 and 9-Ball)", isOn: $stalemate)
+    } header: { Text("Default Rules") } footer: { Text("A new game starts on these. An event (a career match) brings its own.") }
+    Section {
+      Picker("Straight Pool (14.1), Points", selection: $race141) { ForEach([25, 50, 100, 150], id: \.self) { Text("\($0)").tag($0) } }
+      Picker("Three-Cushion, Points", selection: $caromRace) { Text("5").tag(5); Text("10").tag(10); Text("15").tag(15) }
+      Picker("Snooker, Frames", selection: $snookerFrames) { Text("One Frame").tag(1); Text("Best of 3").tag(3) }
+    } header: { Text("Races") }
+    Section {
+      Picker("Call", selection: $calls) { Text("Off").tag("off"); Text("8-Ball Only").tag("eight"); Text("Official Rules").tag("official"); Text("All Shots").tag("all") }
+    } header: { Text("Called Shots") } footer: { Text("Official rules: each game's own (8-ball WPA, 10-ball and straight pool call every shot; 9-ball and rotation none). A missed call is not a foul: the turn ends.") }
+    Section {
+      Picker("Aim Guide", selection: $guide) { Text("Full").tag("full"); Text("Short").tag("short"); Text("Off").tag("off") }.pickerStyle(.segmented).labelsHidden()
+    } header: { Text("Aim Guide") } footer: { Text("Full runs both balls' paths out; short shows the ghost ball and a stub; off draws nothing.") }
+  }
+  /* ppCtl: Auto Aim (the page's Layout group, the hand and the power bar's place, is not ported) */
+  @ViewBuilder private var controls: some View {
+    Section {
+      Picker("Auto Aim", selection: $autoAim) { Text("On").tag(true); Text("Off").tag(false) }.pickerStyle(.segmented).labelsHidden()
+    } header: { Text("Auto Aim") } footer: { Text("Auto aim starts each turn pointed at the ball to play next. The cut is up to you.") }
+  }
+  /* ppGfx: Table, Look, Table View, After the Shot, Opening */
+  @ViewBuilder private var graphics: some View {
+    Section {
+      Picker("Table Dressing", selection: $dressMode) { Text("By Game").tag("game"); Text("My Look").tag("mine") }
+      look("Cloth", "cloth", $lookCloth)
+    } header: { Text("Table") } footer: { Text("By Game dresses each game as itself: its cloth, rails, balls, cue and room. My Look wears your choices below on every game. Picking one switches to My Look. A career match wears what its player equipped.") }
+    Section {
+      look("Cue", "cue", $lookCue)
+      look("Chalk", "chalk", $lookChalk)
+      look("Rails", "rail", $lookRail)
+      look("Balls", "balls", $lookBalls)
+    } header: { Text("Look") } footer: { Text("More cloths, cues, chalk, rails and ball sets come from the career shop and are yours here once owned. A look never changes a shot.") }
+    Section {
+      Picker("Table View", selection: $tableView) { Text("Top Down").tag("top"); Text("3D").tag("3d") }.pickerStyle(.segmented).labelsHidden()
+    } header: { Text("Table View") } footer: { Text("3D puts the camera behind the cue ball: drag across the table to aim, up and down to tilt, pinch to move in or out. The 3D button on the table switches too.") }
+    Section {
+      Picker("After the Shot", selection: $viewAfter) { Text("Pull Back").tag("pull"); Text("Top Down").tag("top"); Text("Stay").tag("stay") }.pickerStyle(.segmented).labelsHidden()
+    } header: { Text("After the Shot") } footer: { Text("In 3D, once the cue strikes. Pull Back rises smoothly to a view of the whole table, holds it while the balls roll, then comes back down behind the cue ball. Top Down shows the roll on the flat table. Stay keeps your aiming view. Your pitch and distance are always kept.") }
+    Section {
+      Toggle("Opening Animation", isOn: $intro)
+    } header: { Text("Opening") } footer: { Text("A break under the lamp each time felt opens, then the home. A tap skips it. With Reduce Motion the home simply fades in.") }
+  }
+  /* ppAud: Sound, Haptics (the volumes are not ported) */
+  @ViewBuilder private var audio: some View {
+    Section {
+      Picker("Sound", selection: $sound) { Text("On").tag(true); Text("Off").tag(false) }.pickerStyle(.segmented).labelsHidden()
+    } header: { Text("Sound") } footer: { Text("Table sounds are the balls, cushions, cue and pockets. felt has no music or ambience.") }
+    Section {
+      Picker("Haptics", selection: $haptics) { Text("On").tag(true); Text("Off").tag(false) }.pickerStyle(.segmented).labelsHidden()
+    } header: { Text("Haptics") } footer: { Text("A tick for a hard contact, two for a pot, three for a win.") }
+  }
+  /* ppAbout: felt, and the sound credits (CREDITS.md) */
+  @ViewBuilder private var about: some View {
+    Section {
+      VStack(alignment: .leading, spacing: 2) { Text("felt").font(.headline); Text("Pool, snooker and carom in one app. Offline, no account, nothing leaves the device.").font(.subheadline).foregroundStyle(.secondary) }
+      Text("Settings, records and the career stay on this device.").font(.subheadline).foregroundStyle(.secondary)
+    }
+    Section {
+      credit("Ball Clacks", "Za-Games, bsumusictech, RossJuterbock, 13FPanska_Marval_Lukas and csaszi, on Freesound.")
+      credit("Cue", "craigsmith and csaszi, on Freesound.")
+      credit("Cushions", "allberto and 13FPanska_Marval_Lukas, on Freesound.")
+      credit("Pockets", "Yarmonics and Caitlin_100, on Freesound.")
+      credit("Break and Roll", "RossJuterbock and csaszi, on Freesound.")
+    } header: { Text("Sound Credits") } footer: { Text("Every recording is CC0 (public domain), trimmed and levelled for felt.") }
+  }
+  private func credit(_ t: String, _ w: String) -> some View {
+    VStack(alignment: .leading, spacing: 2) { Text(t); Text(w).font(.subheadline).foregroundStyle(.secondary) }
   }
   private func look(_ title: String, _ slot: String, _ sel: Binding<String>) -> some View {
     let pick = Binding<String>(get: { sel.wrappedValue }, set: { sel.wrappedValue = $0; dressMode = "mine" })
@@ -195,5 +237,21 @@ enum RulesInfo {
     if kind == "carom" { ps.append("First to \(Prefs.caromRace) points wins." + (Prefs.caromCush == 1 ? " The easier game: one cushion before the second ball is enough." : "")) }
     if kind == "snooker" { ps.append(Prefs.snookerFrames == 3 ? "Best of three frames." : "One frame."); ps.append("After a foul the player fouled chooses: play on, have it played again, or take a free ball when snookered.") }
     return (title + " Rules", SRC[id] ?? "", ps)
+  }
+}
+
+/* a row of the settings list (.prow): its icon on the accent's tile, the name, the line, a chevron */
+struct PrefRow: View {
+  let icon: String, name: String, line: String
+  var body: some View {
+    HStack(spacing: 12) {
+      Image(systemName: icon).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+        .frame(width: 30, height: 30).background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(red: 0.12, green: 0.42, blue: 0.29)))
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 1) {
+        Text(name).font(.system(size: 17))
+        Text(line).font(.system(size: 15)).foregroundStyle(.secondary)
+      }
+    }
   }
 }

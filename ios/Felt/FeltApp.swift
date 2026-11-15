@@ -32,6 +32,7 @@ struct Home: View {
   @State private var lessoning = false
   @State private var lessonOffer = false
   @State private var helpPath: String? = nil
+  @State private var prefsOpen = false
   struct PracticeGo: Identifiable { let layout: String; var id: String { layout } }
   /* How to play's actions: the lesson, a game's tutorial, the drills, the career (More Modes: the home's Modes section) */
   private var helpActs: HelpActions {
@@ -182,6 +183,7 @@ struct Home: View {
       .toolbar(.hidden, for: .navigationBar)
       .navigationTitle("").navigationBarTitleDisplayMode(.inline)
       .navigationDestination(isPresented: $showCareer) { CareerView(store: career) }
+      .navigationDestination(isPresented: $prefsOpen) { SettingsView() }
       .navigationDestination(item: $helpPath) { p in
         if p == "drills" { DrillsList { drilling = PracticeGo(layout: $0) } }
         else if p.hasPrefix("topic:"), let t = HelpTopic.all.first(where: { $0.id == String(p.dropFirst(6)) }) { HelpPage(t: t, acts: helpActs) }
@@ -205,6 +207,8 @@ struct Home: View {
       if let i = a.firstIndex(of: "-felt-practice"), i + 1 < a.count { practicing = PracticeGo(layout: a[i + 1]) }
       /* `-felt-help [topic]`: How to play, or a topic's page */
       if let i = a.firstIndex(of: "-felt-help") { helpPath = i + 1 < a.count && !a[i + 1].hasPrefix("-") ? "topic:" + a[i + 1] : "help" }
+      /* `-felt-prefs`: Settings open */
+      if a.contains("-felt-prefs") { prefsOpen = true }
       /* `-felt-lesson`: the lesson */
       if a.contains("-felt-lesson") { lessoning = true }
       /* `-felt-tutorial id`: that tutorial (`-felt-tutshow` plays each step's Show me) */
