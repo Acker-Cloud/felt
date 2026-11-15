@@ -20,6 +20,17 @@ const HASH_EVERY = 240;
 
 /* 4d's geometry and preview, the page's own source, cut from index.html (they read game, cueBall and
    performance, which the shim gives them) */
+/* 4o's camera, the page's own source: the matrices, the orbit, the overview's fit, the pose, the projection both ways
+   (with its constants), cut from index.html; V3 and settings are the harness's */
+function v3Source() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const line = a => { const i = html.indexOf('\n' + a); if (i < 0) throw new Error('ios-golden: 4o moved: ' + a); return html.slice(i + 1, html.indexOf('\n', i + 1)) + '\n'; };
+  const cut = (a, b) => { const i = html.indexOf(a), j = html.indexOf(b, i); if (i < 0 || j < 0) throw new Error('ios-golden: 4o moved: ' + a); return html.slice(i, j); };
+  return 'const LIFT_H = 0.045; const V3 = { box: null, geo: null }; let settings = { viewPitch: 24, viewDist: 1.1 }; const reducedMotion = () => true;\n' +
+    line('const V3_PITCH = ') + line('const V3_PITCH_PX = ') + line('const V3_GHOST_A = ') + line('const V3_ROOM_R = ') +
+    cut('const v3Sub = (a, b)', 'function v3Layout()') + cut('function v3Mats(', '/* the overview for this box') + cut('/* the camera\'s pose:', '/* a move to the overview') +
+    cut('function v3Proj(', '/* once a frame (frameBody)');
+}
 function guideSource() {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const cut = (a, b) => { const i = html.indexOf(a), j = html.indexOf(b, i); if (i < 0 || j < 0) throw new Error('ios-golden: 4d moved: ' + a); return html.slice(i, j); };
@@ -32,7 +43,7 @@ function tourneySource() {
   return html.slice(i, j);
 }
 function loadFd() {
-  let src = regionSource() + '\n;let game = null; const cueBall = () => game.balls.find(b => b.n === game.cue); const performance = { now: () => 0 };\n' + guideSource() + '\n' + tourneySource();
+  let src = regionSource() + '\n;let game = null; const cueBall = () => game.balls.find(b => b.n === game.cue); const performance = { now: () => 0 };\n' + guideSource() + '\n' + tourneySource() + '\n' + v3Source();
   const pw = [['clamp(power, 0, 1) ** POWER_EXP', 'Math.pow(clamp(power, 0, 1), POWER_EXP)'],
     ['clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1) ** (1 / POWER_EXP)', 'Math.pow(clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1), 1 / POWER_EXP)']];
   for (const [a, b] of pw) { if (!src.includes(a)) throw new Error('ios-golden: sim changed, update the pow rewrite: ' + a); src = src.replace(a, b); }
@@ -55,7 +66,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -627,7 +638,32 @@ ${D.NAT.map(n => `    (${q(n.id)}, ${q(n.name)}, ${q(n.first)}, ${q(n.last)}, ${
   /* a repeated key in the text: the first place, the last value */
   objs.push('{"b":1,"a":2,"b":3,"10":4,"2":5}');
   const jv = JSON.stringify({ nums: nums.map(v => [bits(v), String(v)]), strs: strs.map(s => [s, JSON.stringify(s)]), objs: objs.map(t => [t, JSON.stringify(JSON.parse(t))]) });
-  return { math, career, careerData, jv, golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
+  /* 4o's camera: on each table and two boxes (a phone upright and on its side), poses behind the cue ball at several
+     aims, pitches and distances (the matrices, F, the principal point), points projected and screen points unprojected
+     through each, the orbit and its eye, a blend, and the overview for three shot directions */
+  const v3cams = [];
+  {
+    const bits = v => v === null ? null : hx(v), arr = a => a.map(bits);
+    for (const T of [['7', null, 'regulation'], ['9', null, 'generous'], ['snooker', 'compact', 'regulation'], ['carom', null, 'regulation'], ['bumper', 'octagon', 'regulation'], ['heyball', null, 'regulation']]) {
+      S.setPockets(T[2]); S.setGame ? null : null; S.setTable(T[0], T[1]);
+      for (const box of [{ left: 0, top: 0, width: 393, height: 700 }, { left: 40, top: 8, width: 760, height: 330 }]) {
+        S.V3.box = box;
+        const poses = [];
+        for (const [px, py, yaw, pitch, dist] of [[S.TL * 0.25, S.TW * 0.5, 0, 24, 1.1], [S.TL * 0.6, S.TW * 0.3, 2.1, 8, 0.45], [S.TL * 0.1, S.TW * 0.9, -1.3, 70, 3.2], [S.TL * 0.5, S.TW * 0.5, 3.14, 40, 1.8]]) {
+          Object.assign(S.V3, { px, py, yaw, mv: null, ovOn: false }); S.settings.viewPitch = pitch; S.settings.viewDist = dist;
+          const C = S.v3Pose(0);
+          const pts = [[S.TL / 2, S.TW / 2, 0], [px + 0.3, py, S.BALL_R], [0, 0, 0.04], [S.TL, S.TW, 0], [px - 0.2, py + 0.1, 0]].map(P => { const q = S.v3Proj(P[0], P[1], P[2]); return q ? arr(q) : null; });
+          const back = [[box.left + 100, box.top + 200], [box.left + box.width / 2, box.top + box.height * 0.7], [box.left + 10, box.top + 10]].map(Q => { const q = S.v3Unproj(Q[0], Q[1], S.BALL_R); return q ? arr(q) : null; });
+          const o = S.v3OrbitOf(C.E, C.T), e = S.v3EyeOf(o), l = S.v3Lerp(o, { T: [S.TL / 2, S.TW / 2, 0], yaw: o.yaw + 2.5, pitch: 0.9, dist: 2.4 }, 0.37);
+          poses.push({ px: bits(px), py: bits(py), yaw: bits(yaw), pitch, dist, M: arr(C.M), F: bits(C.F), cx: bits(C.cx), cy: bits(C.cy), E: arr(C.E), T: arr(C.T), pts, back,
+            orbit: [...arr(o.T), bits(o.yaw), bits(o.pitch), bits(o.dist)], eye: [...arr(e.E), ...arr(e.T)], lerp: [...arr(l.T), bits(l.yaw), bits(l.pitch), bits(l.dist)] });
+        }
+        const ovs = [0, 1.2, -2.6].map(y => { const o = S.v3Overview(y); return { yaw0: bits(y), T: arr(o.T), yaw: bits(o.yaw), pitch: bits(o.pitch), dist: bits(o.dist), fill: bits(o.fill), ok: o.ok }; });
+        v3cams.push({ table: T[0], shape: T[1], pockets: T[2], box: [box.left, box.top, box.width, box.height], poses, ovs });
+      }
+    }
+  }
+  return { math, career, careerData, jv, v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
 }
 /* tests/ios-check.cjs rebuilds both in memory and requires the committed files to match */
 module.exports = { build, OUT, loadFd };
@@ -640,6 +676,7 @@ if (require.main === module) {
   fs.writeFileSync(path.join(OUT, 'cpu.json'), b.cpu);
   fs.writeFileSync(path.join(OUT, 'career.json'), b.career);
   fs.writeFileSync(path.join(OUT, 'jv.json'), b.jv);
+  fs.writeFileSync(path.join(OUT, 'v3.json'), b.v3);
   fs.writeFileSync(path.join(__dirname, '..', 'ios', 'FeltSim', 'Sources', 'FeltSim', 'CareerData.swift'), b.careerData);
   const steps = b.cases.reduce((a, c) => a + c.result.steps, 0);
   console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${b.games.length} games (${b.games.reduce((a, g) => a + g.steps.length, 0)} judgements), ${b.cpuCases.length} CPU decisions, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);
