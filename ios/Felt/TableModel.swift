@@ -138,14 +138,26 @@ final class TableModel {
   /* a party (6f, 'party'): 2 to 4 people in turn on a ring ruleset; their racks won, the rack, the ruleset */
   struct Party { var names: [String], wins: [Int], rack = 0, ruleset: String }
   private(set) var party: Party?
+  /* a quick tournament's match (6f, tmatch): the bracket's match, the opponent, racks won, the race in racks (a points
+     race is one game, need 1), the lag's winner, and where the result goes */
+  struct TMatch { let m: Int, foe: String, level: String, need: Int, points: Bool, race: Int, lag: Int, ruleset: String; var score = [0, 0], rack = 1, done = false, counted = false }
+  private(set) var tmatch: TMatch?
+  @ObservationIgnored var onReport: ((Int, Int, Int, Bool) -> Void)?
   /* the handoff: the player the device is passed to (the breaker at a rack's start), until they are ready */
   var handoff: (p: Int, first: Bool)? = nil
   @ObservationIgnored private var cpuBusy = false
   private(set) var cpuThinking = false
 
-  init(game: TableGame, cpu: String? = nil, exhib: [String]? = nil, party: (names: [String], ruleset: String)? = nil) {
+  init(game: TableGame, cpu: String? = nil, exhib: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil) {
     self.game = game
-    cpuLevel = exhib == nil && party == nil ? cpu : nil
+    /* tourneyPlay: the player's next match, the opponent's level, the lag from the tournament's seed */
+    var tm: TMatch? = nil
+    if let t = tourney, let m = t.mine() {
+      let foe = t.foe(m), pts = Tourney.points(t.kind)
+      tm = TMatch(m: m, foe: foe.name, level: foe.level ?? "medium", need: pts ? 1 : t.race, points: pts, race: t.race,
+                      lag: cpuRng(Double(CareerLib.seedOf([String(t.seed), "lag", String(m)])))() < 0.5 ? 0 : 1, ruleset: t.ruleset)
+    }
+    cpuLevel = tm?.level ?? (exhib == nil && party == nil ? cpu : nil)
     self.exhib = exhib
     self.party = party.map { Party(names: $0.names, wins: $0.names.map { _ in 0 }, ruleset: $0.ruleset) }
     Words.cpuMode = cpuLevel != nil
@@ -159,6 +171,7 @@ final class TableModel {
     }
     TableModel.setUp(sim, spec)
     engine = RulesEngine(sim: sim)
+    tmatch = tm
     rerack()
     /* a test hook: `-felt-paused` opens the table with the pause menu up */
     if ProcessInfo.processInfo.arguments.contains("-felt-paused") { paused = true }
@@ -175,7 +188,7 @@ final class TableModel {
     rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], [], [], []]; potCount = 0; banner = nil
     if let k = rulesKind {
       /* newGame with the settings' rules, snooker's frames and carom's race and cushions */
-      g = k == "snooker" ? engine.snookerGame(frames: Prefs.snookerFrames, first: 0)
+      g = tmatch != nil ? tourneyGame(k) : k == "snooker" ? engine.snookerGame(frames: Prefs.snookerFrames, first: 0)
         : k == "carom" ? engine.caromGame(race: Prefs.caromRace, cushions: Prefs.caromCush)
         : party != nil ? partyGame(k) : engine.newGame(k, rules: Prefs.rules(k))
       /* a test hook: `-felt-pots "1,9,8"` starts the rack with those balls down (the potted windows) */
@@ -339,7 +352,7 @@ final class TableModel {
   }
   private func words(_ gm: Game, _ shooter: Int, chose: (who: Int, kind: String, choice: String)? = nil) {
     guard let v = gm.verdict else { return }
-    if gm.winner != nil { msg = Words.overLine(gm); banner = nil; return }
+    if gm.winner != nil { msg = Words.overLine(gm); banner = nil; tourneyRackOver(); return }
     if gm.kind == "bumper" {
       let w = Words.bumper(v, gm, shooter, gm.turn)
       msg = w.msg
@@ -534,6 +547,37 @@ final class TableModel {
     }
   }
 
+
+  /* tourneyTerms: the tournament's rules (locked), who breaks (the lag's winner, then alternate breaks; carom the player) */
+  private func tourneyGame(_ k: String) -> Game {
+    let t = tmatch!, br = k == "carom" ? 0 : (t.lag + t.rack - 1) % 2
+    var c = CallConfig(); c.mode = Prefs.calls
+    if k == "snooker" { return engine.snookerGame(frames: 1, first: br) }
+    if k == "carom" { return engine.caromGame(race: t.race, cushions: 3) }
+    var gm = engine.newGame(k, rules: makeRules(k, ruleset: t.ruleset, call: c, race: k == "straight" ? t.race : nil, locked: true))
+    if br > 0 { gm.turn = br; gm.breaker = br }
+    return gm
+  }
+  /* tourneyRackOver: a rack's winner counts; the match ends at the race (a points race: the game's points) */
+  func tourneyRackOver() {
+    guard var t = tmatch, !t.done, !t.counted, let w = g?.winner else { return }
+    t.counted = true
+    t.score[w] += 1
+    if t.score[w] >= t.need {
+      t.done = true
+      let rec = t.points ? [0, 1].map { p in p == w ? t.race : max(0, min(t.race - 1, g?.score?[p] ?? 0)) } : t.score
+      onReport?(t.m, rec[0], rec[1], false)
+    }
+    tmatch = t
+  }
+  func tourneyNextRack() { guard var t = tmatch, !t.done else { return }; t.rack += 1; t.counted = false; tmatch = t; rerack() }
+  /* tourneyAbandon: a match left before its end is a forfeit, the racks (or points) won so far against the race */
+  func tourneyAbandon() {
+    guard let t = tmatch, !t.done else { return }
+    let mine = t.points ? (g?.score?[0] ?? 0) : t.score[0]
+    onReport?(t.m, max(0, min(mine, t.race - 1)), t.race, true)
+    tmatch = nil
+  }
 
   /* partyTerms: the ring ruleset for the party's players, the settings' calls; the break passed round (rack % n) */
   private func partyGame(_ k: String) -> Game {

@@ -66,4 +66,28 @@ import Testing
       }
     }
   }
+  /* whole quick tournaments: the page's tourneyNew (field, draw, the CPU matches settled), the player's matches
+     reported as the page reported them, every result after each, then the places and every round's name */
+  @Test func tourneys() {
+    let ints = { (a: Any?) -> [Int]? in (a as? [NSNumber])?.map { $0.intValue } }
+    for o in Self.fx["tourneys"] as! [[String: Any]] {
+      let kind = o["kind"] as! String, name = "\(kind) \(o["size"]!) \(o["fmt"]!)"
+      var t = Tourney.make(kind: kind, ruleset: nil, size: Int(Self.num(o["size"])), fmt: o["fmt"] as! String, race: Int(Self.num(o["race"])),
+                           field: o["field"] as! String, seed: Int(Self.num(o["seed"])))
+      let st = o["start"] as! [String: Any], fw = st["field"] as! [[String: Any]]
+      #expect(t.field.map { $0.name } == fw.map { $0["name"] as! String } && t.field.map { $0.level } == fw.map { $0["level"] as? String }, "\(name): field")
+      #expect(t.field.map { $0.arch } == fw.map { $0["arch"] as? String } && t.f == ints(st["f"])! && t.ruleset == st["ruleset"] as! String && t.race == Int(Self.num(st["race"])), "\(name): draw, rules, race")
+      #expect(t.res.map { $0 } == (st["res"] as! [Any]).map { ints($0) }, "\(name): the opening's CPU matches")
+      for (k, r) in (o["reports"] as! [[String: Any]]).enumerated() {
+        let m = Int(Self.num(r["m"]))
+        #expect(t.mine() == m, "\(name) report \(k): the player's match")
+        t.report(m, Int(Self.num(r["mine"])), Int(Self.num(r["theirs"])), forfeit: false)
+        #expect(t.res.map { $0 } == (r["res"] as! [Any]).map { ints($0) } && t.sim == (r["sim"] as! [Bool]), "\(name) report \(k): results")
+      }
+      #expect(t.done == o["done"] as! Bool, "\(name): done")
+      let wp = (o["places"] as? [[NSNumber]])?.map { $0.map { $0.intValue } }
+      #expect(t.places == wp, "\(name): places \(String(describing: t.places)) vs \(String(describing: wp))")
+      #expect(t.bracket.M.indices.map { CareerLib.roundName(t.fmt, t.bracket, $0) } == o["rounds"] as! [String], "\(name): round names")
+    }
+  }
 }

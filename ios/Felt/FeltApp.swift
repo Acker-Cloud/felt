@@ -15,6 +15,9 @@ struct Home: View {
   @AppStorage("felt.opponent") private var opponent = "medium"
   @State private var exhibit: Exhibit?
   @State private var party: PartyGo?
+  @State private var store = TourneyStore()
+  @State private var playingTourney = false
+  @State private var showTourney = false
   struct PartyGo: Identifiable { let game: TableGame, names: [String], ruleset: String; var id: String { ruleset + names.joined() } }
   struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var id: String { game.rawValue + levels.joined() } }
   var body: some View {
@@ -48,6 +51,13 @@ struct Home: View {
             }.frame(minHeight: 44, alignment: .leading)
           }
           .accessibilityIdentifier("mode-exhibit")
+          NavigationLink { TourneyView(store: store) { playingTourney = true } } label: {
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Quick Tournament").font(.body.weight(.semibold))
+              Text(store.tour.map { $0.done ? "Finished: \(TourneyView.placeWords($0.place ?? 0))" : "In progress, \(TourneyView.kindName($0.kind))" } ?? "4, 8 or 16 players, a bracket").font(.footnote).foregroundStyle(.secondary)
+            }.frame(minHeight: 44, alignment: .leading)
+          }
+          .accessibilityIdentifier("mode-tourney")
           NavigationLink { PartySetup { party = $0 } } label: {
             VStack(alignment: .leading, spacing: 2) {
               Text("Party").font(.body.weight(.semibold))
@@ -60,6 +70,7 @@ struct Home: View {
         }
       }
       .navigationTitle("felt")
+      .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { playingTourney = true } }
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
           NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }.accessibilityLabel("Settings").accessibilityIdentifier("settings")
@@ -71,6 +82,8 @@ struct Home: View {
     .onAppear {
       let a = ProcessInfo.processInfo.arguments
       if let i = a.firstIndex(of: "-felt-game"), i + 1 < a.count { playing = TableGame(rawValue: a[i + 1]) }
+      /* `-felt-tourney`: the golden's first tournament (9-ball, 8 players, seed 11), its screen open */
+      if a.contains("-felt-tourney") { store.start(Tourney.make(kind: "9", ruleset: nil, size: 8, fmt: "single", race: 3, field: "mixed", seed: 11)); showTourney = true }
       if let i = a.firstIndex(of: "-felt-party"), i + 1 < a.count, let n = Int(a[i + 1]) { party = PartyGo(game: .nine, names: (1...n).map { "Player \($0)" }, ruleset: "9-ring") }
       if let i = a.firstIndex(of: "-felt-exhibit"), i + 1 < a.count, let g = TableGame(rawValue: a[i + 1]) { exhibit = Exhibit(game: g, levels: ["medium", "hard"]) }
       /* `-felt-landscape left|right`: the interface turned on its side (the simulator cannot be turned from a script) */
@@ -81,6 +94,11 @@ struct Home: View {
     }
     .fullScreenCover(item: $playing) { g in TableScreen(model: TableModel(game: g, cpu: opponent == "two" ? nil : opponent)) }
     .fullScreenCover(item: $exhibit) { e in TableScreen(model: TableModel(game: e.game, exhib: e.levels)) }
+    .fullScreenCover(isPresented: $playingTourney) {
+      if let t = store.tour, let g = TourneyView.game(t.kind) {
+        TableScreen(model: { let m = TableModel(game: g, tourney: t); m.onReport = { store.report($0, $1, $2, $3) }; return m }())
+      }
+    }
     .fullScreenCover(item: $party) { p in TableScreen(model: TableModel(game: p.game, party: (p.names, p.ruleset))) }
   }
 }
@@ -388,6 +406,109 @@ struct PowerBar: View {
   }
 }
 
+/* the quick tournament's state, kept as the page keeps it (felt.tourney.v1, at every change) */
+@MainActor @Observable final class TourneyStore {
+  var tour: Tourney?
+  init() { tour = UserDefaults.standard.data(forKey: "felt.tourney.v1").flatMap { try? JSONDecoder().decode(Tourney.self, from: $0) } }
+  func save() { if let t = tour, let d = try? JSONEncoder().encode(t) { UserDefaults.standard.set(d, forKey: "felt.tourney.v1") } else { UserDefaults.standard.removeObject(forKey: "felt.tourney.v1") } }
+  func start(_ t: Tourney) { tour = t; save() }
+  func report(_ m: Int, _ mine: Int, _ theirs: Int, _ forfeit: Bool) {
+    guard var t = tour else { return }
+    let foe = t.foe(m).name
+    t.report(m, mine, theirs, forfeit: forfeit)
+    t.msg = forfeit ? "Forfeit: the match against \(foe) was left before its end, and counts as a loss." : mine > theirs ? "You beat \(foe) \(mine)-\(theirs)." : "\(foe) beat you \(theirs)-\(mine)."
+    tour = t; save()
+  }
+}
+
+/* the quick tournament (6f): its setup (game, size, format, race, field), then the player's next match, the bracket
+   round by round (simulated matches marked), and the places at the end */
+struct TourneyView: View {
+  @Bindable var store: TourneyStore
+  let play: () -> Void
+  @State private var kind = "9"
+  @State private var size = 8
+  @State private var fmt = "single"
+  @State private var race = 3
+  @State private var field = "mixed"
+  static func kindName(_ k: String) -> String { ["8": "8-Ball", "9": "9-Ball", "10": "10-Ball", "straight": "Straight Pool", "rotation": "Rotation", "heyball": "Chinese 8-Ball", "snooker": "Snooker", "carom": "Three-Cushion"][k] ?? k }
+  static func game(_ k: String) -> TableGame? { ["8": .eight, "9": .nine, "10": .ten, "straight": .straight, "rotation": .rotation, "heyball": .heyball, "snooker": .snooker, "carom": .carom][k] }
+  static func placeWords(_ p: Int) -> String { p == 1 ? "Champion" : p == 2 ? "Runner-up" : "Place \(p)" }
+  var body: some View {
+    List {
+      if let t = store.tour, !t.done { running(t) } else {
+        if let t = store.tour, t.done { results(t) }
+        setup
+      }
+    }
+    .navigationTitle("Quick Tournament").navigationBarTitleDisplayMode(.inline)
+  }
+  private var setup: some View {
+    Group {
+      Section {
+        Picker("Game", selection: $kind) { ForEach(Tourney.KINDS, id: \.self) { Text(Self.kindName($0)).tag($0) } }
+          .onChange(of: kind) { _, k in race = ["straight": 50, "snooker": 2, "carom": 10][k] ?? 3 }
+        Picker("Players", selection: $size) { ForEach(Tourney.SIZES, id: \.self) { Text("\($0)").tag($0) } }.pickerStyle(.segmented)
+        Picker("Format", selection: $fmt) { Text("Single Elimination").tag("single"); Text("Double Elimination").tag("double") }
+        Picker(Tourney.points(kind) ? "Race (Points)" : kind == "snooker" ? "Race (Frames)" : "Race (Racks)", selection: $race) { ForEach(Tourney.races(kind), id: \.self) { Text("\($0)").tag($0) } }
+        Picker("Field", selection: $field) { Text("Mixed").tag("mixed"); Text("Rookies").tag("easy"); Text("Regulars").tag("medium"); Text("Hustlers").tag("hard") }
+      } header: { Text("New Tournament") } footer: { Text("Your matches are played on the table; the rest are simulated from each player's level and style.") }
+      Section {
+        Button { store.start(Tourney.make(kind: kind, ruleset: nil, size: size, fmt: fmt, race: race, field: field, seed: Int.random(in: 1...0x7fffffff))) } label: {
+          Text("Start Tournament").font(.headline).frame(maxWidth: .infinity, minHeight: 50)
+        }
+        .background(Capsule().fill(.white)).foregroundStyle(.black).listRowBackground(Color.clear).accessibilityIdentifier("tourney-start")
+      }
+    }
+  }
+  @ViewBuilder private func running(_ t: Tourney) -> some View {
+    Section {
+      if !t.msg.isEmpty { Text(t.msg) }
+      if let m = t.mine() {
+        let foe = t.foe(m)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(t.round(m)).font(.footnote).foregroundStyle(.secondary)
+          Text("You vs \(foe.name)").font(.headline)
+          Text("\(TourneyView.kindName(t.kind)), race to \(t.race), \(TableModel.FOES[foe.level ?? "medium"] ?? "") level").font(.footnote).foregroundStyle(.secondary)
+        }
+        Button(action: play) { Text("Play Match").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+          .background(Capsule().fill(.white)).foregroundStyle(.black).listRowBackground(Color.clear).accessibilityIdentifier("tourney-play")
+      }
+    } header: { Text("\(Self.kindName(t.kind)), \(t.size) players, \(t.fmt == "single" ? "single" : "double") elimination") }
+    bracket(t)
+    Section { Button(role: .destructive) { store.tour = nil; store.save() } label: { Text("Abandon Tournament") } }
+  }
+  @ViewBuilder private func results(_ t: Tourney) -> some View {
+    Section {
+      if !t.msg.isEmpty { Text(t.msg) }
+      if let p = t.place { Text("You: \(Self.placeWords(p))").font(.headline) }
+      ForEach(Array((t.places ?? []).prefix(4).enumerated()), id: \.offset) { _, p in
+        HStack { Text(t.field[p[0]].name); Spacer(); Text(Self.placeWords(p[1])).foregroundStyle(.secondary) }
+      }
+    } header: { Text("Last Tournament") }
+    bracket(t)
+  }
+  /* the bracket by round, in play order: each match's players and score, simulated ones marked */
+  @ViewBuilder private func bracket(_ t: Tourney) -> some View {
+    let c = t.ctx(), T = t.bracket
+    let order = T.M.indices.reduce(into: [String]()) { acc, m in let r = t.round(m); if !acc.contains(r) { acc.append(r) } }
+    ForEach(order, id: \.self) { r in
+      Section(r) {
+        ForEach(T.M.indices.filter { t.round($0) == r }, id: \.self) { m in
+          let o = CareerLib.outcome(c, m), nm = { (p: Int?) -> String in p == nil ? "TBD" : p! < 0 ? "Bye" : t.field[p!].name }
+          if o.st != "skip" {
+            HStack {
+              Text("\(nm(o.a)) vs \(nm(o.b))").lineLimit(1).fontWeight(o.a == 0 || o.b == 0 ? .bold : .regular)
+              Spacer()
+              if let s = t.res[m] { Text("\(s[0])-\(s[1])\(t.sim[m] ? ", simulated" : t.ff[m] ? ", forfeit" : "")").font(.footnote).monospacedDigit().foregroundStyle(.secondary) }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 /* the party's setup (6f): the game (a ring ruleset: 9-ball ring, rotation ring, Around the table), how many play
    and their names */
 struct PartySetup: View {
@@ -683,15 +804,27 @@ struct Overlays: View {
           .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("resume")
         Button { model.paused = false; model.rerack() } label: { Label("Restart", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity, minHeight: 44) }
           .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
-        Button { model.paused = false; back() } label: { Text("Quit to Home").frame(maxWidth: .infinity, minHeight: 44) }
+        Button { model.paused = false; model.tourneyAbandon(); back() } label: { Text(model.tmatch != nil ? "Forfeit Match" : "Quit to Home").frame(maxWidth: .infinity, minHeight: 44) }
           .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
       }
     } else if let g = model.g, g.winner != nil, model.rolling == nil {
       card {
         Text(Words.overLine(g)).font(.headline).multilineTextAlignment(.center)
-        Button { model.party != nil ? model.partyAgain() : model.rerack() } label: { Text("Play Again").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
-          .background(Capsule().fill(.white)).foregroundStyle(.black)
-        Button(action: back) { Text("Home").frame(maxWidth: .infinity, minHeight: 44) }
+        if let t = model.tmatch {
+          /* a tournament match: the racks, then the next rack or back to the bracket */
+          Text("You \(t.score[0]), \(t.foe) \(t.score[1]), race to \(t.need)").font(.subheadline).foregroundStyle(.secondary)
+          if t.done {
+            Button(action: back) { Text("Back to Tournament").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+              .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("tourney-back")
+          } else {
+            Button { model.tourneyNextRack() } label: { Text("Next Rack").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+              .background(Capsule().fill(.white)).foregroundStyle(.black)
+          }
+        } else {
+          Button { model.party != nil ? model.partyAgain() : model.rerack() } label: { Text("Play Again").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(.white)).foregroundStyle(.black)
+          Button(action: back) { Text("Home").frame(maxWidth: .infinity, minHeight: 44) }
+        }
       }
     } else if let g = model.g, let o = g.option, model.rolling == nil {
       card {

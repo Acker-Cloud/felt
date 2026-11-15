@@ -25,8 +25,14 @@ function guideSource() {
   const cut = (a, b) => { const i = html.indexOf(a), j = html.indexOf(b, i); if (i < 0 || j < 0) throw new Error('ios-golden: 4d moved: ' + a); return html.slice(i, j); };
   return cut('function aimSweep(', '/* polylines and rings') + cut('const PV_CAP = ', '/* the preview for this aim');
 }
+/* 6f's quick tournament, its pure part: the field, the draw, the CPU matches settled by the model (T_KINDS to tSave) */
+function tourneySource() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8'), i = html.indexOf('const T_KINDS = '), j = html.indexOf('function tSave()', i);
+  if (i < 0 || j < 0) throw new Error('ios-golden: 6f moved');
+  return html.slice(i, j);
+}
 function loadFd() {
-  let src = regionSource() + '\n;let game = null; const cueBall = () => game.balls.find(b => b.n === game.cue); const performance = { now: () => 0 };\n' + guideSource();
+  let src = regionSource() + '\n;let game = null; const cueBall = () => game.balls.find(b => b.n === game.cue); const performance = { now: () => 0 };\n' + guideSource() + '\n' + tourneySource();
   const pw = [['clamp(power, 0, 1) ** POWER_EXP', 'Math.pow(clamp(power, 0, 1), POWER_EXP)'],
     ['clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1) ** (1 / POWER_EXP)', 'Math.pow(clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1), 1 / POWER_EXP)']];
   for (const [a, b] of pw) { if (!src.includes(a)) throw new Error('ios-golden: sim changed, update the pow rewrite: ' + a); src = src.replace(a, b); }
@@ -37,7 +43,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -424,7 +430,27 @@ function build() {
     }
     brackets.push({ fmt, n, M: T.M.map(x => ({ a: x.a, b: x.b, br: x.br, rd: x.rd, dep: x.dep, st: x.st === undefined ? null : x.st, el: x.el === undefined ? null : x.el, fin: !!x.fin, cond: x.cond || null, of: x.of === undefined ? null : x.of })), steps, res });
   }
-  const career = JSON.stringify({ seed: 4242, players, models, brackets, hashes: ['', 'a', 'felt', 'Zhao|9|p'].map(x => [x, L.hashStr(x)]) });
+  /* whole tournaments by the page's tourneyNew and tSettle, the player's matches reported with drawn scores
+     (oriented as tReport orients them), and the places and round names at the end */
+  const tourneys = [];
+  for (const [kind, size, fmt, race, field, seed] of [['9', 8, 'single', 3, 'mixed', 11], ['8', 16, 'double', 2, 'mixed', 2026], ['snooker', 4, 'single', 2, 'hard', 7],
+    ['straight', 8, 'double', 50, 'easy', 99], ['carom', 16, 'single', 10, 'medium', 31337], ['heyball', 4, 'double', 1, 'mixed', 5]]) {
+    const t = S.tourneyNew({ kind, size, fmt, race, field, seed, ruleset: undefined });
+    const start = JSON.parse(JSON.stringify({ field: t.field, f: t.f, res: t.res, sim: t.sim, race: t.race, ruleset: t.ruleset }));
+    const reports = [];
+    for (let g = 0; g < 40; g++) {
+      const m = S.tMine(t);
+      if (m === null) break;
+      const won = crnd() < 0.55, lose = Math.floor(crnd() * t.race), mine = won ? t.race : lose, theirs = won ? lose : t.race;
+      const o = L.outcome(S.tCtx(t), m);
+      t.res[m] = o.a === 0 ? [mine, theirs] : [theirs, mine];
+      S.tSettle(t);
+      reports.push({ m, mine, theirs, res: t.res.slice(), sim: t.sim.slice() });
+    }
+    const T = S.tTpl(t);
+    tourneys.push({ kind, size, fmt, race, field, seed, start, reports, done: t.done, places: t.places, rounds: T.M.map((_, m) => L.roundName({ fmt }, T, m)) });
+  }
+  const career = JSON.stringify({ seed: 4242, players, models, brackets, tourneys, hashes: ['', 'a', 'felt', 'Zhao|9|p'].map(x => [x, L.hashStr(x)]) });
   const q = v => JSON.stringify(v);
   const careerData = `/* GENERATED by tools/ios-golden.cjs from index.html's career engine (its constants, sim 1 career region).
    Do not edit: change the page and re-run the tool; tests/ios-check.cjs fails while this is stale. */

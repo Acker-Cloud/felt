@@ -199,4 +199,111 @@ public enum CareerLib {
     guard let r = c.res[m] else { return Outcome(st: "ready", a: a, b: b) }
     return Outcome(st: "done", a: a, b: b, w: r[0] > r[1] ? a : b, l: r[0] > r[1] ? b : a, s: r)
   }
+
+  public static func complete(_ c: Ctx) -> Bool { c.T.M.indices.allSatisfy { let s = outcome(c, $0).st; return s == "done" || s == "bye" || s == "skip" } }
+  /* placings for a knockout: players out at the same stage share a place (1 + how many went out later) */
+  public static func placings(_ T: Bracket, _ f: [Int], _ res: [[Int]?]) -> [[Int]] {
+    let c = Ctx(T, f, res), pids = f
+    var st: [Int: Double] = Dictionary(uniqueKeysWithValues: pids.map { ($0, Double.infinity) })
+    for (m, x) in T.M.enumerated() {
+      let o = outcome(c, m)
+      if o.st != "done" { continue }
+      if x.el == "true" { st[o.l!] = Double(x.st!) }
+      else if x.el == "gf" && outcome(c, m + 1).st == "skip" { st[o.l!] = Double(x.st!) }
+    }
+    let vals = pids.map { st[$0]! }
+    let out = pids.map { p in [p, 1 + vals.filter { $0 > st[p]! }.count] }
+    return out.enumerated().sorted { a, b in a.element[1] != b.element[1] ? a.element[1] < b.element[1] : f.firstIndex(of: a.element[0])! < f.firstIndex(of: b.element[0])! }.map { $0.element }
+  }
+  public static func roundName(_ fmt: String, _ T: Bracket, _ m: Int) -> String {
+    let x = T.M[m]
+    if x.br == "G" { return "Grand final" }
+    if x.br == "G2" { return "Grand final, deciding match" }
+    if x.br == "L" { return "Losers bracket, round \((x.st ?? 0) + 1)" }
+    let left = T.M.filter { $0.br == x.br && $0.rd == x.rd }.count
+    return left == 1 ? "Final" : left == 2 ? "Semi-final" : left == 4 ? "Quarter-final" : "Round of \(left * 2)"
+  }
+}
+
+/* 6f's quick tournament, its pure part, line for line (T_KINDS to tourneyNew): the field (the player and CPU entrants
+   from genPlayer, each a level), the draw, every CPU match the model settles before the player's next, the places */
+public struct Tourney: Codable, Sendable {
+  public struct Entrant: Codable, Sendable { public var name: String, first: String, me: Bool? = nil, arch: String? = nil, level: String? = nil }
+  public var v = 1, seed: Int, kind: String, ruleset: String, fmt: String, size: Int, race: Int, str: String
+  public var field: [Entrant], f: [Int], res: [[Int]?], sim: [Bool], ff: [Bool], live: Int? = nil, done = false, places: [[Int]]? = nil, msg = ""
+  public static let KINDS = ["8", "9", "10", "straight", "rotation", "heyball", "snooker", "carom"], SIZES = [4, 8, 16], FMTS = ["single", "double"], FIELDS = ["mixed", "easy", "medium", "hard"]
+  public static func races(_ kind: String) -> [Int] { ["straight": [25, 50, 75, 100], "snooker": [1, 2, 3], "carom": [5, 10, 15]][kind] ?? [1, 2, 3, 5] }
+  public static func points(_ kind: String) -> Bool { kind == "straight" || kind == "carom" }
+  static let RACE_DEF = ["straight": 50, "snooker": 2, "carom": 10], BASE = ["easy": 40.0, "medium": 58, "hard": 76]
+  /* tAttrs: an AI entrant's attributes for the model, its level's base moved by its archetype */
+  static func attrs(_ level: String, _ arch: String) -> [String: Double] {
+    let d = CareerData.ARCH.first { $0.id == arch }?.d ?? [:], b = BASE[level] ?? BASE["medium"]!
+    var at: [String: Double] = [:]
+    for k in CareerData.ATTRS { at[k] = Swift.min(99, Swift.max(5, CareerLib.round((k == "agg" ? 50 : b) + (d[k] ?? 0)))) }
+    return at
+  }
+  public var bracket: CareerLib.Bracket { CareerLib.makeBracket(fmt, size) }
+  public func ctx() -> CareerLib.Ctx { CareerLib.Ctx(bracket, f, res) }
+  /* tMine: the player's (entrant 0) match ready to play, or nil */
+  public func mine(_ c: CareerLib.Ctx? = nil) -> Int? {
+    let c = c ?? ctx()
+    for m in c.T.M.indices where res[m] == nil { let o = CareerLib.outcome(c, m); if o.st == "ready" && (o.a == 0 || o.b == 0) { return m } }
+    return nil
+  }
+  func model(_ a: Int, _ b: Int, _ m: Int) -> [Int] {
+    let side = { (id: Int) in CareerLib.Side(at: Tourney.attrs(self.field[id].level!, self.field[id].arch!), pref: self.kind) }
+    return CareerLib.playModel(side(a), side(b), kind, race, Double(CareerLib.seedOf([String(seed), "m", String(m)]))).s
+  }
+  /* tSettle: every CPU match playable before the player's next (all once the player is out), then the end and places */
+  public mutating func settle() {
+    let T = bracket
+    for _ in 0..<400 {
+      let c = CareerLib.Ctx(T, f, res), my = mine(c), lim = my == nil ? Int.max : T.M[my!].dep
+      var pickM = -1, o: CareerLib.Outcome? = nil
+      for i in T.M.indices where pickM < 0 {
+        if res[i] != nil || T.M[i].dep > lim { continue }
+        let x = CareerLib.outcome(c, i)
+        if x.st == "ready" && x.a != 0 && x.b != 0 { pickM = i; o = x }
+      }
+      if pickM < 0 { break }
+      res[pickM] = model(o!.a!, o!.b!, pickM); sim[pickM] = true
+    }
+    let c = CareerLib.Ctx(T, f, res)
+    done = CareerLib.complete(c)
+    places = done ? CareerLib.placings(T, f, res) : nil
+  }
+  /* tourneyNew */
+  public static func make(kind k: String, ruleset: String?, size s: Int, fmt fm: String, race r: Int, field fl: String, seed sd: Int) -> Tourney {
+    let seed = sd == 0 ? 1 : sd, kind = KINDS.contains(k) ? k : "9", size = SIZES.contains(s) ? s : 8, fmt = FMTS.contains(fm) ? fm : "single"
+    let race = races(kind).contains(r) ? r : RACE_DEF[kind] ?? 3
+    let sets = RULESETS.values.filter { $0.game == kind && !$0.ring }.map { $0.id }
+    let rs = ruleset.flatMap { sets.contains($0) ? $0 : nil } ?? DEFAULT_RULESET[kind]!, str = FIELDS.contains(fl) ? fl : "mixed"
+    var names: Set<String> = ["You"], field = [Entrant(name: "You", first: "You", me: true)]
+    for i in 1..<size {
+      let g = CareerLib.genPlayer(seed, i, &names), u = cpuRng(Double(CareerLib.seedOf([String(seed), "lv", String(i)])))()
+      field.append(Entrant(name: g.name, first: g.first, arch: g.arch, level: str != "mixed" ? str : u < 0.3 ? "easy" : u < 0.7 ? "medium" : "hard"))
+    }
+    var f = Array(0..<field.count)
+    let rr = cpuRng(Double(CareerLib.seedOf([String(seed), "draw"])))
+    for i in stride(from: f.count - 1, to: 0, by: -1) { let j = Int((rr() * Double(i + 1)).rounded(.down)); f.swapAt(i, j) }
+    let n = CareerLib.makeBracket(fmt, size).M.count
+    var t = Tourney(seed: seed, kind: kind, ruleset: rs, fmt: fmt, size: size, race: race, str: str, field: field, f: f,
+                    res: Array(repeating: nil, count: n), sim: Array(repeating: false, count: n), ff: Array(repeating: false, count: n))
+    t.settle()
+    return t
+  }
+  /* tReport: the player's match m, mine and theirs, oriented onto the bracket's sides */
+  public mutating func report(_ m: Int, _ mineScore: Int, _ theirs: Int, forfeit: Bool) {
+    let o = CareerLib.outcome(ctx(), m)
+    res[m] = o.a == 0 ? [mineScore, theirs] : [theirs, mineScore]
+    ff[m] = forfeit; live = nil
+    settle()
+  }
+  /* tRound: the career's round name, a double elimination's winners side named as such */
+  public func round(_ m: Int) -> String {
+    let T = bracket, x = T.M[m], n = CareerLib.roundName(fmt, T, m)
+    return x.br == "U" ? "Winners bracket, \(n.prefix(1).lowercased() + n.dropFirst())" : n
+  }
+  public func foe(_ m: Int) -> Entrant { let o = CareerLib.outcome(ctx(), m); return field[o.a == 0 ? o.b! : o.a!] }
+  public var place: Int? { places.map { p in (p.first { $0[0] == 0 } ?? [0, size])[1] } }
 }
