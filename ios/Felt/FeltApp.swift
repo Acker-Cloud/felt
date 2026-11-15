@@ -323,8 +323,8 @@ struct TableScreen: View {
       }
     }
     .background(Color(rgb: 9, 9, 10).ignoresSafeArea())
-    .onAppear { model.reduceMotion = reduceMotion }
-    .onChange(of: reduceMotion) { _, v in model.reduceMotion = v }
+    .onAppear { model.reduceMotion = reduceMotion || Prefs.reduceMotion }
+    .onChange(of: reduceMotion) { _, v in model.reduceMotion = v || Prefs.reduceMotion }
     .overlay(alignment: .topTrailing) { if model.prac != nil && !model.paused { PracticeTools(model: model).padding(.top, 8).padding(.trailing, 12) } }
     /* the elevation sheet over the pad (upright: above it, at the strip's leading end), a tap anywhere else closing it */
     .overlay(alignment: .bottomLeading) {
@@ -766,7 +766,8 @@ struct PowerBar: View {
   let upright: Bool
   @State private var t0: Date? = nil
   @State private var fullOnce = false
-  @Environment(\.accessibilityReduceMotion) private var still
+  @Environment(\.accessibilityReduceMotion) private var sysStill
+  private var still: Bool { sysStill || Prefs.bool("reduceMotion", false) }
   var body: some View {
     GeometryReader { g in
       let len = upright ? g.size.width : g.size.height, p = CGFloat(model.power), live = p > 0

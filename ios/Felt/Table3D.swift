@@ -186,7 +186,7 @@ struct BallU {
   /* V3's seat and moves (v3Update, v3Go): the pivot and yaw, what the seat was set for, the overview and a move */
   var px = Double.nan, py = Double.nan, yaw = 0.0, seatSet = false, seatShot = -1.0, seatTurn = -1, seatPlan: Double? = nil
   var ovOn = false, ovYaw = 0.0, ov: (key: String, o: V3.Overview)? = nil, mv: (from: V3.Orbit, t0: Double, ms: Double)? = nil, rolled = false
-  var still: Bool { UIAccessibility.isReduceMotionEnabled }
+  var still: Bool { Prefs.reduceMotion }
   /* v3Go: a move to the overview (out) or back behind the cue ball; Reduce Motion, or no pose yet: a cut */
   func go(_ out: Bool, _ now: Double) {
     ovOn = out

@@ -36,6 +36,8 @@ enum Prefs {
   static var dressMode: String { str("dress", "game") }
   /* Table View (settings.view): "top" or "3d", with the 3D camera's pitch (8-70 deg) and distance (0.45-3.2 m), clamped */
   static var view: String { str("view", "top") }
+  /* reducedMotion(): Settings' Reduce Motion, or the system's, whichever says so */
+  static var reduceMotion: Bool { bool("reduceMotion", false) || UIAccessibility.isReduceMotionEnabled }
   /* settings.names: the two players' names, as given at setup (cleanName: spaces collapsed, trimmed, 12 at most) */
   static func cleanName(_ v: String) -> String { String(v.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").prefix(12)) }
   static var names: [String] {
@@ -105,6 +107,8 @@ struct SettingsView: View {
   @AppStorage("felt.settings.vol") private var vol = 100
   @AppStorage("felt.settings.volFx") private var volFx = 100
   @AppStorage("felt.settings.replays") private var replays = true
+  @AppStorage("felt.settings.reduceMotion") private var reduceMotion = false
+  @AppStorage("felt.settings.hcAim") private var hcAim = false
   @AppStorage("felt.settings.bar") private var bar = "mid"
   /* the list (prefsList): a row per page (PREF_PAGES), its icon, name and line, pushed from the right. The page's
      Accessibility page is not here: none of its settings (ball marks, high-contrast aim, text size, Space on the bar)
@@ -116,6 +120,7 @@ struct SettingsView: View {
         NavigationLink { page("Controls") { controls } } label: { PrefRow(icon: "switch.2", name: "Controls", line: "Auto aim, layout, power bar") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("Graphics") { graphics } } label: { PrefRow(icon: "photo", name: "Graphics", line: "Cloth, camera, replay, motion") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("Audio and Haptics") { audio } } label: { PrefRow(icon: "speaker.wave.2.fill", name: "Audio and Haptics", line: "Volume, table sounds, haptics") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        NavigationLink { page("Accessibility") { a11y } } label: { PrefRow(icon: "figure.stand", name: "Accessibility", line: "High-contrast aim, reduce motion") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("About") { about } } label: { PrefRow(icon: "info.circle", name: "About", line: "This build") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
       } header: {
         /* the page's header row: "Settings" in Title 1, by the back button */
@@ -182,6 +187,9 @@ struct SettingsView: View {
       Picker("Replays", selection: $replays) { Text("Offer").tag(true); Text("Never").tag(false) }.pickerStyle(.segmented).labelsHidden()
     } header: { Text("Replays") } footer: { Text("Offer puts a Replay pill over the table after a shot. Never keeps the table clear after every shot.") }
     Section {
+      Toggle("Reduce Motion", isOn: $reduceMotion)
+    } header: { Text("Motion") } footer: { Text("On: no sliding sheets, swings or pulses, whatever the system says. Off: follows the system setting.") }
+    Section {
       Toggle("Opening Animation", isOn: $intro)
     } header: { Text("Opening") } footer: { Text("A break under the lamp each time felt opens, then the home. A tap skips it. With Reduce Motion the home simply fades in.") }
   }
@@ -195,6 +203,13 @@ struct SettingsView: View {
     Section {
       Picker("Haptics", selection: $haptics) { Text("On").tag(true); Text("Off").tag(false) }.pickerStyle(.segmented).labelsHidden()
     } header: { Text("Haptics") } footer: { Text("A tick for a hard contact, two for a pot, three for a win.") }
+  }
+  /* ppA11y: Seeing the Table (the page's ball marks, text size and keyboard rows are not ported) */
+  @ViewBuilder private var a11y: some View {
+    Section {
+      Toggle("High-Contrast Aim Line", isOn: $hcAim)
+      Toggle("Reduce Motion", isOn: $reduceMotion)
+    } header: { Text("Seeing the Table") } footer: { Text("High contrast draws the aim line, the ghost ball and the paths wider, white over a near-black edge, on any cloth. Reduce Motion: no sliding sheets, swings or pulses, whatever the system says.") }
   }
   /* ppAbout: felt, and the sound credits (CREDITS.md) */
   @ViewBuilder private var about: some View {

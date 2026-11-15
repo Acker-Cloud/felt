@@ -239,7 +239,7 @@ final class IntroBuilt: @unchecked Sendable {
   /* introBoot: on a cold launch at home, unless it is off, Reduce Motion (the fade) or a test asks for none */
   func boot(size: CGSize, title: CGRect, insets: EdgeInsets, scale: Double) {
     guard state == .off else { return }
-    if UIAccessibility.isReduceMotionEnabled { state = .fade; withAnimation(.easeOut(duration: 0.24)) { ik = 1 } completion: { self.state = .done }; return }
+    if Prefs.reduceMotion { state = .fade; withAnimation(.easeOut(duration: 0.24)) { ik = 1 } completion: { self.state = .done }; return }
     state = .prep; prepT0 = CACurrentMediaTime(); ik = 0; cv = 0; pose = [0, 0, 1, 1, 100]
     let dp = min(3, scale), W = Int((size.width * dp).rounded()), H = Int((size.height * dp).rounded())
     self.dp = dp

@@ -346,7 +346,7 @@ enum HeroArt {
       }
     }
   }
-  func replay() { t0 = CACurrentMediaTime(); done = false; if UIAccessibility.isReduceMotionEnabled { t0 -= 10; tick() } }
+  func replay() { t0 = CACurrentMediaTime(); done = false; if Prefs.reduceMotion { t0 -= 10; tick() } }
   func tick() {
     guard let p = parts, !done else { return }
     let t = (CACurrentMediaTime() - t0) * 1000

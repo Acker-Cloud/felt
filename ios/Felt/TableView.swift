@@ -932,17 +932,25 @@ final class Sink2D: GuideSink {
   let m: Mapper
   init(ctx: GraphicsContext, m: Mapper) { g = ctx; self.m = m }
   var ctx: GraphicsContext? { g }
+  /* settings.hcAim (guideHC): every guide stroke at least 2.5 pt (1.8 times its width) over a near-black edge, its white
+     opaque */
+  let hc = Prefs.bool("hcAim", false)
   func line(_ pts: [[Double]], _ col: Color, _ w: Double, _ dash: [CGFloat]) {
     var p = Path(); for (i, q) in pts.enumerated() { i == 0 ? p.move(to: m.pt(q[0], q[1])) : p.addLine(to: m.pt(q[0], q[1])) }
-    g.stroke(p, with: .color(.black.opacity(0.22)), style: StrokeStyle(lineWidth: w + 2, lineCap: .round, lineJoin: .round, dash: dash))
-    g.stroke(p, with: .color(col), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round, dash: dash))
+    let W = hc ? Swift.max(2.5, w * 1.8) : w
+    g.stroke(p, with: .color(.black.opacity(hc ? 0.85 : 0.22)), style: StrokeStyle(lineWidth: W + (hc ? 3 : 2), lineCap: .round, lineJoin: .round, dash: dash))
+    g.stroke(p, with: .color(hcStyle(col, hc)), style: StrokeStyle(lineWidth: W, lineCap: .round, lineJoin: .round, dash: dash))
   }
   func ring(_ x: Double, _ y: Double, _ r: Double, _ col: Color, _ w: Double, fill: Color?, ghost: Bool) {
     let q = m.pt(x, y), p = Path(ellipseIn: CGRect(x: q.x - r, y: q.y - r, width: 2 * r, height: 2 * r))
     if let f = fill { g.fill(p, with: .color(f)) }
-    g.stroke(p, with: .color(col), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round))
+    let W = hc ? Swift.max(2.5, w * 1.8) : w
+    if hc { g.stroke(p, with: .color(.black.opacity(0.85)), style: StrokeStyle(lineWidth: W + 3, lineCap: .round, lineJoin: .round)) }
+    g.stroke(p, with: .color(hcStyle(col, hc)), style: StrokeStyle(lineWidth: W, lineCap: .round, lineJoin: .round))
   }
 }
+/* hcStyle: a white overlay drawn opaque under high contrast */
+func hcStyle(_ c: Color, _ hc: Bool) -> Color { guard hc else { return c }; let v = rgbaOf(c); return v[0] > 0.99 && v[1] > 0.99 && v[2] > 0.99 ? .white : c }
 func rgbaOf(_ c: Color) -> [Double] { var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0; UIColor(c).getRed(&r, green: &g, blue: &b, alpha: &a); return [r, g, b, a].map { Double($0) } }
 final class Sink3D: GuideSink {
   var rib: V3Ribbons
@@ -950,10 +958,11 @@ final class Sink3D: GuideSink {
   var ghost: (x: Double, y: Double, col: [Double])? = nil
   init(_ C: V3.Cam, s: Sim, m: Mapper, scale: Double, topH: Double) { rib = V3Ribbons(C); self.C = C; self.s = s; self.m = m; self.scale = scale; self.topH = topH }
   var ctx: GraphicsContext? { nil }
+  let hc = Prefs.bool("hcAim", false)
   func line(_ pts: [[Double]], _ col: Color, _ w: Double, _ dash: [CGFloat]) {
-    let d = dash.isEmpty ? nil : dash.map { Double($0) / m.k }
-    rib.line(pts, (w + 2) * scale, [0, 0, 0, 0.22], dash: d)
-    rib.line(pts, w * scale, rgbaOf(col), dash: d)
+    let d = dash.isEmpty ? nil : dash.map { Double($0) / m.k }, W = hc ? Swift.max(2.5, w * 1.8) : w
+    rib.line(pts, (W + (hc ? 3 : 2)) * scale, [0, 0, 0, hc ? 0.85 : 0.22], dash: d)
+    rib.line(pts, W * scale, rgbaOf(hcStyle(col, hc)), dash: d)
   }
   func ring(_ x: Double, _ y: Double, _ r: Double, _ col: Color, _ w: Double, fill: Color?, ghost g: Bool) {
     if g { let c = rgbaOf(col); ghost = (x, y, c[0] > 0.85 && c[1] > 0.85 && c[2] > 0.85 ? [0.96, 0.96, 0.93] : c); return }
