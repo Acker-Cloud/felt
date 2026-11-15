@@ -154,6 +154,64 @@ final class TableModel {
     /* a career match (careerTerms): its event's calls and table, the event's own words */
     var call: CallConfig? = nil, spec: (table: String, shape: String?, pockets: String)? = nil, career = false, dress: Dress? = nil }
   private(set) var tmatch: TMatch?
+  /* settleSolo's trick shot: judged, the tries, the old stars and the program's run (TRICK_RUN attempts: full value on
+     the first, minus 1, minus 2), then the result sheet */
+  private func settleTrick(_ before: Game, _ r: ShotResult) {
+    guard var T = trick, let c = trickById(T.id) else { return }
+    let j = engine.trickJudge(c, r)
+    var gm = before; gm.balls = r.balls.map { b -> GBall in var x = GBall(n: b.n, x: b.x, y: b.y); x.on = b.on; return x }; gm.shots += 1
+    g = gm; rolling = nil; spin = Spin(); v3Top2d = false; syncBalls(); inHand = false
+    if !T.demo {
+      T.attempts += 1
+      var tries = TrickStore.tries; tries[c.id] = max(tries[c.id] ?? 0, T.attempts); TrickStore.tries = tries
+      if j.ok {
+        T.stars = trickStars(T.attempts)
+        var best = TrickStore.best; if T.stars > (best[c.id] ?? 0) { best[c.id] = T.stars; TrickStore.best = best }
+      }
+      let val = trickVal(c.id)
+      T.got = 0; T.runOver = false; T.runTry = 0
+      if val > 0 {
+        var sc = TrickStore.score
+        let n = (sc.run[c.id] ?? 0) + 1; T.runTry = n
+        if j.ok { T.got = trickPts(val, n); sc.pts[c.id] = max(sc.pts[c.id] ?? 0, T.got); sc.run[c.id] = nil }
+        else if n >= TRICK_RUN { T.runOver = true; sc.run[c.id] = nil }
+        else { sc.run[c.id] = n }
+        TrickStore.score = sc
+      }
+    }
+    trick = T
+    /* showTrickRes: the head, the words (a run's attempt and points, or the stars by try), the score now */
+    let i = TRICKS.firstIndex { $0.id == c.id } ?? 0, val = trickVal(c.id), n = T.runTry, a = T.attempts
+    let why: String
+    if T.demo { why = j.ok ? "One way to make it. Your turn." : j.why }
+    else if val > 0 {
+      let best = TrickStore.score.pts[c.id] ?? 0
+      why = j.ok ? "\(n == 1 ? "First attempt" : "Attempt \(n)") of this run: \(T.got) point\(T.got == 1 ? "" : "s"). Best: \(best) of \(val)."
+        : T.runOver ? "\(j.why) Run over, no points. Try again for a new run: full value on the first attempt." : "\(j.why) Attempt \(n) of \(TRICK_RUN): the next make scores \(trickPts(val, n + 1))."
+    } else {
+      let best = TrickStore.best[c.id] ?? 0
+      why = j.ok ? "\(a == 1 ? "First try" : "On try \(a)"): \(T.stars) star\(T.stars == 1 ? "" : "s")." + (best > T.stars ? " Best: \(best)." : "") : "\(j.why) Tries: \(a)."
+    }
+    let pts = val > 0 ? (j.ok && !T.demo && T.got > 0 ? "\(T.got) of \(val)" : "") : (j.ok && !T.demo ? String(repeating: "★", count: T.stars) + String(repeating: "☆", count: 3 - T.stars) : "")
+    trickRes = TrickRes(ok: j.ok, why: why, head: T.demo ? (j.ok ? "Like that" : "Close") : j.ok ? "Made it" : "Not quite", kind: "Trick shot \(i + 1) of \(TRICKS.count): \(c.title)", pts: pts, demo: T.demo, i: i)
+    msg = why
+    sound.cue(j.ok ? "win" : "foul")
+  }
+  /* startTrick again (Try Again), or another (Next) */
+  func startTrick(_ id: String) {
+    guard let c = trickById(id) else { return }
+    trick = TrickSession(id: c.id, attempts: trick?.id == c.id ? trick!.attempts : (TrickStore.tries[c.id] ?? 0))
+    rerack()
+  }
+  /* showMe: the layout again and the stored solution played as a shot (not an attempt) */
+  func showMe() {
+    guard let T = trick, let c = trickById(T.id), let sol = engine.trickSol(c) else { return }
+    startTrick(c.id)
+    trick?.demo = true
+    flashDue = ("Show me", "One way to make it", 1.1)
+    aim = sol.angle; spin = sol.spin; power = sol.power
+    shoot()
+  }
   /* settleSolo's practice: practiceJudge, the session's numbers, its words and cues */
   private func settlePractice(_ before: Game, _ shot: RuleShot) {
     if prac != nil { pushUndo(before) }
@@ -260,12 +318,19 @@ final class TableModel {
 
   /* practice (page 5s): the session's layout and seed, the undo stack (UNDO_MAX), its numbers, editing and the tools strip */
   struct Practice { var layout: String, seed: UInt32, undo: [Game] = [], shots = 0, pots = 0, potting = 0, edit: Bool, tools = false }
-  static let UNDO_MAX = 50
+  static let UNDO_MAX = 60
   var prac: Practice? = nil
   static let PRACTICE_NAMES = ["8": "8-Ball Rack", "9": "9-Ball Rack", "heyball": "Chinese 8-Ball Rack", "scatter": "Free Table", "empty": "Empty Table"]
   var freeTable: Bool { prac.map { $0.layout == "scatter" || $0.layout == "empty" } ?? false }
 
-  init(game: TableGame, cpu: String? = nil, practice: String? = nil, exhib: [String]? = nil, exhibArch: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil, match: TMatch? = nil) {
+  /* a trick shot session (startTrick): the challenge, attempts this run of the list, a Show me in play, and the last
+     attempt's result for the sheet (showTrickRes) */
+  struct TrickRes { var ok: Bool, why: String, head: String, kind: String, pts: String, demo: Bool, i: Int }
+  struct TrickSession { var id: String, attempts: Int, demo = false, stars = 0, got = 0, runOver = false, runTry = 0 }
+  var trick: TrickSession? = nil
+  var trickRes: TrickRes? = nil
+
+  init(game: TableGame, cpu: String? = nil, practice: String? = nil, trick: String? = nil, exhib: [String]? = nil, exhibArch: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil, match: TMatch? = nil) {
     self.game = game
     /* tourneyPlay: the player's next match, the opponent's level, the lag from the tournament's seed */
     var tm: TMatch? = match
@@ -274,8 +339,9 @@ final class TableModel {
       tm = TMatch(m: m, foe: foe.name, level: foe.level ?? "medium", arch: foe.arch, need: pts ? 1 : t.race, points: pts, race: t.race,
                       lag: cpuRng(Double(CareerLib.seedOf([String(t.seed), "lag", String(m)])))() < 0.5 ? 0 : 1, ruleset: t.ruleset)
     }
-    cpuLevel = practice != nil ? nil : tm?.level ?? (exhib == nil && party == nil ? cpu : nil)
+    cpuLevel = practice != nil || trick != nil ? nil : tm?.level ?? (exhib == nil && party == nil ? cpu : nil)
     /* startPractice: a fresh seed, editing on for the empty table */
+    if let id = trick, trickById(id) != nil { self.trick = TrickSession(id: id, attempts: TrickStore.tries[id] ?? 0) }
     if let l = practice {
       var P = Practice(layout: l, seed: UInt32.random(in: 0...0x7fffffff), edit: l == "empty")
       /* test hooks: `-felt-seed n` the scatter's seed, `-felt-tools` the tools strip open */
@@ -304,6 +370,10 @@ final class TableModel {
     /* the look: a career match wears the career's equipped items (lookCareer), else the settings' (look()) */
     dress = tm?.dress ?? Prefs.dress(game.table.2)
     rerack()
+    /* a test hook: `-felt-showme` plays the trick's stored solution a moment after it opens */
+    if trick != nil && ProcessInfo.processInfo.arguments.contains("-felt-showme") {
+      Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(1.5)); self?.showMe() }
+    }
     /* a test hook: `-felt-paused` opens the table with the pause menu up */
     if ProcessInfo.processInfo.arguments.contains("-felt-paused") { paused = true }
     /* a test hook: `-felt-loupe` holds the fine-aim wheel's loupe open */
@@ -320,6 +390,14 @@ final class TableModel {
   func rerack() {
     abandonCpuGame()
     rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], [], [], []]; potCount = 0; banner = nil
+    if let T = trick, let c = trickById(T.id) {
+      g = engine.trickGame(c); trickRes = nil
+      syncBalls()
+      let hint = trickHint(c)
+      flashDue = (c.title, hint.isEmpty ? c.goal : "\(c.goal) \(hint)", 2.2); msg = c.title + ". " + c.goal + (hint.isEmpty ? "" : " " + hint)
+      randomOrient(); aimAtNearest()
+      return
+    }
     if let P = prac {
       g = engine.newPractice(P.layout, seed: P.seed)
       syncBalls()
@@ -398,7 +476,7 @@ final class TableModel {
   private(set) var shotAt: TimeInterval = 0
   private(set) var now: TimeInterval = 0
   func shoot() {
-    guard rolling == nil, stroke == nil, power > 0.01, g?.option == nil, g?.winner == nil, !cpuTurn else { power = 0; return }
+    guard rolling == nil, stroke == nil, power > 0.01, g?.option == nil, g?.winner == nil, !cpuTurn, trickRes == nil else { power = 0; return }
     /* a pull the call refuses (no needed call yet) opens the call's menu on the let-go, the pockets first */
     if !callReady { power = 0; callMenu = true; return }
     markPower = power
@@ -495,6 +573,7 @@ final class TableModel {
     guard let before = g else { return }
     let shot = RuleShot(r)
     if before.mode == "practice" { settlePractice(before, shot); return }
+    if before.mode == "trick" { settleTrick(before, r); return }
     let shooter = before.turn, next = engine.judge(before, shot)
     potCount += next.verdict?.potted.count ?? 0
     if let gm0 = gBefore, gm0.turn < 4 { pottedBy[gm0.turn] += next.verdict?.potted.filter { $0 > 0 } ?? [] }

@@ -26,6 +26,7 @@ struct Home: View {
   @State private var statsPath: String? = nil
   /* a practice session's layout (startPractice) */
   @State private var practicing: PracticeGo? = nil
+  @State private var tricking: PracticeGo? = nil
   struct PracticeGo: Identifiable { let layout: String; var id: String { layout } }
   /* Solo: Practice (#pracSheet, 5s) */
   private var soloSection: some View {
@@ -37,6 +38,13 @@ struct Home: View {
         }.frame(minHeight: 44, alignment: .leading)
       }
       .accessibilityIdentifier("solo-practice")
+      NavigationLink { TricksList { tricking = PracticeGo(layout: $0) } } label: {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Trick Shots").font(.body.weight(.semibold))
+          Text("\(programTotal(TrickStore.score.pts)) of \(programMax()) points").font(.footnote).foregroundStyle(.secondary)
+        }.frame(minHeight: 44, alignment: .leading)
+      }
+      .accessibilityIdentifier("solo-tricks")
     } header: { Text("Solo") }
   }
   /* #leftNote: a game left by closing the app counted as a loss, once, until OK or LEFT_MS */
@@ -133,6 +141,8 @@ struct Home: View {
       if let i = a.firstIndex(of: "-felt-stats") { statsPath = i + 1 < a.count && !a[i + 1].hasPrefix("-") ? a[i + 1] : "all" }
       /* `-felt-practice 8|9|heyball|scatter|empty`: a practice session */
       if let i = a.firstIndex(of: "-felt-practice"), i + 1 < a.count { practicing = PracticeGo(layout: a[i + 1]) }
+      /* `-felt-trick id`: that trick shot */
+      if let i = a.firstIndex(of: "-felt-trick"), i + 1 < a.count { tricking = PracticeGo(layout: a[i + 1]) }
       /* `-felt-career`: the career's screen open */
       if a.contains("-felt-career") { showCareer = true }
       if a.contains("-felt-tourney") { store.start(Tourney.make(kind: "9", ruleset: nil, size: 8, fmt: "single", race: 3, field: "mixed", seed: 11)); showTourney = true }
@@ -173,6 +183,7 @@ struct Home: View {
         TableScreen(model: { let m = TableModel(game: g, tourney: t); m.onReport = { store.report($0, $1, $2, $3) }; return m }())
       }
     }
+    .fullScreenCover(item: $tricking) { t in TableScreen(model: TableModel(game: .eight, trick: t.layout)) }
     .fullScreenCover(item: $practicing) { p in TableScreen(model: TableModel(game: p.layout == "9" ? .nine : p.layout == "heyball" ? .heyball : .eight, practice: p.layout)) }
     .fullScreenCover(item: $party) { p in TableScreen(model: TableModel(game: p.game, party: (p.names, p.ruleset))) }
   }
@@ -219,6 +230,7 @@ struct TableScreen: View {
     .background(Color(rgb: 9, 9, 10).ignoresSafeArea())
     .overlay(alignment: .topTrailing) { if model.prac != nil && !model.paused { PracticeTools(model: model).padding(.top, 8).padding(.trailing, 12) } }
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
+    .overlay { if let r = model.trickRes, !model.paused { TrickResult(model: model, res: r, back: { dismiss() }) } }
     .onDisappear { model.abandonCpuGame() }
     .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
     .overlay { if let h = model.handoff, !model.paused { Handoff(model: model, p: h.p, first: h.first) } }
@@ -1309,5 +1321,79 @@ struct PracticeTools: View {
         .overlay(Capsule().strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
     }
     .accessibilityAddTraits(on ? .isSelected : [])
+  }
+}
+
+/* #tricks: the program's disciplines (each "Draw, 12 of 21") and Extra Shots, a card per shot: its difficulty and points
+   ("Difficulty 7", "6 of 7"), or its number, level and stars */
+struct TricksList: View {
+  let go: (String) -> Void
+  var body: some View {
+    let sc = TrickStore.score, best = TrickStore.best
+    let secs: [(String, [String])] = TRICK_PROGRAM.map { ("\($0.title), \(discTotal(sc.pts, $0.slots)) of \(discMax($0.slots))", $0.slots.compactMap { $0 }) }
+      + [("Extra Shots", TRICKS.filter { trickVal($0.id) == 0 }.map(\.id))]
+    List {
+      Section {} footer: { Text("\(programTotal(sc.pts)) of \(programMax()) points. Three attempts a run: full value on the first, minus 1, minus 2. A shot keeps its best, and a new run can always beat it.") }
+      ForEach(secs.filter { !$0.1.isEmpty }, id: \.0) { sec in
+        Section(sec.0) {
+          ForEach(sec.1, id: \.self) { id in
+            let c = trickById(id)!, i = TRICKS.firstIndex { $0.id == id }!, val = trickVal(id)
+            Button { go(id) } label: {
+              HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(c.title).font(.body.weight(.semibold)).foregroundStyle(.primary)
+                  Text(val > 0 ? "Difficulty \(val)" : "\(i + 1)" + (c.level.map { " \u{00b7} " + ($0.prefix(1).uppercased() + $0.dropFirst()) } ?? "")).font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if val > 0 { Text("\(sc.pts[id] ?? 0) of \(val)").font(.subheadline.weight(.semibold)).monospacedDigit().foregroundStyle(.primary) }
+                else { let s = best[id] ?? 0; Text(String(repeating: "★", count: s) + String(repeating: "☆", count: 3 - s)).foregroundStyle(.primary).accessibilityLabel("\(s) of 3 stars") }
+              }
+              .frame(minHeight: 44)
+            }
+            .accessibilityHint(c.goal + (trickHint(c).isEmpty ? "" : " " + trickHint(c)))
+            .accessibilityIdentifier("trick-" + id)
+          }
+        }
+      }
+    }
+    .navigationTitle("Trick Shots")
+  }
+}
+
+/* #trickRes: the shot's line, Made it or Not quite (Like that, Close for Show me), the words, the points or stars, then
+   Try Again, Show Me (when a solution is stored) and Next (First after the last); Back to Trick Shots */
+struct TrickResult: View {
+  let model: TableModel
+  let res: TableModel.TrickRes
+  let back: () -> Void
+  var body: some View {
+    VStack(spacing: 0) {
+      Spacer()
+      VStack(alignment: .leading, spacing: 10) {
+        Text(res.kind).font(.footnote).foregroundStyle(.secondary)
+        HStack(alignment: .firstTextBaseline) {
+          Text(res.head).font(.title2.bold())
+          Spacer()
+          if !res.pts.isEmpty { Text(res.pts).font(.title3.weight(.semibold)).monospacedDigit() }
+        }
+        Text(res.why).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: 10) {
+          Button { model.startTrick(TRICKS[res.i].id) } label: { Text("Try Again").frame(maxWidth: .infinity, minHeight: 44) }
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2))).accessibilityIdentifier("trickRetry")
+          if model.engine.trickSol(TRICKS[res.i]) != nil {
+            Button { model.showMe() } label: { Text("Show Me").frame(maxWidth: .infinity, minHeight: 44) }
+              .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2))).accessibilityIdentifier("trickShow")
+          }
+        }
+        Button { model.startTrick(TRICKS[(res.i + 1) % TRICKS.count].id) } label: { Text(res.i == TRICKS.count - 1 ? "First" : "Next").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+          .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("trickNext")
+        Button("Back to Trick Shots", action: back).frame(maxWidth: .infinity, minHeight: 44).foregroundStyle(.primary)
+      }
+      .foregroundStyle(.primary)
+      .padding(20)
+      .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
+      .padding(.horizontal, 12).padding(.bottom, 12)
+    }
+    .accessibilityElement(children: .contain)
   }
 }

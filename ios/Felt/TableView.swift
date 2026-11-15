@@ -108,6 +108,7 @@ struct TableCanvas: View {
       }
       ctx.scaleBy(x: sc, y: sc)
       drawGuide(&ctx, m)
+      drawSolo(&ctx, m)
       defer { drawLoupe(&ctx, m, bp) }
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       drawPots(&ctx, m, bp, rb, sc)
@@ -146,6 +147,20 @@ struct TableCanvas: View {
      paths, the object ball's solid line and the cue ball's dashed one, each over a faint dark
      under-stroke so it reads on any cloth (strokeLine, guideRing). Practice has no rules: any first
      contact is legal, and only the cue ball's pot is not. */
+  /* drawSolo: a trick shot's marks, the cue ball's target ring (filled faintly, a dashed edge) and the pocket the goal names
+     (a gold ring) */
+  private func drawSolo(_ ctx: inout GraphicsContext, _ m: Mapper) {
+    guard let gm = model.g, gm.mode == "trick", let id = gm.trick, let c = trickById(id), c.zoneR != nil || c.pocket != nil else { return }
+    if let r0 = c.zoneR, let z = model.engine.trickPoints(c)[-1] {
+      let p = m.pt(z[0], z[1]), r = r0 * m.k, box = CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)
+      ctx.fill(Path(ellipseIn: box), with: .color(.white.opacity(0.08)))
+      ctx.stroke(Path(ellipseIn: box), with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2, dash: [6, 5]))
+    }
+    if let k = c.pocket, k < model.sim.POCKETS.count {
+      let P = model.sim.POCKETS[k], p = m.pt(P[0], P[1]), r = model.sim.POCKET_R[k] * m.k + 5
+      ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(Color(rgb: 0xf2, 0xc9, 0x4c)), lineWidth: 2.5)
+    }
+  }
   private func drawGuide(_ ctx: inout GraphicsContext, _ m: Mapper) { drawGuide(Sink2D(ctx: ctx, m: m), m) }
   func drawGuide(_ sink: GuideSink, _ m: Mapper) {
     if Prefs.guide == "off" { return }
