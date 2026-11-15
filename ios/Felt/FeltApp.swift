@@ -951,6 +951,116 @@ struct TourneySetup: View {
   }
 }
 
+/* MD_PAGES.tour, under way: the kicker (`9-ball, 8 players, race to 3 racks`) over Quick Tournament; Your Next Match: the
+   round and a race tag, the opponent's avatar (initials on their colour), name, and style and level ("Shotmaker, hard
+   CPU"), Play Match; the bracket round by round (tMatchRow: the winner in bold, You in the accent, the score with
+   "simulated" or "forfeit" under it, else vs; Bye, To come); End Tournament, two taps */
+struct TourneyRun: View {
+  @Bindable var store: TourneyStore
+  let t: Tourney
+  let play: () -> Void
+  @State private var ending = false
+  static let AV_COLS = ["#1f7a55", "#2f6fb0", "#b03a2e", "#8a5a12", "#7b3fa0", "#375a7f", "#0f6e78", "#9c2f62", "#4d6b1f", "#a4501c", "#355c99", "#6b4a8a"]
+  /* the page's hashStr (FNV-1a), for an avatar's colour when none is kept */
+  static func hashStr(_ s: String) -> UInt32 { var h: UInt32 = 0x811c9dc5; for u in s.utf16 { h ^= UInt32(u); h = h &* 0x01000193 }; return h }
+  static func unitWords(_ kind: String, _ n: Int) -> String {
+    kind == "straight" || kind == "carom" ? "\(n) points" : kind == "snooker" ? "\(n) frame\(n == 1 ? "" : "s")" : "\(n) rack\(n == 1 ? "" : "s")"
+  }
+  static let KIND_LINE = ["8": "8-ball", "9": "9-ball", "10": "10-ball", "straight": "Straight pool", "rotation": "Rotation", "heyball": "Chinese 8-ball", "snooker": "Snooker", "carom": "Three-cushion"]
+  static let LEVEL = ["easy": "easy", "medium": "medium", "hard": "hard"]
+  var body: some View {
+    let c = t.ctx(), T = t.bracket
+    let order = T.M.indices.reduce(into: [String]()) { acc, m in if CareerLib.outcome(c, m).st != "skip" { let r = t.round(m); if !acc.contains(r) { acc.append(r) } } }
+    ScrollView {
+      VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("\(Self.KIND_LINE[t.kind] ?? t.kind), \(t.size) players, race to \(Self.unitWords(t.kind, t.race))").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+          Text("Quick Tournament").font(.system(size: 28, weight: .bold)).accessibilityAddTraits(.isHeader)
+        }
+        if !t.msg.isEmpty { Text(t.msg).font(.system(size: 15)) }
+        if let m = t.mine() {
+          let foe = t.foe(m)
+          ModeField("Your Next Match") {
+            VStack(alignment: .leading, spacing: 10) {
+              HStack {
+                Text(t.round(m)).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+                Spacer()
+                Text("Race to \(Self.unitWords(t.kind, t.race))").font(.system(size: 13, weight: .semibold)).padding(.horizontal, 10).padding(.vertical, 4)
+                  .background(Capsule().fill(Color.white.opacity(0.1)))
+              }
+              HStack(spacing: 12) {
+                let ini = foe.name.split(separator: " ").compactMap { $0.first }.prefix(2).map(String.init).joined()
+                Text(ini).font(.system(size: 17, weight: .bold)).foregroundStyle(.white).frame(width: 46, height: 46)
+                  .background(Circle().fill(css(Self.AV_COLS[Int(Self.hashStr(foe.name) % UInt32(Self.AV_COLS.count))])))
+                  .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                  Text(foe.name).font(.system(size: 17, weight: .semibold))
+                  Text("\(ExhibitionSetup.STYLES.first { $0.0 == (foe.arch ?? "allround") }?.1 ?? "All-Round"), \(Self.LEVEL[foe.level ?? "medium"] ?? "medium") CPU")
+                    .font(.system(size: 15)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+                }
+              }
+            }
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(rgb: 0x1c, 0x1c, 0x1f)))
+          }
+          Button(action: play) { Text("Play Match").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("tourney-play")
+        } else {
+          ModeNote("Your next opponent is not known yet.")
+        }
+        ForEach(order, id: \.self) { r in
+          ModeField(titleCaseWords(r)) {
+            VStack(spacing: 0) {
+              let ms = T.M.indices.filter { t.round($0) == r && CareerLib.outcome(c, $0).st != "skip" }
+              ForEach(Array(ms.enumerated()), id: \.element) { i, m in
+                row(c, m)
+                if i < ms.count - 1 { Divider().padding(.leading, 16) }
+              }
+            }
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(rgb: 0x1c, 0x1c, 0x1f)))
+          }
+        }
+        Button {
+          if ending { store.tour = nil; store.save() } else { ending = true; Task { try? await Task.sleep(for: .seconds(4)); ending = false } }
+        } label: {
+          Text(ending ? "Tap again to end it" : "End Tournament").font(.system(size: 17, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 50)
+            .foregroundStyle(ending ? Color.white : Color(rgb: 0xff, 0x8a, 0x7a))
+            .background(Capsule().fill(ending ? Color(rgb: 0xc0, 0x39, 0x2b) : Color(rgb: 0x2c, 0x2c, 0x30)))
+        }
+        .accessibilityIdentifier("tourney-end")
+      }
+      .padding(.horizontal, 16).padding(.bottom, 24)
+    }
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+  }
+  /* tMatchRow: a side's name (Bye, To come; the winner bold; You in the accent), the middle the score and how it was
+     settled, else bye or vs */
+  @ViewBuilder private func row(_ c: CareerLib.Ctx, _ m: Int) -> some View {
+    let o = CareerLib.outcome(c, m), done = o.st == "done"
+    let side = { (p: Int?, trail: Bool) -> AnyView in
+      let name = p == nil ? "To come" : p! < 0 ? "Bye" : p! == 0 ? "You" : t.field[p!].name
+      let win = done && p != nil && o.w == p
+      return AnyView(Text(name).font(.system(size: 15, weight: win ? .bold : .regular))
+        .foregroundStyle(p == 0 ? Color(rgb: 0x3d, 0xdc, 0x84) : win ? Color.white : Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.75))
+        .lineLimit(1).frame(maxWidth: .infinity, alignment: trail ? .trailing : .leading))
+    }
+    HStack(spacing: 8) {
+      side(o.a, false)
+      VStack(spacing: 0) {
+        if done, let s = t.res[m] {
+          Text("\(s[0])-\(s[1])").font(.system(size: 15, weight: .bold)).monospacedDigit()
+          if t.sim[m] || t.ff[m] { Text(t.ff[m] ? "forfeit" : "simulated").font(.system(size: 11)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)) }
+        } else {
+          Text(o.st == "bye" ? "bye" : "vs").font(.system(size: 15, weight: .bold))
+        }
+      }
+      .frame(width: 76)
+      side(o.b, true)
+    }
+    .padding(.horizontal, 16).frame(minHeight: 44)
+  }
+}
+
 struct TourneyView: View {
   @Bindable var store: TourneyStore
   let play: () -> Void
@@ -963,7 +1073,9 @@ struct TourneyView: View {
   static func game(_ k: String) -> TableGame? { ["8": .eight, "9": .nine, "10": .ten, "straight": .straight, "rotation": .rotation, "heyball": .heyball, "snooker": .snooker, "carom": .carom][k] }
   static func placeWords(_ p: Int) -> String { p == 1 ? "Champion" : p == 2 ? "Runner-up" : "Place \(p)" }
   var body: some View {
-    if store.tour == nil { TourneySetup(store: store) } else { list }
+    if store.tour == nil { TourneySetup(store: store) }
+    else if let t = store.tour, !t.done { TourneyRun(store: store, t: t, play: play) }
+    else { list }
   }
   private var list: some View {
     List {
