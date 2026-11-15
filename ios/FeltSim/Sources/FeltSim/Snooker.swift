@@ -49,7 +49,7 @@ extension RulesEngine {
     if reds > 0 || g.snk!.on == .colour { return reds * 8 + (g.snk!.on == .colour ? 7 : 0) + 27 }
     return cols.reduce(0) { $0 + snkValue($1) }
   }
-  func snookersNeeded(_ g: Game, _ p: Int) -> Bool { g.score![1 - p] - g.score![p] > snookerLeft(g) }
+  public func snookersNeeded(_ g: Game, _ p: Int) -> Bool { g.score![1 - p] - g.score![p] > snookerLeft(g) }
 
   func snkClear(_ balls: [GBall], _ ax: Double, _ ay: Double, _ bx: Double, _ by: Double, _ pass: Set<Int>, _ noCush: Bool = false) -> Bool {
     let ex = bx - ax, ey = by - ay, L = M.hypot(ex, ey), Ld = L == 0 ? 1 : L, ux = ex / Ld, uy = ey / Ld, R2 = 2 * sim.BALL_R - 1e-9

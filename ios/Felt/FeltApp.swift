@@ -331,6 +331,70 @@ struct PowerBar: View {
   }
 }
 
+/* .pc: a player's card in the pause menu: the turn mark (the signal red, lit, for the player to shoot), the name, and a
+   second line with the group or score in words (cardOf) and its balls as dots */
+struct PlayerCard: View {
+  let model: TableModel
+  let p: Int
+  var body: some View {
+    let c = model.cardOf(p), on = model.g?.turn == p && model.g?.winner == nil
+    VStack(alignment: .leading, spacing: 5) {
+      HStack(spacing: 8) {
+        Circle().fill(on ? Color(rgb: 0xc0, 0x39, 0x2b) : .clear)
+          .overlay(Circle().strokeBorder(on ? .clear : Color(rgb: 0x6b, 0x6b, 0x74), lineWidth: 1.5))
+          .background(Circle().stroke(on ? Color(.sRGB, red: 192 / 255, green: 57 / 255, blue: 43 / 255, opacity: 0.28) : .clear, lineWidth: 3).padding(-1.5))
+          .frame(width: 8, height: 8)
+        Text(model.cardName(p)).font(.body.weight(.bold)).lineLimit(1).truncationMode(.tail)
+      }
+      if !c.meta.isEmpty { Text(c.meta).font(.system(size: 12)).monospacedDigit().foregroundStyle(c.warn ? Color(hex: 0xffe27a) : Color(rgb: 0xa3, 0xa3, 0xaa)).lineLimit(1) }
+      if !c.dots.isEmpty { FlowDots(dots: c.dots, size: 12) }
+    }
+    .padding(.horizontal, 11).padding(.top, 9).padding(.bottom, 10)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(RoundedRectangle(cornerRadius: 12).fill(on ? Color(.sRGB, red: 38 / 255, green: 38 / 255, blue: 42 / 255, opacity: 0.96) : Color(rgb: 0x26, 0x26, 0x2a)))
+    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(on ? Color(rgb: 0x74, 0x74, 0x7e) : Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
+    .accessibilityElement(children: .combine)
+  }
+}
+/* dotEl: a ball as a flat dot, its colour (colorOf), a stripe's ivory caps, bumper's marked spot, a dark ball ringed so
+   it reads on the dark panel (darkBall: under 3:1 on #26262a), an inset shade; wrapped as the page's flex-wrap */
+struct FlowDots: View {
+  let dots: [Int]
+  let size: CGFloat
+  var body: some View {
+    let cols = max(1, Int(9 * 12 / size))
+    VStack(alignment: .leading, spacing: 3) {
+      ForEach(Array(stride(from: 0, to: dots.count, by: cols)), id: \.self) { i in
+        HStack(spacing: size > 13 ? 3 : 2) { ForEach(dots[i..<min(dots.count, i + cols)], id: \.self) { Dot(n: $0, size: size) } }
+      }
+    }
+  }
+}
+struct Dot: View {
+  let n: Int
+  let size: CGFloat
+  var body: some View {
+    let c = ballColor(n), col = Color(rgb: c.0, c.1, c.2)
+    let lum = { (v: Int) -> Double in let x = Double(v) / 255; return x <= 0.03928 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
+    let L = 0.2126 * lum(c.0) + 0.7152 * lum(c.1) + 0.0722 * lum(c.2), Lp = 0.2126 * lum(38) + 0.7152 * lum(38) + 0.0722 * lum(42)
+    let dark = !(n > 20 && n < 40) && (n > 40 || n <= 8) && (L + 0.05) / (Lp + 0.05) < 3
+    ZStack {
+      Circle().fill(col)
+      if n > 8 && n < 16 {
+        Circle().fill(LinearGradient(stops: [.init(color: Color(hex: 0xf6f4ec), location: 0), .init(color: Color(hex: 0xf6f4ec), location: 0.24),
+          .init(color: .clear, location: 0.24), .init(color: .clear, location: 0.76), .init(color: Color(hex: 0xf6f4ec), location: 0.76), .init(color: Color(hex: 0xf6f4ec), location: 1)],
+          startPoint: .top, endPoint: .bottom))
+      }
+      if n == 21 || n == 31 { Circle().fill(n == 21 ? Color(hex: 0xf7f4ea) : Color(hex: 0xc8262c)).frame(width: size * 0.52, height: size * 0.52) }
+      Circle().fill(RadialGradient(colors: [.clear, .black.opacity(0.35)], center: UnitPoint(x: 0.4, y: 0.4), startRadius: size * 0.2, endRadius: size * 0.6))
+    }
+    .frame(width: size, height: size)
+    .overlay(Circle().stroke(dark ? Color(rgb: 0xa3, 0xa3, 0xaa) : .black.opacity(0.3), lineWidth: dark ? 1.5 : 1).padding(dark ? -0.75 : -0.5))
+    .padding(.horizontal, dark ? 1.5 : 0)
+    .accessibilityLabel(String(n))
+  }
+}
+
 /* the call's menu (#callBar, 6p's pop-up material) over the power bar: Change or Clear Call, the pockets as a
    picture of the table as the player sees it (callPkMap: a 3 x 3 grid, the called one checked), Bank, Kick and Combo
    under a detailed call, Safety where the rules allow one, Push Out when it is on offer. A pick or a tap outside closes it. */
@@ -451,8 +515,20 @@ struct Overlays: View {
     if model.paused {
       /* the pause menu (6): what game this is, the latest word (#menuMsg), Resume, Restart, Quit to Home */
       card {
-        Text("Paused, \(model.game.rawValue)" + (model.cpuLevel != nil ? " vs CPU" : "")).font(.footnote).foregroundStyle(.secondary)
-        if !model.msg.isEmpty { Text(model.msg).font(.body).multilineTextAlignment(.center).accessibilityIdentifier("msg") }
+        Text("Paused, \(model.game.rawValue)" + (model.cpuLevel != nil ? " vs \(model.cardName(1).replacingOccurrences(of: " (CPU)", with: ""))" : "")).font(.footnote).foregroundStyle(.secondary)
+        /* gameNow: both players' cards (the shooter's lit), the potted balls in pot order, the latest word */
+        HStack(spacing: 8) { PlayerCard(model: model, p: 0); PlayerCard(model: model, p: 1) }
+        if model.game != .carom {
+          HStack(spacing: 10) {
+            Text("POTTED").font(.system(size: 12, weight: .bold)).kerning(1.1).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa))
+            let pr = model.pottedRow
+            if pr.isEmpty { Text("none yet").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)) }
+            else { FlowDots(dots: pr, size: 18) }
+            Spacer(minLength: 0)
+          }
+          .frame(minHeight: 30)
+        }
+        if !model.msg.isEmpty { Text(model.msg).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("msg") }
         Button { model.paused = false } label: { Label("Resume", systemImage: "play.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("resume")
         Button { model.paused = false; model.rerack() } label: { Label("Restart", systemImage: "arrow.counterclockwise").frame(maxWidth: .infinity, minHeight: 44) }

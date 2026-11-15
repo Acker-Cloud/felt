@@ -144,6 +144,8 @@ final class TableModel {
     TableModel.setUp(sim, spec)
     engine = RulesEngine(sim: sim)
     rerack()
+    /* a test hook: `-felt-paused` opens the table with the pause menu up */
+    if ProcessInfo.processInfo.arguments.contains("-felt-paused") { paused = true }
   }
 
   /* the game's balls as the sim's (velocities as the game left them; newTable zeroes the spin) */
@@ -154,7 +156,7 @@ final class TableModel {
   }
 
   func rerack() {
-    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); potCount = 0; banner = nil
+    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], []]; potCount = 0; banner = nil
     if let k = rulesKind {
       /* newGame with the settings' rules, snooker's frames and carom's race and cushions */
       g = k == "snooker" ? engine.snookerGame(frames: Prefs.snookerFrames, first: 0)
@@ -306,10 +308,12 @@ final class TableModel {
   /* settle() for a pocket game: the page's judge, then its words (banner and status line) */
   private func settleRules(_ r: ShotResult) {
     picked = false; resetCall()
+    gBefore = g
     guard let before = g else { return }
     let shot = RuleShot(r)
     let shooter = before.turn, next = engine.judge(before, shot)
     potCount += next.verdict?.potted.count ?? 0
+    if let gm0 = gBefore, gm0.turn < 2 { pottedBy[gm0.turn] += next.verdict?.potted.filter { $0 > 0 } ?? [] }
     g = next; rolling = nil; spin = Spin()
     syncBalls()
     words(next, shooter)
@@ -509,6 +513,55 @@ final class TableModel {
     }
   }
 
+
+  /* stats.potted: each player's pots (the verdict's potted, their own), for the pause menu's cards */
+  @ObservationIgnored private(set) var pottedBy: [[Int]] = [[], []]
+  @ObservationIgnored private var gBefore: Game? = nil
+
+  /* cardOf (page 6b): a player's card in the pause menu, the second line in words and its balls */
+  func cardOf(_ p: Int) -> (meta: String, dots: [Int], warn: Bool) {
+    guard let gm = g else { return ("", [], false) }
+    let on = gm.balls.filter { $0.on && $0.n > 0 }.map { $0.n }
+    switch gm.kind {
+    case "carom":
+      return ("\(p != 0 ? "Yellow" : "White"), \(gm.score![p]) of \(gm.race!)" + (gm.high![p] > 1 ? ", best run \(gm.high![p])" : ""), [C_CUE[p]], false)
+    case "straight", "rotation":
+      let f = gm.fouls[p], st = gm.kind == "straight"
+      return ("\(gm.score![p]) of \(gm.race!)" + (st && gm.high![p] > 1 ? ", best run \(gm.high![p])" : "") + (st && f > 0 ? ", \(f) foul\(f > 1 ? "s" : "") in a row" : ""),
+              !st && p == gm.turn && !on.isEmpty ? [on.min()!] : [], st && f >= 2)
+    case "snooker":
+      let up = p == gm.turn && gm.winner == nil, need = up && engine.snookersNeeded(gm, p), S = gm.snk!
+      var dots: [Int] = []
+      if up {
+        if let f = S.free { dots = S.on == .red ? [41, f] : [f] }
+        else { switch S.on { case .red: dots = [41]; case .colour: dots = S_COLS.filter { c in gm.balls.contains { $0.n == c && $0.on } }; case .ball(let b): dots = [b]; case .none: dots = [] } }
+      }
+      return (Words.ptsWord(gm.score![p]) + (up && S.brk > 0 ? ", break \(S.brk)" : "") + (need ? ", needs snookers" : ""), dots, need)
+    case "bumper":
+      let mine = on.filter { bOwner($0) == p }.sorted()
+      return ("\(Words.colourOf(p)), \(mine.count) left" + (mine.contains(B_MARK[p]) && mine.count > 1 ? ", marked first" : ""), mine, false)
+    default:
+      if is8(gm.kind) {
+        guard let gr = gm.groups[p] else { return ("Open table", [], false) }
+        let left = on.filter { engine.groupOf($0) == gr }
+        if left.isEmpty { return ("On the 8", on.contains(8) ? [8] : [], false) }
+        return (gr.prefix(1).uppercased() + gr.dropFirst(), left, false)
+      }
+      let f = gm.fouls[p], two = (gm.kind == "9" || gm.kind == "10") && gm.rules.threeFoul != nil && f >= 2, fw = two ? "Two fouls" : f > 0 ? "1 foul" : ""
+      if gm.turn == p && gm.winner == nil && !on.isEmpty { return (fw.isEmpty ? "Ball on" : "\(fw), ball on", [on.min()!], f > 0) }
+      let pot = pottedBy[p].count
+      return (!fw.isEmpty ? fw : pot > 0 ? "\(pot) potted" : "", pottedBy[p], f > 0)
+    }
+  }
+  /* the pause menu's card name: the CPU by its opponent's name (FOES) */
+  func cardName(_ p: Int) -> String { cpuLevel != nil && p == 1 ? "\(["easy": "Rookie", "medium": "Regular", "hard": "Hustler"][cpuLevel!] ?? "CPU") (CPU)" : Words.nameOf(p) }
+  /* the potted row: the players' pots in pot order, then any other ball off the table */
+  var pottedRow: [Int] {
+    var out: [Int] = []
+    for n in pottedBy.flatMap({ $0 }) where n > 0 && !out.contains(n) { out.append(n) }
+    for b in g?.balls ?? [] where !b.on && b.n > 0 && !out.contains(b.n) { out.append(b.n) }
+    return out
+  }
 
   /* 6b3: the balls down in pot order, who potted each, and when (a pot's window waits for its drop) */
   @ObservationIgnored private(set) var potOrder: [Int] = []
