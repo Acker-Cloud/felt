@@ -24,4 +24,25 @@ final class PlayTests: XCTestCase {
     waitForExpectations(timeout: 65)
     let end = XCTAttachment(screenshot: app.screenshot()); end.name = "break-rest"; end.lifetime = .keepAlways; add(end)
   }
+
+  /* 5c at 10-ball past the break: the bar says Call your shot and does not arm; a tap on it opens the call's menu with
+     the six pockets, a tap outside closes it, and a pull with no call opens it on the let-go instead of shooting */
+  @MainActor func testCallMenu() throws {
+    let app = XCUIApplication()
+    app.launchArguments = ["-felt-game", "10-Ball", "-felt-pots", "2,5"]
+    app.launch()
+    let bar = app.otherElements["power"]
+    XCTAssertTrue(bar.waitForExistence(timeout: 10))
+    XCTAssertEqual(bar.value as? String, "Call your shot, 0 percent")
+    bar.tap()
+    let pk = app.buttons["pocket-0"]
+    XCTAssertTrue(pk.waitForExistence(timeout: 3), "a tap on the bar opens the call's menu")
+    XCTAssertEqual((0..<6).filter { app.buttons["pocket-\($0)"].exists }.count, 6)
+    let open = XCTAttachment(screenshot: app.screenshot()); open.name = "call-menu"; open.lifetime = .keepAlways; add(open)
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).tap()
+    XCTAssertTrue(pk.waitForNonExistence(timeout: 3), "a tap outside closes it")
+    bar.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)).press(forDuration: 0.1, thenDragTo: bar.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)))
+    XCTAssertTrue(pk.waitForExistence(timeout: 3), "a pull the call refuses opens the menu")
+    XCTAssertEqual(bar.value as? String, "Call your shot, 0 percent", "and never shoots")
+  }
 }

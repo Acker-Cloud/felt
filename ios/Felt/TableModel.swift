@@ -139,7 +139,7 @@ final class TableModel {
   }
 
   func rerack() {
-    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; potCount = 0; banner = nil
+    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); potCount = 0; banner = nil
     if let k = rulesKind {
       g = engine.newGame(k)
       /* a test hook: `-felt-pots "1,9,8"` starts the rack with those balls down (the potted windows) */
@@ -148,6 +148,8 @@ final class TableModel {
         let ns = a[i + 1].split(separator: ",").compactMap { Int($0) }
         for j in g!.balls.indices where ns.contains(g!.balls[j].n) { g!.balls[j].on = false }
         if ns.contains(where: { $0 < 8 }) { g!.groups = ["solids", "stripes"] }
+        /* the rack is past its break: calls are open, the cue ball where the rack left it */
+        g!.breakShot = false; g!.inHand = nil; inHand = false
       }
       syncBalls()
       msg = k == "snooker" ? "\(Words.dWords(0)). On a red." : k == "carom" ? "\(Words.nameOf(0)) to break: the red first." : "\(Words.nameOf(0)) to break."
@@ -204,17 +206,14 @@ final class TableModel {
   private(set) var now: TimeInterval = 0
   func shoot() {
     guard rolling == nil, stroke == nil, power > 0.01, g?.option == nil, g?.winner == nil, !cpuTurn else { power = 0; return }
+    /* a pull the call refuses (no needed call yet) opens the call's menu on the let-go, the pockets first */
+    if !callReady { power = 0; callMenu = true; return }
     markPower = power
     stroke = (power, nil)
   }
   private func strikeNow(_ pw: Double, _ t: TimeInterval) {
-    /* a shot the rules need called: the obvious call from the guide's preview, the ball it pots and its
-       pocket, else a declared safety (the page's call menu is not ported yet) */
-    if var gm = g, !cpuTurn, let need = engine.callNeed(gm) {
-      var c = ShotCall()
-      if let (_, P) = guide(), let f = P.first, P.objPot >= 0 { c.ball = f; c.pocket = P.objPot; c.auto = need.auto } else { c.safety = true }
-      gm.call = c; g = gm
-    }
+    /* shoot(): the declaration the player built (humanCall) goes on the game; judge takes it from there */
+    if var gm = g, !cpuTurn { gm.call = humanCall(); g = gm }
     let tab = sim.newTable(balls, cue: cueN)
     if let c = cue { lastCue = (c.x, c.y, aim) }
     sim.strike(tab, aim, pw, spin)
@@ -286,7 +285,7 @@ final class TableModel {
 
   /* settle() for a pocket game: the page's judge, then its words (banner and status line) */
   private func settleRules(_ r: ShotResult) {
-    picked = false
+    picked = false; resetCall()
     guard let before = g else { return }
     let shot = RuleShot(r)
     let shooter = before.turn, next = engine.judge(before, shot)
@@ -504,6 +503,116 @@ final class TableModel {
       potOrder.append(n); potBy[n] = gm.turn; potAt[n] = rolling != nil ? now + TableModel.POT_MS : 0
     }
   }
+
+  // MARK: 5c. the called shot
+
+  /* what the player chose by tapping (a ball, then a pocket; Bank, Kick and Combo under custom detail), a declared
+     safety, a push-out, and the aim's obvious call switched off by Change Call; cleared every turn (resetCall) */
+  var callMan: ShotCall? = nil
+  var callSafe = false
+  var callPushOn = false
+  var callAutoOff = false
+  var callMenu = false
+  func resetCall() { callMan = nil; callSafe = false; callPushOn = false; callAutoOff = false; callMenu = false }
+  var callable: Bool { rolling == nil && stroke == nil && !cpuTurn && g?.winner == nil && g?.option == nil && g?.mode == nil }
+  var callOn: Bool {
+    guard callable, let gm = g else { return false }
+    return engine.callNeed(gm) != nil || (gm.kind == "straight" && gm.breakShot && engine.callScope(gm) != "none")
+  }
+  var pushOffer: Bool { callable && (g?.pushAvail ?? false) && (g?.rules.pushOut ?? false) }
+  /* the obvious shot down the aim line: the legal ball it meets, and the pocket its line runs into with a clear path */
+  func obviousCall() -> ShotCall? {
+    guard let gm = g, let c = cue else { return nil }
+    let dx = JSMath.cos(aim), dy = JSMath.sin(aim), h = sim.aimTrace(balls, c.x, c.y, dx, dy, skip: [c.n], far: 6)
+    guard h.kind == "ball", let o = h.ball, engine.legalTargets(gm).contains(o.n) else { return nil }
+    let gx = c.x + dx * h.t, gy = c.y + dy * h.t, l0 = JSMath.hypot(o.x - gx, o.y - gy), ul = l0 == 0 ? 1 : l0, ux = (o.x - gx) / ul, uy = (o.y - gy) / ul
+    var best = -1, bd = Double.infinity
+    let cp = CPU(engine: engine)
+    for (k, p) in sim.POCKET_AIM.enumerated() {
+      let vx = p[0] - o.x, vy = p[1] - o.y, along = vx * ux + vy * uy, off = abs(vx * uy - vy * ux)
+      if along > 0 && off < (k == 1 || k == 4 ? sim.SIDE_W : sim.CORNER_W) * 0.45 && off < bd && cp.cpuClear(gm.balls, o.x, o.y, p[0], p[1], o.n) { best = k; bd = off }
+    }
+    guard best >= 0 else { return nil }
+    var r = ShotCall(); r.ball = o.n; r.pocket = best; r.auto = true
+    return r
+  }
+  /* the declaration the next human shot carries */
+  func humanCall() -> ShotCall? {
+    if callPushOn && pushOffer { var c = ShotCall(); c.push = true; return c }
+    guard callOn, let gm = g else { return nil }
+    if callSafe { var c = ShotCall(); c.safety = true; return c }
+    let need = engine.callNeed(gm), auto = (need?.auto ?? false) && !callAutoOff ? obviousCall() : nil
+    if var c = callMan, c.ball != nil {
+      if c.pocket == nil, let a = auto, a.ball == c.ball { c.pocket = a.pocket }
+      return c
+    }
+    return callMan != nil ? nil : auto
+  }
+  /* the bar may arm: no call needed, or the declaration is whole */
+  var callReady: Bool {
+    if cpuTurn || rolling != nil { return true }
+    if callPushOn && pushOffer { return true }
+    guard callOn, let gm = g, let need = engine.callNeed(gm) else { return true }
+    guard let c = humanCall() else { return false }
+    return c.safety || (c.ball != nil && (!need.pocket || c.pocket != nil))
+  }
+  var callLocked: Bool { !(g?.rules.call.change ?? true) && callMan?.ball != nil && callMan?.pocket != nil }
+  /* a tap on an object ball while a call is open: it is the called ball (the tap still aims) */
+  func pickCallBall(_ n: Int) {
+    guard callOn, !callLocked else { return }
+    callSafe = false
+    if callMan == nil || callMan!.ball != n {
+      var c = ShotCall(); c.ball = n; c.pocket = callMan != nil && callMan!.ball == nil ? callMan!.pocket : nil; callMan = c
+    }
+  }
+  /* a tap on a pocket: the called pocket (the ball from the aim when none is picked yet) */
+  func pickPocket(_ k: Int) {
+    guard callOn, !callLocked, let gm = g else { return }
+    callSafe = false
+    if callMan == nil || callMan!.ball == nil {
+      let t = engine.legalTargets(gm)
+      var c = ShotCall(); c.ball = obviousCall()?.ball ?? (t.count == 1 ? t[0] : nil); c.pocket = k; callMan = c
+    } else { callMan!.pocket = k }
+  }
+  /* Change Call (or Clear): the aim's call goes, the player taps the ball and the pocket; a safety or push-out is undone */
+  func changeCall() {
+    guard callable else { return }
+    if callPushOn { callPushOn = false; return }
+    if callSafe { callSafe = false; return }
+    if callLocked { return }
+    callMan = ShotCall(); callAutoOff = true
+  }
+  func toggleFlag(_ f: String) {
+    guard callOn, !callLocked else { return }
+    if callMan == nil { var c = ShotCall(); if let h = humanCall(), h.ball != nil { c.ball = h.ball; c.pocket = h.pocket }; callMan = c }
+    switch f { case "bank": callMan!.bank.toggle(); case "kick": callMan!.kick.toggle(); default: callMan!.combo.toggle() }
+  }
+  func toggleSafety() { guard callOn else { return }; callSafe.toggle(); callPushOn = false }
+  func togglePush() { guard pushOffer else { return }; callPushOn.toggle(); callSafe = false }
+  /* a pocket in words as the player sees the table (pocketWords, top-down): "top left corner", "right side" */
+  func pocketWords(_ k: Int, upright: Bool) -> String {
+    let p = sim.POCKET_AIM[k]
+    let f = upright ? p[0] - sim.TL / 2 : sim.TW / 2 - p[1], r = upright ? p[1] - sim.TW / 2 : p[0] - sim.TL / 2
+    let e = 0.01, v = f > e ? "top" : f < -e ? "bottom" : "", h = r < -e ? "left" : r > e ? "right" : ""
+    return k == 1 || k == 4 ? "\(v.isEmpty ? h : v) side" : "\(v) \(h) corner"
+  }
+  func pocketShort(_ k: Int, upright: Bool) -> String {
+    pocketWords(k, upright: upright).replacingOccurrences(of: " corner", with: "").split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+  }
+  /* callLab: the bar's label for the call, or nil when the bar says its own words */
+  func callLab(upright: Bool) -> String? {
+    guard callOn || pushOffer, let c = humanCall() else { return nil }
+    if c.push { return "Push Out" }
+    if c.safety { return "Safety" }
+    guard let b = c.ball else { return nil }
+    let fl = [("Bank", c.bank), ("Kick", c.kick), ("Combo", c.combo)].filter { $0.1 }.map { $0.0 }.joined(separator: ", ")
+    let need = g.flatMap { engine.callNeed($0) }
+    let body = c.pocket != nil ? "\(b) · \(pocketShort(c.pocket!, upright: upright))" : need?.pocket == true ? "\(b) · Tap a Pocket" : String(b)
+    return (fl.isEmpty ? "" : fl + ": ") + body
+  }
+  var callMenuOffered: Bool { callOn || pushOffer }
+  /* the table is drawn upright (a phone held upright): the call's pocket words follow the screen */
+  var uprightView = true
 
   /* pickBall: bumper pool, strike ball n from now on (one of the shooter's, any but on the opening) */
   func pickBall(_ n: Int) -> Bool {

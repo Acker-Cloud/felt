@@ -91,12 +91,14 @@ struct TableScreen: View {
     }
     .background(Color(rgb: 9, 9, 10).ignoresSafeArea())
     .overlay { Overlays(model: model, back: { dismiss() }) }
+    .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
     .tint(.primary)
     .statusBarHidden()
   }
 
   private func touch(_ v: DragGesture.Value, _ size: CGSize, began: Bool) {
     let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW)
+    model.uprightView = m.upright
     let (x, y) = m.table(v.location)
     /* bumper pool: a touch on one of the shooter's own balls strikes that one from now on (pickBall) */
     if began, model.game == .bumper, let g = model.g {
@@ -111,6 +113,17 @@ struct TableScreen: View {
       if let n = best, n != model.cueN, model.pickBall(n) { picking = true; return }
     }
     if picking { return }
+    /* a call open: a touch on a pocket calls it (pocketAt: 26 pt or 1.6 ball radii round its centre), on a ball calls
+       that ball (and still aims) */
+    if began, model.callOn {
+      var best = -1, bd = Double.infinity
+      for (k, p) in s.POCKETS.enumerated() {
+        let q = m.pt(p[0], p[1]), d = JSMath.hypot(Double(q.x - v.location.x), Double(q.y - v.location.y))
+        if d < max(26, 1.6 * s.BALL_R * m.k) && d < bd { bd = d; best = k }
+      }
+      if best >= 0 { model.pickPocket(best); picking = true; return }
+      if let b = model.balls.first(where: { $0.on && $0.n != model.cueN && JSMath.hypot($0.x - x, $0.y - y) < s.BALL_R * 1.4 }) { model.pickCallBall(b.n) }
+    }
     if began, model.inHand, let c = model.cue, JSMath.hypot(c.x - x, c.y - y) < s.BALL_R * 3 { placing = true }
     if placing { model.place(x, y); return }
     guard model.rolling == nil, let c = model.cue else { return }
@@ -245,6 +258,7 @@ struct SpinPad: View {
 struct PowerBar: View {
   let model: TableModel
   let upright: Bool
+  @State private var t0: Date? = nil
   @Environment(\.accessibilityReduceMotion) private var still
   var body: some View {
     GeometryReader { g in
@@ -258,6 +272,14 @@ struct PowerBar: View {
         if live {
           Text("\(Int((p * 100).rounded()))%").font(.system(size: 13, weight: .bold)).monospacedDigit().foregroundStyle(Color(rgb: 0xec, 0xec, 0xee))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: upright ? .trailing : .bottom).padding(upright ? .trailing : .bottom, 10)
+        } else if model.rolling == nil, !model.cpuTurn, let lab = model.callLab(upright: upright) ?? (model.callReady ? nil : "Call your shot") {
+          /* the call is the bar's own label (callLab): "10 · Top Left", "Safety", "Push Out", or Call your shot */
+          HStack(spacing: 6) {
+            Text(lab).font(.system(size: 15, weight: .semibold)).lineLimit(1).truncationMode(.tail)
+              .foregroundStyle(model.callReady ? Color(rgb: 0xec, 0xec, 0xee) : Color(rgb: 0xff, 0xd5, 0x8a))
+            if model.callMenuOffered { Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)) }
+          }
+          .padding(.horizontal, 12).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         } else if model.rolling != nil {
           Text("Rolling").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -282,16 +304,101 @@ struct PowerBar: View {
       .contentShape(Rectangle())
       .gesture(DragGesture(minimumDistance: 0).onChanged { v in
         guard model.rolling == nil else { return }
+        if t0 == nil { t0 = Date() }
         let d = upright ? v.translation.width : v.translation.height
-        model.power = min(1, max(0, Double(d / len)))
-      }.onEnded { _ in model.shoot() })
+        /* the bar does not arm without a needed call */
+        model.power = model.callReady ? min(1, max(0, Double(d / len))) : 0
+      }.onEnded { v in
+        /* a tap (under BAR_TAP 10 pt of travel and BAR_TAP_MS 600 ms) opens the call's menu, never shoots */
+        let tap = hypot(v.translation.width, v.translation.height) < 10 && Date().timeIntervalSince(t0 ?? Date()) < 0.6
+        t0 = nil
+        if tap && model.callMenuOffered { model.power = 0; model.callMenu.toggle(); return }
+        model.shoot()
+      })
     }
     .frame(minWidth: upright ? 136 : 64, maxWidth: .infinity, minHeight: upright ? 56 : 96, maxHeight: upright ? 56 : 440)
     .layoutPriority(1)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("Power")
     .accessibilityIdentifier("power")
-    .accessibilityValue(model.rolling != nil ? "Rolling" : "\(Int(model.power * 100)) percent")
+    /* aria-valuetext: the call's words with the percentage while a call is open (callSay) */
+    .accessibilityValue(model.rolling != nil ? "Rolling" : model.callMenuOffered ? "\(model.callLab(upright: upright) ?? "Call your shot"), \(Int(model.power * 100)) percent" : "\(Int(model.power * 100)) percent")
+  }
+}
+
+/* the call's menu (#callBar, 6p's pop-up material) over the power bar: Change or Clear Call, the pockets as a
+   picture of the table as the player sees it (callPkMap: a 3 x 3 grid, the called one checked), Bank, Kick and Combo
+   under a detailed call, Safety where the rules allow one, Push Out when it is on offer. A pick or a tap outside closes it. */
+struct CallMenu: View {
+  let model: TableModel
+  var body: some View {
+    let c = model.humanCall(), gm = model.g!, need = model.engine.callNeed(gm)
+    let open = model.callOn, push = model.pushOffer
+    let change = open && !model.callSafe && !(model.callPushOn && push) && c?.ball != nil && !model.callLocked
+    let showPk = open && !model.callSafe && !(model.callPushOn && push) && !model.callLocked && need?.pocket == true
+    let flags = need?.flags == true && !model.callSafe && !(model.callPushOn && push)
+    ZStack(alignment: .bottomTrailing) {
+      Color.black.opacity(0.001).ignoresSafeArea().onTapGesture { model.callMenu = false }
+      VStack(alignment: .leading, spacing: 0) {
+        if change { row(c?.auto == true ? "Change Call" : "Clear Call", false) { model.changeCall() } }
+        if showPk {
+          Text(c?.ball != nil ? "Pocket for the \(c!.ball!)" : "Pocket").font(.footnote).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.top, 10)
+          pockets(c).padding(.horizontal, 12).padding(.vertical, 8)
+          Divider()
+        }
+        if flags {
+          row("Bank", c?.bank == true) { model.toggleFlag("bank") }
+          row("Kick", c?.kick == true) { model.toggleFlag("kick") }
+          row("Combo", c?.combo == true) { model.toggleFlag("combo") }
+        }
+        if open && gm.rules.safetyCall { row("Safety", model.callSafe) { model.toggleSafety() } }
+        if push { row("Push Out", model.callPushOn) { model.togglePush() } }
+      }
+      .frame(width: 250)
+      .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+      .accessibilityElement(children: .contain).accessibilityIdentifier("callMenu")
+      .padding(.trailing, 60).padding(.bottom, 70)
+    }
+  }
+  private func row(_ t: String, _ on: Bool, _ act: @escaping () -> Void) -> some View {
+    Button { act(); model.callMenu = false } label: {
+      HStack(spacing: 8) {
+        Image(systemName: "checkmark").font(.system(size: 13, weight: .semibold)).opacity(on ? 1 : 0)
+        Text(t).font(.body)
+        Spacer()
+      }
+      .padding(.horizontal, 16).frame(minHeight: 44).contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+  }
+  /* the pockets laid out as the table is seen: upright the long table's six (corners top and bottom, sides at the middle) */
+  private func pockets(_ c: ShotCall?) -> some View {
+    let s = model.sim, up = model.uprightView
+    let cells: [(Int, Int, Int)] = s.POCKET_AIM.indices.map { k in
+      let p = s.POCKET_AIM[k], f = up ? p[0] - s.TL / 2 : s.TW / 2 - p[1], r = up ? p[1] - s.TW / 2 : p[0] - s.TL / 2
+      return (k, f > 0.01 ? 0 : f < -0.01 ? 2 : 1, r < -0.01 ? 0 : r > 0.01 ? 2 : 1)
+    }
+    let rows = Array(Set(cells.map { $0.1 })).sorted(), cols = Array(Set(cells.map { $0.2 })).sorted()
+    return Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+      ForEach(rows, id: \.self) { rr in
+        GridRow {
+          ForEach(cols, id: \.self) { cc in
+            if let k = cells.first(where: { $0.1 == rr && $0.2 == cc })?.0 {
+              Button { model.pickPocket(k); model.callMenu = false } label: {
+                ZStack {
+                  Circle().fill(Color.black).frame(width: 34, height: 34)
+                  if c?.pocket == k { Image(systemName: "checkmark").font(.system(size: 14, weight: .bold)).foregroundStyle(.white) }
+                }
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+              }
+              .buttonStyle(.plain).accessibilityLabel(model.pocketShort(k, upright: up)).accessibilityIdentifier("pocket-\(k)")
+            } else { Color.clear.frame(width: 44, height: 44) }
+          }
+        }
+      }
+    }
+    .frame(maxWidth: .infinity)
+    .background(RoundedRectangle(cornerRadius: 10).fill(Color(rgb: 0x1b, 0x5d, 0x47).opacity(0.6)))
   }
 }
 

@@ -11,6 +11,8 @@ struct Look {
   /* CLOTHS[...].ovMin and .illegal: every white overlay at least ovMin opaque; the illegal colour */
   var ovMin: Double { ["8": 0.6, "9": 0.72, "10": 0.78, "heyball": 0.64, "snooker": 0.66, "carom": 0.66, "bumper": 0.76][game] ?? 0.6 }
   var illegal: Color { game == "8" ? Color(hex: 0xffa597) : Color(hex: 0xffe27a) }
+  /* CL.call: the called ball's ring and pocket's glow, 3:1 and more on the cloth */
+  var call: Color { game == "8" ? Color(hex: 0xffe27a) : Color(hex: 0x9ff0ff) }
   var game = "8"
   static func of(_ g: TableGame) -> Look {
     var l = base(g); l.game = g.table.2; return l
@@ -106,6 +108,7 @@ struct TableCanvas: View {
       ctx.scaleBy(x: sc, y: sc)
       drawPotRail(&ctx, m, bp)
       drawRail(&ctx, m, bp)
+      drawCall(&ctx, m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       /* the cue (4f): pulled back by power while aiming, driven through during the stroke, carried a
          few centimetres on and faded as the shot starts */
@@ -443,6 +446,27 @@ struct TableCanvas: View {
         let br = ballD / 2 + 0.5
         ctx.stroke(Path(ellipseIn: CGRect(x: c.x - br, y: c.y - br, width: 2 * br, height: 2 * br)), with: .color(Color(rgb: 0x77, 0x71, 0x6b)), lineWidth: 1)
       }
+    }
+  }
+
+  /* 5c drawCall: the called ball (a ring) and pocket (a pulsing glow and a ring) until the shot: the player's call while
+     aiming, the CPU's in its plan; an obvious (auto) call a little fainter */
+  private func drawCall(_ ctx: inout GraphicsContext, _ m: Mapper) {
+    guard let c = model.cpuTurn ? model.g?.call : model.humanCall(), let n = c.ball, model.rolling == nil else { return }
+    let s = model.sim, rp0 = s.BALL_R * m.k, w = max(2, rp0 * 0.12), col = look.call
+    var g = ctx
+    g.opacity = c.auto ? 0.8 : 1
+    if let b = model.balls.first(where: { $0.n == n && $0.on }) {
+      let p = m.pt(b.x, b.y), r = rp0 + 2 + w / 2
+      g.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(col), lineWidth: w)
+    }
+    if let k = c.pocket, k < s.POCKETS.count {
+      let P = s.POCKETS[k], p = m.pt(P[0], P[1]), r = s.POCKET_R[k] * m.k, pulse = 0.5 + 0.5 * sin(model.now * 1000 / 320)
+      var gl = ctx
+      gl.opacity = (c.auto ? 0.35 : 0.5) + 0.15 * pulse
+      gl.fill(Path(ellipseIn: CGRect(x: p.x - r * 1.9, y: p.y - r * 1.9, width: r * 3.8, height: r * 3.8)),
+              with: .radialGradient(Gradient(colors: [col, .clear]), center: p, startRadius: r * 0.4, endRadius: r * 1.9))
+      g.stroke(Path(ellipseIn: CGRect(x: p.x - r * 1.15, y: p.y - r * 1.15, width: r * 2.3, height: r * 2.3)), with: .color(col), lineWidth: w)
     }
   }
 }

@@ -188,7 +188,7 @@ public final class CPU {
 
   // MARK: lines
 
-  func cpuClear(_ balls: [GBall], _ ax: Double, _ ay: Double, _ bx: Double, _ by: Double, _ skip: Int) -> Bool {
+  public func cpuClear(_ balls: [GBall], _ ax: Double, _ ay: Double, _ bx: Double, _ by: Double, _ skip: Int) -> Bool {
     let ex = bx - ax, ey = by - ay, L2 = ex * ex + ey * ey
     for o in balls {
       if !o.on || o.n == 0 || o.n == skip { continue }
