@@ -494,12 +494,14 @@ extension CareerEngine {
   }
   /* time moves only here: days ahead, "week", or the next season's first day. It stops early on a match of the player's that is due (unless forfeit).
      The stop: "match", "season" or nil */
-  @discardableResult public func advance(days: Int? = nil, week: Bool = false, toSeason: Bool = false, forfeit: Bool = false, stopAtSeason: Bool = false) -> String? {
+  @discardableResult public func advance(days: Int? = nil, week: Bool = false, toSeason: Bool = false, toEvent: Bool = false, forfeit: Bool = false, stopAtSeason: Bool = false) -> String? {
     if live() != nil { return nil }
     bounds = []
     let day = S["day"]!.i
     var stop: String? = nil
-    let target = toSeason ? season * Self.YEAR : week ? (day / 7 + 1) * 7 : day + Swift.max(0, days ?? 1)
+    /* 'event': the start of the next entered event not yet drawn, else the week's end */
+    let nx = toEvent ? S["cal"]!.a.first { ev in let e = S["es"]![ev["id"]!.s]; return truthy(e?["en"]) && e?["f"] == nil && !truthy(e?["x"]) && ev["start"]!.i > day } : nil
+    let target = toSeason ? season * Self.YEAR : toEvent ? (nx?["start"]?.i ?? (day / 7 + 1) * 7) : week ? (day / 7 + 1) * 7 : day + Swift.max(0, days ?? 1)
     while true {
       if myPending() != nil { if forfeit { while forfeitPending() { resolveAll() }; continue }; stop = "match"; break }
       if S["day"]!.i >= target { break }

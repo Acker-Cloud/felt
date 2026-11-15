@@ -27,6 +27,8 @@ import SwiftUI
         if let ev = E.S["cal"]!.a.first(where: { $0["start"]!.i > day && E.eligibility($0).isEmpty }) { E.enter(ev["id"]!.s) }
         if E.advance(week: true) == "match" { break }
       }
+      /* `-felt-career-forfeit1`: the first match forfeited, so no match is due (a test hook) */
+      if ProcessInfo.processInfo.arguments.contains("-felt-career-forfeit1") { E.reportMatch(CareerEngine.MatchReport(forfeit: true)) }
       /* `-felt-career-retire`: retired at once (after any steps on: see below) */
       defer { if ProcessInfo.processInfo.arguments.contains("-felt-career-retire") { E.retire() } }
       /* `-felt-career-rivals`: 40 steps on (a due match simulated, else an eligible event entered and a week) */
@@ -807,6 +809,52 @@ struct CareerRetired: View {
   }
 }
 
+/* the hub's This Week card (no match due): what is under way or next, else none entered; Advance a Week, and To My Next
+   Match (to the event's start, or the week while one is under way) or Calendar. cvAdvance's words: the match day or
+   the season and week, then up to three news lines since */
+struct CareerThisWeek: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, S = E.S, es = S["es"]!
+    let sched = S["cal"]!.a.filter { truthy(es[$0["id"]!.s]?["en"]) && !truthy(es[$0["id"]!.s]?["done"]) }
+    let live = sched.first { es[$0["id"]!.s]?["f"] != nil && !truthy(es[$0["id"]!.s]?["x"]) }
+    let nx = sched.first { es[$0["id"]!.s]?["f"] == nil && !truthy(es[$0["id"]!.s]?["x"]) }
+    Section {
+      VStack(alignment: .leading, spacing: 12) {
+        Text(live.map { "\($0["name"]!.s) is under way: your next match comes as the draw reaches it." }
+             ?? nx.map { "Next: \($0["name"]!.s), week \(E.weekOfDay($0["start"]!.i))." } ?? "You have not entered an event. Pick one from the calendar.")
+          .font(.system(size: 15)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: 8) {
+          Button { go(week: true) } label: { cap("Advance a Week", primary: true) }.buttonStyle(.plain).accessibilityIdentifier("career-week")
+          if nx != nil || live != nil {
+            Button { if live != nil { go(week: true) } else { go(event: true) } } label: { cap("To My Next Match", primary: false) }.buttonStyle(.plain).accessibilityIdentifier("cvToEvent")
+          } else {
+            NavigationLink { CareerCalendar(store: store) } label: { cap("Calendar", primary: false) }.buttonStyle(.plain).accessibilityIdentifier("cvCalBtn")
+          }
+        }
+      }
+      .padding(.vertical, 6)
+    } header: { CareerPageHead(t: "This Week") }
+  }
+  private func go(week: Bool = false, event: Bool = false) {
+    let E = store.E, from = E.S["day"]!.i
+    if truthy(E.S["me"]?["ret"]) { store.msg = "This career is over."; store.touch(); return }
+    let stop = event ? E.advance(toEvent: true) : E.advance(week: true)
+    E.save()
+    let fresh = E.S["news"]!.a.filter { $0[0]!.i > from }.map { $0[1]!.s }.suffix(3)
+    let nm = E.nextMatch()
+    let said = stop == "match" && nm != .null ? "Match day: \(nm["round"]!.s) of \(nm["eventName"]!.s), against \(nm["opponent"]!["name"]!.s)." : "Season \(E.season), week \(E.weekOfDay(E.S["day"]!.i))."
+    store.msg = ([said] + fresh).joined(separator: " ")
+    store.touch()
+  }
+  private func cap(_ t: String, primary: Bool) -> some View {
+    Text(t).font(.system(size: 17, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity, minHeight: 50)
+      .foregroundStyle(primary ? Color.black : Color.white)
+      .background(Capsule().fill(primary ? Color.white : Color(rgb: 0x2c, 0x2c, 0x30)))
+  }
+}
+
 struct CareerHubGroups: View {
   @Bindable var store: CareerStore
   var onPractice: () -> Void
@@ -1079,11 +1127,7 @@ struct CareerHub: View {
       } else {
       if !store.msg.isEmpty { Section { Text(store.msg).font(.subheadline) } }
       if E.reviewDue { CareerReview(store: store) }
-      if nm == .null {
-        Section {
-          Button("Next Week") { let r = E.advance(week: true); store.msg = r == "match" ? "A match is due." : ""; store.touch() }.bold().foregroundStyle(.white).accessibilityIdentifier("career-week")
-        }
-      }
+      if nm == .null { CareerThisWeek(store: store) }
       CareerHubGroups(store: store, onPractice: onPractice, onRetire: { recap = true })
       }
     }
