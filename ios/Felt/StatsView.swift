@@ -3,6 +3,7 @@
    pushed: a game's numbers, the records book or the form. Every rate shows its denominator ("7 of 9, 78%"). All of it
    reads the record (Rec); nothing here writes it. Not here: the trick points and daily streak (not ported), the
    career's numbers (its own screen). */
+import FeltSim
 import SwiftUI
 
 enum StatWords {
@@ -81,36 +82,44 @@ struct StatsView: View {
   @State private var rec = Rec.load()
   var body: some View {
     List {
+      /* .kpis: four tiles, two to a row: the win streak and best against the CPU, the trick shots' points of the
+         program's, the daily shot's streak and its best */
       Section {
-        HStack {
-          kpi("Win Streak", rec.streak, "vs CPU")
-          kpi("Best Streak", rec.best, "vs CPU")
+        let D = DailyStore.rec
+        Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+          GridRow { kpi("Win Streak", rec.streak, "vs CPU"); kpi("Best Streak", rec.best, "vs CPU") }
+          GridRow { kpi("Trick Points", programTotal(TrickStore.score.pts), "of \(programMax())"); kpi("Daily Streak", DailyStore.streak(), "best \(D.best)") }
         }
+        .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+      } header: {
+        Text("Stats").font(.system(size: 28, weight: .bold)).foregroundStyle(Color.white).textCase(nil).padding(.leading, -4).padding(.bottom, 6).accessibilityAddTraits(.isHeader)
       }
       Section {
         ForEach(Rec.KINDS, id: \.self) { k in
           let r = rec.kinds[k]!, c = StatWords.cpuOf(r)
           NavigationLink { StatsKindPage(kind: k, rec: rec) } label: {
             HStack(spacing: 12) {
-              BallDot(n: StatWords.BALL[k] ?? 0, style: ["bumper": "bb", "carom": "bc", "snooker": "bsblk"][k]).frame(width: 28, height: 28)
-              VStack(alignment: .leading, spacing: 2) {
-                Text(StatWords.title(StatWords.NAME[k]!)).font(.body.weight(.semibold))
-                Text(r.played > 0 ? "\(r.played) played, \(c.n > 0 ? "\(c.w) won of \(c.n) vs CPU" : "none vs CPU")" : "Not played yet").font(.footnote).foregroundStyle(.secondary)
+              /* .htile: the game's ball on the accent's tile */
+              BallDot(n: StatWords.BALL[k] ?? 0, style: ["bumper": "bb", "carom": "bc", "snooker": "bsblk"][k]).frame(width: 18, height: 18)
+                .frame(width: 30, height: 30).background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(red: 0.12, green: 0.42, blue: 0.29)))
+              VStack(alignment: .leading, spacing: 1) {
+                Text(StatWords.title(StatWords.NAME[k]!)).font(.system(size: 17))
+                Text(r.played > 0 ? "\(r.played) played, \(c.n > 0 ? "\(c.w) won of \(c.n) vs CPU" : "none vs CPU")" : "Not played yet").font(.system(size: 15)).foregroundStyle(.secondary)
               }
             }
           }
-          .accessibilityIdentifier("st-" + k)
+          .accessibilityIdentifier("st-" + k).listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         }
-      } header: { Text("Games") }
+      } header: { Text("By Game").font(.system(size: 13)).foregroundStyle(.secondary).textCase(nil) }
       Section {
         let bk = StatWords.book(rec).count, fl = rec.form.suffix(10)
         NavigationLink { StatsBookPage(rec: rec) } label: {
-          VStack(alignment: .leading, spacing: 2) { Text("Records"); Text(bk > 0 ? "\(bk) record\(bk == 1 ? "" : "s"), with their dates" : "Your bests, with their dates").font(.footnote).foregroundStyle(.secondary) }
+          PrefRow(icon: "book.closed", name: "Records Book", line: bk > 0 ? "\(bk) record\(bk == 1 ? "" : "s"), with their dates" : "Your bests, with their dates")
         }
         NavigationLink { StatsFormPage(rec: rec) } label: {
-          VStack(alignment: .leading, spacing: 2) { Text("Recent Form"); Text(fl.isEmpty ? "Your last games against the CPU" : "Last \(fl.count): " + fl.map(\.wl).joined(separator: " ")).font(.footnote).foregroundStyle(.secondary) }
+          PrefRow(icon: "chart.line.uptrend.xyaxis", name: "Recent Form", line: fl.isEmpty ? "Your last games against the CPU" : "Last \(fl.count): " + fl.map(\.wl).joined(separator: " "))
         }
-      }
+      } header: { Text("Records").font(.system(size: 13)).foregroundStyle(.secondary).textCase(nil) }
       /* the table: games by kind, played, against each CPU, two-player */
       Section {
         Grid(alignment: .trailing, horizontalSpacing: 10, verticalSpacing: 8) {
@@ -127,20 +136,30 @@ struct StatsView: View {
         }
         .font(.footnote).monospacedDigit()
         .accessibilityElement(children: .contain).accessibilityLabel("Games by kind: played, wins and losses against Rookie, Regular and Hustler, and two-player games")
-      } header: { Text("Against the CPU") } footer: {
+      } header: { Text("CPU Results by Level").font(.system(size: 13)).foregroundStyle(.secondary).textCase(nil) } footer: {
         let sk = rec.kinds["snooker"]!
-        Text("Snooker: \(sk.frames) frame\(sk.frames == 1 ? "" : "s") played, highest break \(sk.high).")
+        VStack(alignment: .leading, spacing: 8) {
+          Text("Against the CPU: wins and losses. A game counts when it finishes.")
+          Text("Snooker: \(sk.frames) frame\(sk.frames == 1 ? "" : "s") played, highest break \(sk.high).")
+          /* tutStat: the page's six tutorials (TUT_IDS) */
+          Text("Tutorials: \(["8", "9", "bumper", "carom", "snooker", "heyball"].filter { TutStore.rec.done.contains($0) }.count) of 6 done.")
+        }
       }
     }
-    .navigationTitle("Stats")
+    .environment(\.defaultMinListRowHeight, 54)
+    .contentMargins(.top, 0, for: .scrollContent)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
     .onAppear { rec = Rec.load() }
   }
+  /* a .kpis tile: its name, the figure, a few words after it */
   func kpi(_ t: String, _ v: Int, _ s: String) -> some View {
     VStack(alignment: .leading, spacing: 2) {
-      Text(t).font(.footnote).foregroundStyle(.secondary)
-      HStack(alignment: .firstTextBaseline, spacing: 4) { Text("\(v)").font(.title.weight(.bold)).monospacedDigit(); Text(s).font(.footnote).foregroundStyle(.secondary) }
+      Text(t).font(.system(size: 13)).foregroundStyle(.secondary)
+      HStack(alignment: .firstTextBaseline, spacing: 4) { Text("\(v)").font(.system(size: 22, weight: .bold)).monospacedDigit(); Text(s).font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary) }
     }
+    .padding(.horizontal, 16).padding(.vertical, 14)
     .frame(maxWidth: .infinity, alignment: .leading)
+    .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color(rgb: 0x1c, 0x1c, 0x1f)))
     .accessibilityElement(children: .combine)
   }
 }
