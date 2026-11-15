@@ -36,6 +36,12 @@ enum Prefs {
   static var dressMode: String { str("dress", "game") }
   /* Table View (settings.view): "top" or "3d", with the 3D camera's pitch (8-70 deg) and distance (0.45-3.2 m), clamped */
   static var view: String { str("view", "top") }
+  /* settings.names: the two players' names, as given at setup (cleanName: spaces collapsed, trimmed, 12 at most) */
+  static func cleanName(_ v: String) -> String { String(v.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").prefix(12)) }
+  static var names: [String] {
+    get { let a = d.stringArray(forKey: "felt.settings.names") ?? []; return [a.count > 0 ? cleanName(a[0]) : "", a.count > 1 ? cleanName(a[1]) : ""] }
+    set { d.set(newValue.map(cleanName), forKey: "felt.settings.names") }
+  }
   /* After the Shot (settings.viewAfter): 'pull' to the overview, 'top' the roll top-down, 'stay' the aiming pose */
   static var viewAfter: String { str("viewAfter", "pull") }
   static var viewPitch: Double { min(V3.PITCH[1], max(V3.PITCH[0], d.object(forKey: "felt.settings.viewPitch") as? Double ?? V3.PITCH0)) }

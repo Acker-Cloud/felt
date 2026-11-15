@@ -1388,6 +1388,7 @@ struct GameSetup: View {
   @AppStorage("felt.settings.stalemate") private var stalemate = false
   /* the form's measured height (setupRoom), which the hero gives way to */
   @State private var formContent = 0.0
+  @State private var names = Prefs.names
   @State private var showRules = false
   /* #rulesPop: its title, the ruleset's name, the words; following the choices live */
   var rulesPop: some View {
@@ -1497,6 +1498,22 @@ struct GameSetup: View {
           Text("Two Players").tag("two"); Text("CPU").tag("cpu")
         }
         .pickerStyle(.segmented).accessibilityIdentifier("opponent").frame(minHeight: 44).listRowInsets(Self.ROW)
+        /* #nameRow: the two players' names, two fields (36 pt, the fill, Player 1 and Player 2 until given) */
+        if opponent == "two" {
+          HStack(spacing: 12) {
+            Text("Names")
+            HStack(spacing: 8) {
+              ForEach(0..<2, id: \.self) { i in
+                TextField("Player \(i + 1)", text: Binding(get: { names[i] }, set: { v in names[i] = String(v.prefix(12)); Prefs.names = names }))
+                  .textInputAutocapitalization(.words).autocorrectionDisabled().submitLabel(.done)
+                  .padding(.horizontal, 10).frame(height: 36)
+                  .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(white: 0.46, opacity: 0.24)))
+                  .accessibilityLabel("Player \(i + 1)").accessibilityIdentifier("name\(i + 1)")
+              }
+            }
+          }
+          .frame(minHeight: 44).listRowInsets(Self.ROW)
+        }
         if opponent != "two" {
           ForEach(Self.FOES, id: \.id) { f in
             Button { opponent = f.id } label: {

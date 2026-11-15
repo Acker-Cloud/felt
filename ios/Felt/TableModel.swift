@@ -729,7 +729,10 @@ final class TableModel {
     self.exhibArch = exhibArch
     self.party = party.map { Party(names: $0.names, wins: $0.names.map { _ in 0 }, ruleset: $0.ruleset) }
     Words.cpuMode = cpuLevel != nil
+    /* nameOf: an exhibition's or a party's players, else (two players) the names given at setup, else Player 1 and 2 */
+    let given = Prefs.names
     Words.names = exhib.map { $0.map { TableModel.FOES[$0] ?? "CPU" } } ?? party?.names
+      ?? (cpuLevel == nil && given.contains { !$0.isEmpty } ? given.enumerated().map { $1.isEmpty ? "Player \($0 + 1)" : $1 } : nil)
     /* start(): the settings' table (every pool game on its size and pockets; snooker's size; the bumper table's shape) */
     let prefSpec: (table: String, shape: String?, pockets: String) = switch game {
     case .eight, .nine, .ten, .straight, .rotation: (Prefs.table, nil, Prefs.pockets)
