@@ -14,6 +14,8 @@ public final class HeroRun {
   public var pos: [[Double]] = [], on: [[Bool]] = [], rot: [[Float]] = []
   public var pots: [Int: (t: Double, k: Int, at: [Double])] = [:]
   public var moveT = 0.0, done = false, S = 0.0
+  /* how many of the roll's hits had happened by each sample (the opening's sound and its cut, 6o) */
+  public var hitN: [Int] = []
   public init(_ s: Sim, balls: [Ball], ball: Int, angle: Double, power: Double, spin: Spin) {
     self.s = s
     tab = s.strike(s.newTable(balls, cue: ball), angle, power, spin); n = tab.balls.count
@@ -38,7 +40,7 @@ public final class HeroRun {
       for k in 0..<9 { r[9 * i + k] = Float(m[i][k]) }
     }
     if moved { moveT = tab.t }
-    pos.append(p); on.append(o); rot.append(r)
+    pos.append(p); on.append(o); rot.append(r); hitN.append(tab.hits.count)
   }
   /* heroRunOn, unsliced: to the end (the page slices it by wall time; the steps are the same) */
   public func runAll() {

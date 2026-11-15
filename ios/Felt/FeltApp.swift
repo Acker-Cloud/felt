@@ -21,11 +21,25 @@ struct Home: View {
   @State private var career = CareerStore()
   @State private var showCareer = false
   @State private var setupGame: TableGame? = nil
+  @State private var intro = IntroModel()
+  @State private var titleRect = CGRect.zero
   struct PartyGo: Identifiable { let game: TableGame, names: [String], ruleset: String; var id: String { ruleset + names.joined() } }
   struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var archs: [String] = ["allround", "allround"]; var id: String { game.rawValue + levels.joined() + archs.joined() } }
   var body: some View {
     NavigationStack {
       List {
+        /* the wordmark (.brand h1), where the opening (6o) glides home */
+        Section {} header: {
+          Wordmark().textCase(nil).opacity(intro.state == .done ? 1 : 0)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { r in
+              titleRect = r
+              if intro.state == .off, r.width > 0, let w = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first {
+                let i = w.safeAreaInsets
+                intro.boot(size: w.bounds.size, title: r, insets: EdgeInsets(top: i.top, leading: i.left, bottom: i.bottom, trailing: i.right), scale: w.screen.scale)
+              }
+            }
+            .accessibilityAddTraits(.isHeader).accessibilityLabel("felt")
+        }
         Section {
           Picker("Opponent", selection: $opponent) {
             Text("2 Players").tag("two"); Text("Easy").tag("easy"); Text("Medium").tag("medium"); Text("Hard").tag("hard")
@@ -79,7 +93,7 @@ struct Home: View {
           Text("Watch the CPU play itself, each player at its own level.")
         }
       }
-      .navigationTitle("felt")
+      .navigationTitle("").navigationBarTitleDisplayMode(.inline)
       .navigationDestination(isPresented: $showCareer) { CareerView(store: career) }
       .navigationDestination(item: $setupGame) { g in GameSetup(game: g) { playing = g } }
       .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { store.markLive(); playingTourney = true } }
@@ -108,6 +122,8 @@ struct Home: View {
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: a[i + 1] == "left" ? .landscapeLeft : .landscapeRight))
       }
     }
+    .overlay { if intro.state != .done { IntroOverlay(model: intro, title: titleRect) } }
+    .onChange(of: playing) { _, g in if let g { Prefs.last = g.table.2 } }
     .fullScreenCover(item: $playing) { g in TableScreen(model: TableModel(game: g, cpu: opponent == "two" ? nil : opponent)) }
     .fullScreenCover(item: $exhibit) { e in TableScreen(model: TableModel(game: e.game, exhib: e.levels, exhibArch: e.archs)) }
     .fullScreenCover(isPresented: $playingTourney) {

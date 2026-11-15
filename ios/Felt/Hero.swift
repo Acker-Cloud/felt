@@ -15,7 +15,9 @@ enum HeroArt {
   struct Geo { let TL, TW, R, rail, co, h: Double; let noses: [[Double]], polys: [[[Double]]], outline: [[Double]], mouths: Int, pockets: [[Double]], pr: [Double], posts: [[Double]], postR: Double }
   struct Data { let kind: String, spec: (table: String, shape: String?, pockets: String), geo: Geo, balls: [Ball], ball: Int, angle: Double, power: Double, spin: Spin }
   struct Cam { var E, f, r, u: [Double]; var F = 1.0, cx = 0.0, cy = 0.0, yaw: Double }
-  struct Art { let C: Cam, bg: CGImage, fg: CGImage, vg: CGImage?, W: Int, H: Int }
+  struct Art { var C: Cam; let bg: CGImage, fg: CGImage, vg: CGImage?, W: Int, H: Int; var pan: Double? = nil }
+  /* what the opening (6o) changes in heroDraw: no pull-back (flat), no cue on its high camera, its own clocks and stroke */
+  struct Opt { var flat = false, cueOff = false; var simAt: ((Double) -> Double)? = nil, potAt: ((Double) -> Double)? = nil, cueGap: ((Double) -> (Double, Double)?)? = nil }
 
   /* heroPrep: what the hero needs of the table, its layout and its shot */
   static func prep(_ kind: String, _ spec: (table: String, shape: String?, pockets: String)) -> Data {
@@ -123,10 +125,10 @@ enum HeroArt {
     x.closePath()
   }
   /* heroStill: W x H device px; txt: the words' block over the hero's foot, device px */
-  static func still(_ d: Data, _ W: Int, _ H: Int, txt: Double, dress: Dress, vignette: Bool = true) -> Art {
+  static func still(_ d: Data, _ W: Int, _ H: Int, txt: Double, dress: Dress, vignette: Bool = true, cam: Cam? = nil, room: ((Canvas2D, Cam, Geo, Double, Double) -> Void)? = nil, post: ((Canvas2D, Cam) -> Void)? = nil) -> Art {
     let Wd = Double(W), Hd = Double(H), tall = min(1, max(0, (Hd / Wd - 0.66) / 0.5)), top = Hd * (0.13 - 0.03 * tall)
     let box = (x: Wd * 0.04, y: top, w: Wd * 0.92, h: Hd * 0.62 + (Hd - 0.8 * txt - top - Hd * 0.62) * tall)
-    let g = d.geo, C = camera(d, Wd, Hd, box, tall), look = TableLook.of(dress), RW = look.rail, CL = look.cloth
+    let g = d.geo, C = cam ?? camera(d, Wd, Hd, box, tall), look = TableLook.of(dress), RW = look.rail, CL = look.cloth
     let T = turned(d, look, C.yaw), x = Canvas2D(width: W, height: H), hC = g.h
     /* the room: near black, warmer where the lamp falls */
     x.fillStyle("#0b0b0c"); x.fillRect(0, 0, Wd, Hd)
@@ -135,6 +137,7 @@ enum HeroArt {
     if dress.room == "hall" { gr.addColorStop(0, "rgba(255,236,205,0.10)"); gr.addColorStop(1, "rgba(255,236,205,0)") }
     else { let R = TableLook.ROOM[dress.room] ?? TableLook.ROOM["hall"]!; gr.addColorStop(0, "rgba(\(R.glow),\(R.glowA * 1.45))"); gr.addColorStop(1, "rgba(\(R.glow),0)") }
     x.fillStyle = .gradient(gr); x.fillRect(0, 0, Wd, Hd)
+    room?(x, C, g, Wd, Hd)   /* the opening's far room (6o) */
     /* the bed (and everything at z 0) */
     let (uA, uB) = uRange(T, g.outline)
     x.save(); x.beginPath(); path(x, C, g.outline, 0); x.clip(); plane(x, C, T, 0, uA, uB); x.restore()
@@ -183,6 +186,7 @@ enum HeroArt {
       z.fillStyle = .gradient(gv); z.fillRect(0, 0, Wd, Hd)
       vg = z.image()
     }
+    post?(x, C)   /* the opening's light (introLight), into the still */
     return Art(C: C, bg: x.image(), fg: y.image(), vg: vg, W: W, H: H)
   }
 
@@ -199,15 +203,17 @@ enum HeroArt {
     for _ in 0..<40 { let mid = (lo + hi) / 2; if simT(run, mid) < t { lo = mid } else { hi = mid } }
     return CUE_MS + hi * ROLL_MS
   }
-  static func draw(_ t: Double, _ d: Data, _ run: HeroRun, _ A: Art, _ x: Canvas2D, bp: BallPainter, dress: Dress) {
-    let C = A.C, g = d.geo, Wd = Double(A.W), Hd = Double(A.H), total = CUE_MS + ROLL_MS, still = t >= total
-    let z = still ? 1 : 1 + (ZOOM - 1) * (1 - easeIO(min(1, t / total)))
+  static func draw(_ t: Double, _ d: Data, _ run: HeroRun, _ A: Art, _ x: Canvas2D, bp: BallPainter, dress: Dress, opt o: Opt = Opt()) {
+    let C = A.C, g = d.geo, Wd = Double(A.W), Hd = Double(A.H), total = CUE_MS + ROLL_MS, still = o.simAt == nil && t >= total
+    let z = still || o.flat ? 1 : 1 + (ZOOM - 1) * (1 - easeIO(min(1, t / total)))
     let c0 = d.balls.first { $0.n == d.ball }!, fc = proj(C, c0.x, c0.y, g.R), F0 = proj(C, g.TL * 0.6, g.TW / 2, 0)
     let fx = (fc[0] + F0[0]) / 2, fy = (fc[1] + F0[1]) / 2
     func Z(_ p: [Double]) -> [Double] { [fx + (p[0] - fx) * z, fy + (p[1] - fy) * z, p[2]] }
     x.setTransform(1, 0, 0, 1, 0, 0)
-    x.drawImage(A.bg, fx - fx * z, fy - fy * z, Wd * z, Hd * z)
-    let n = d.balls.count, s: Double = t < CUE_MS ? -1 : still ? .infinity : simT(run, (t - CUE_MS) / ROLL_MS)
+    /* the opening's tall still (6o): the rows in view, a whole-pixel window moved down it (A.pan) */
+    if let pan = A.pan { let cw = Double(x.width), ch = Double(x.height); x.drawImage(A.bg, 0, pan, cw, ch, 0, 0, cw, ch) }
+    else { x.drawImage(A.bg, fx - fx * z, fy - fy * z, Wd * z, Hd * z) }
+    let n = d.balls.count, s: Double = t < CUE_MS ? -1 : still ? .infinity : o.simAt?(t) ?? simT(run, (t - CUE_MS) / ROLL_MS)
     let dt = Double(HERO_SUB) * SIM_DT, nS = run.pos.count
     struct Item { var ball = 0, p: [Double] = [], q: [Double] = [], m: Mat3 = [], fade = 1.0, drop: (k: Int, u: Double)? = nil, d = 0.0, rd = 0.0, post: [Double]? = nil }
     var list: [Item] = []
@@ -220,7 +226,7 @@ enum HeroArt {
         on = run.on[k1][i]; bx = P[2 * i] + (Q[2 * i] - P[2 * i]) * w; by = P[2 * i + 1] + (Q[2 * i + 1] - P[2 * i + 1]) * w
         m = run.rot[k][(9 * i)..<(9 * i + 9)].map { Double($0) }
         if !on, let pt = run.pots[i], pt.k >= 0, pt.k < g.pockets.count {
-          let u = (t - potT(run, pt.t)) / DROP_MS
+          let u = (t - (o.potAt?(pt.t) ?? potT(run, pt.t))) / DROP_MS
           if u >= 0 && u < 1 {
             let P2 = g.pockets[pt.k], e = 1 - (1 - u) * (1 - u)
             bx = pt.at[0] + (P2[0] - pt.at[0]) * e; by = pt.at[1] + (P2[1] - pt.at[1]) * e
@@ -254,8 +260,8 @@ enum HeroArt {
       } else { bp.drawBall(x, o.ball, o.p[0], o.p[1], r, ax, alpha: o.fade, dark: 1 - o.fade) }
     }
     x.setTransform(1, 0, 0, 1, 0, 0)
-    x.drawImage(A.fg, fx - fx * z, fy - fy * z, Wd * z, Hd * z)
-    if !still { cue(x, C, g, d, t, Z, z, dress) }
+    x.drawImage(A.fg, fx - fx * z, fy - fy * z - (A.pan ?? 0) * z, Wd * z, Hd * z)
+    if !still && !o.cueOff { cue(x, C, g, d, t, Z, z, dress, o.cueGap) }
     x.setTransform(1, 0, 0, 1, 0, 0)
     if let vg = A.vg { x.drawImage(vg, 0, 0, Wd, Hd) }
   }
@@ -273,10 +279,11 @@ enum HeroArt {
     x.strokeStyle("#0b0b0c"); x.lineWidth = max(1, rt * 0.18); x.beginPath(); x.ellipse(t[0], t[1], rt * 0.91, rt * sq * 0.91, 0, Double.pi * 2); x.stroke()
   }
   /* heroCue: draws back, strikes at CUE_MS, follows through, then lifts away and fades */
-  static func cue(_ x: Canvas2D, _ C: Cam, _ g: Geo, _ d: Data, _ t: Double, _ Z: ([Double]) -> [Double], _ z: Double, _ dress: Dress) {
+  static func cue(_ x: Canvas2D, _ C: Cam, _ g: Geo, _ d: Data, _ t: Double, _ Z: ([Double]) -> [Double], _ z: Double, _ dress: Dress, _ cueGap: ((Double) -> (Double, Double)?)? = nil) {
     let T0 = CUE_MS, b = d.balls.first { $0.n == d.ball }!, dx = cos(d.angle), dy = sin(d.angle)
     var gap: Double, alpha = 1.0
-    if t < 0.66 * T0 { gap = 0.03 + 0.2 * easeIO(t / (0.66 * T0)) }
+    if let cueGap { guard let c = cueGap(t) else { return }; (gap, alpha) = c }   /* the opening's own stroke (6o) */
+    else if t < 0.66 * T0 { gap = 0.03 + 0.2 * easeIO(t / (0.66 * T0)) }
     else if t < 0.74 * T0 { gap = 0.23 }
     else if t < T0 { let u = (t - 0.74 * T0) / (0.26 * T0); gap = 0.23 * (1 - u * u) }
     else {

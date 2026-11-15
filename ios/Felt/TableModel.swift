@@ -76,7 +76,7 @@ final class TableModel {
      search build their own): a bumper table reached from the 7 ft table, as every golden reaches it */
   let spec: (table: String, shape: String?, pockets: String)
   /* start()'s table for a game from the settings (every pool game on its size and pockets; snooker's size; bumper's shape) */
-  static func spec(for game: TableGame) -> (table: String, shape: String?, pockets: String) {
+  nonisolated static func spec(for game: TableGame) -> (table: String, shape: String?, pockets: String) {
     switch game {
     case .eight, .nine, .ten, .straight, .rotation: (Prefs.table, nil, Prefs.pockets)
     case .snooker: ("snooker", Prefs.snookerTable, Prefs.pockets)

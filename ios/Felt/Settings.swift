@@ -28,6 +28,9 @@ enum Prefs {
   static var caromRace: Int { int("caromRace", 10) }
   static var caromCush: Int { int("caromCush", 3) }
   static var sound: Bool { bool("sound", true) }
+  /* Settings > Graphics > Opening Animation (6o); the last game played, which the opening breaks if a pocket game */
+  static var intro: Bool { bool("intro", true) }
+  static var last: String { get { str("last", "8") } set { d.set(newValue, forKey: "felt.settings.last") } }
   /* Table Dressing (settings.dress): "game" wears each game's own (GAME_LOOK), "mine" the settings' look, each slot only if
      unlocked (else the default) */
   static var dressMode: String { str("dress", "game") }
@@ -86,6 +89,7 @@ struct SettingsView: View {
   @AppStorage("felt.settings.haptics") private var haptics = true
   @AppStorage("felt.settings.dress") private var dressMode = "game"
   @AppStorage("felt.settings.view") private var tableView = "top"
+  @AppStorage("felt.settings.intro") private var intro = true
   @AppStorage("felt.settings.viewAfter") private var viewAfter = "pull"
   @AppStorage("felt.settings.look.cloth") private var lookCloth = "green"
   @AppStorage("felt.settings.look.cue") private var lookCue = "house"
@@ -134,6 +138,7 @@ struct SettingsView: View {
         look("Chalk", "chalk", $lookChalk)
         look("Rails", "rail", $lookRail)
         look("Balls", "balls", $lookBalls)
+        Toggle("Opening Animation", isOn: $intro)
       } header: { Text("Graphics") } footer: { Text("By Game dresses each game as itself: its cloth, rails, balls, cue and room. My Look wears your choices below on every game. Picking one switches to My Look. A career match wears what its player equipped.") }
       Section {
         Toggle("Sound", isOn: $sound)
