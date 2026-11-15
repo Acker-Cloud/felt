@@ -57,7 +57,7 @@ final class TableModel {
   var spin = Spin()
   /* #elevPop: the cue elevation sheet, opened by a hold on the pad; spinOk: the player's turn to aim */
   var elevOpen = false
-  var spinOk: Bool { rolling == nil && stroke == nil && !cpuTurn && trickRes == nil && (g?.winner == nil) }
+  var spinOk: Bool { rolling == nil && stroke == nil && !cpuTurn && trickRes == nil && !drillBlocked && (g?.winner == nil) }
   /* setElev: whole degrees 0 to 60 on spin.e (radians) */
   func setElev(_ deg: Double) { spin = spinOf(x: spin.x, y: spin.y, e: max(0, min(60, deg.rounded())) * Double.pi / 180) }
   var elevDeg: Int { Int((spin.e * 180 / Double.pi).rounded()) }
@@ -203,6 +203,41 @@ final class TableModel {
     msg = why
     sound.cue(j.ok ? "win" : "foul")
   }
+  /* drillSettle: the shot judged, its flash, then after DRILL_BEAT the next layout or the result */
+  private func settleDrill(_ before: Game, _ r: ShotResult) {
+    guard var D = drill, let d = drillById(D.id), let S = D.S else { return }
+    let j = engine.drillJudge(d, S, r)
+    D.js.append(j); D.beat = true; drill = D
+    var gm = before; gm.balls = r.balls.map { b -> GBall in var x = GBall(n: b.n, x: b.x, y: b.y); x.on = b.on; return x }; gm.shots += 1
+    g = gm; rolling = nil; spin = Spin(); v3Top2d = false; syncBalls(); inHand = false
+    sound.cue(j.s >= 50 ? "win" : "foul")
+    flashDue = ("Shot \(D.i + 1) of \(d.shots): \(j.s)", j.why, max(1.2, TableModel.DRILL_BEAT + 0.6)); msg = "\(j.why) Shot \(D.i + 1): \(j.s)."
+    let balls = r.balls
+    Task { @MainActor [weak self] in
+      try? await Task.sleep(for: .seconds(TableModel.DRILL_BEAT))
+      guard let self, var D = self.drill, D.id == d.id, D.beat else { return }
+      D.beat = false
+      if drillOver(d, D.js) { self.drill = D; self.drillFinish(d); return }
+      D.i += 1; D.S = self.engine.drillShot(d, D.i, balls); self.drill = D
+      self.g = self.engine.drillGame(d, D.i, balls); self.syncBalls(); self.aimAtNearest()
+      self.msg = "Shot \(D.i + 1) of \(d.shots). \(D.S!.say)"
+    }
+  }
+  /* drillFinish: the score into the record (best, plays, the last DRILL_HIST with their days), the result */
+  private func drillFinish(_ d: Drill) {
+    guard let D = drill else { return }
+    let total = drillTotal(d, D.js)
+    var all = DrillStore.all
+    let was = all[d.id]?.best
+    var rec = all[d.id] ?? DrillRec(best: 0, n: 0, hist: [])
+    rec.n += 1; rec.best = max(rec.best, total); rec.hist.append((total, Rec.today()))
+    if rec.hist.count > DrillStore.HIST { rec.hist.removeFirst(rec.hist.count - DrillStore.HIST) }
+    all[d.id] = rec; DrillStore.all = all
+    drillRes = DrillResult(total: total, was: was, tier: drillTier(d, total))
+    sound.cue(drillTier(d, total) > 0 ? "win" : "foul")
+  }
+  func startDrill(_ id: String) { guard drillById(id) != nil else { return }; drill = DrillSession(id: id); rerack() }
+  var drillBlocked: Bool { drill?.beat == true || drillRes != nil }
   /* startTrick again (Try Again), or another (Next) */
   func startTrick(_ id: String) {
     guard let c = trickById(id) else { return }
@@ -335,8 +370,20 @@ final class TableModel {
   struct TrickSession { var id: String, attempts: Int, demo = false, stars = 0, got = 0, runOver = false, runTry = 0 }
   var trick: TrickSession? = nil
   var trickRes: TrickRes? = nil
+  /* a drill session (startDrill): the shot, its layout, each shot's judgement, the beat after a shot; the result */
+  struct DrillSession { var id: String, i = 0, js: [DrillJ] = [], S: DrillShot? = nil, beat = false }
+  struct DrillResult { var total: Int, was: Int?, tier: Int }
+  var drill: DrillSession? = nil
+  var drillRes: DrillResult? = nil
+  static let DRILL_BEAT = 0.9
+  /* the 7 ft regulation solutions (tests/drill-solutions.json), bundled for the -felt-drillshots hook only when present */
+  static let drillSols: [String: [[Double]]]? = {
+    guard let u = Bundle.main.url(forResource: "drill-solutions", withExtension: "json"), let d = try? Data(contentsOf: u),
+          let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let r = o["7r"] as? [String: Any] else { return nil }
+    return r.compactMapValues { (($0 as? [String: Any])?["shots"] as? [[NSNumber]])?.map { $0.map(\.doubleValue) } }
+  }()
 
-  init(game: TableGame, cpu: String? = nil, practice: String? = nil, trick: String? = nil, exhib: [String]? = nil, exhibArch: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil, match: TMatch? = nil) {
+  init(game: TableGame, cpu: String? = nil, practice: String? = nil, trick: String? = nil, drill: String? = nil, exhib: [String]? = nil, exhibArch: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil, match: TMatch? = nil) {
     self.game = game
     /* tourneyPlay: the player's next match, the opponent's level, the lag from the tournament's seed */
     var tm: TMatch? = match
@@ -345,8 +392,9 @@ final class TableModel {
       tm = TMatch(m: m, foe: foe.name, level: foe.level ?? "medium", arch: foe.arch, need: pts ? 1 : t.race, points: pts, race: t.race,
                       lag: cpuRng(Double(CareerLib.seedOf([String(t.seed), "lag", String(m)])))() < 0.5 ? 0 : 1, ruleset: t.ruleset)
     }
-    cpuLevel = practice != nil || trick != nil ? nil : tm?.level ?? (exhib == nil && party == nil ? cpu : nil)
+    cpuLevel = practice != nil || trick != nil || drill != nil ? nil : tm?.level ?? (exhib == nil && party == nil ? cpu : nil)
     /* startPractice: a fresh seed, editing on for the empty table */
+    if let id = drill, drillById(id) != nil { self.drill = DrillSession(id: id) }
     if let id = trick, trickById(id) != nil { self.trick = TrickSession(id: id, attempts: TrickStore.tries[id] ?? 0) }
     if let l = practice {
       var P = Practice(layout: l, seed: UInt32.random(in: 0...0x7fffffff), edit: l == "empty")
@@ -376,6 +424,17 @@ final class TableModel {
     /* the look: a career match wears the career's equipped items (lookCareer), else the settings' (look()) */
     dress = tm?.dress ?? Prefs.dress(game.table.2)
     rerack()
+    /* a test hook: `-felt-drillshots` plays the drill's 7 ft regulation solutions, one a beat */
+    if let id = drill, ProcessInfo.processInfo.arguments.contains("-felt-drillshots"), let sol = TableModel.drillSols?[id] {
+      Task { @MainActor [weak self] in
+        for a in sol {
+          try? await Task.sleep(for: .seconds(1.2))
+          while let s = self, s.rolling != nil || s.stroke != nil || s.drillBlocked && s.drillRes == nil { try? await Task.sleep(for: .milliseconds(100)) }
+          guard let s = self, s.drillRes == nil else { return }
+          s.aim = a[0]; s.power = a[1]; s.spin = Spin(x: a[2], y: a[3]); s.shoot()
+        }
+      }
+    }
     /* a test hook: `-felt-elev` opens the elevation sheet at 45 degrees */
     if ProcessInfo.processInfo.arguments.contains("-felt-elev") { setElev(45); elevOpen = true }
     /* a test hook: `-felt-showme` plays the trick's stored solution a moment after it opens */
@@ -398,6 +457,14 @@ final class TableModel {
   func rerack() {
     abandonCpuGame()
     rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], [], [], []]; potCount = 0; banner = nil
+    if let D = drill, let d = drillById(D.id) {
+      drill = DrillSession(id: d.id); drillRes = nil
+      drill!.S = engine.drillShot(d, 0, nil); g = engine.drillGame(d, 0, nil)
+      syncBalls()
+      flashDue = (d.name, d.goal, 2.2); msg = "\(d.name). \(drill!.S!.say)"
+      randomOrient(); aimAtNearest()
+      return
+    }
     if let T = trick, let c = trickById(T.id) {
       g = engine.trickGame(c); trickRes = nil
       syncBalls()
@@ -484,7 +551,7 @@ final class TableModel {
   private(set) var shotAt: TimeInterval = 0
   private(set) var now: TimeInterval = 0
   func shoot() {
-    guard rolling == nil, stroke == nil, power > 0.01, g?.option == nil, g?.winner == nil, !cpuTurn, trickRes == nil else { power = 0; return }
+    guard rolling == nil, stroke == nil, power > 0.01, g?.option == nil, g?.winner == nil, !cpuTurn, trickRes == nil, !drillBlocked else { power = 0; return }
     /* a pull the call refuses (no needed call yet) opens the call's menu on the let-go, the pockets first */
     if !callReady { power = 0; callMenu = true; return }
     markPower = power
@@ -582,6 +649,7 @@ final class TableModel {
     let shot = RuleShot(r)
     if before.mode == "practice" { settlePractice(before, shot); return }
     if before.mode == "trick" { settleTrick(before, r); return }
+    if before.mode == "drill" { settleDrill(before, r); return }
     let shooter = before.turn, next = engine.judge(before, shot)
     potCount += next.verdict?.potted.count ?? 0
     if let gm0 = gBefore, gm0.turn < 4 { pottedBy[gm0.turn] += next.verdict?.potted.filter { $0 > 0 } ?? [] }

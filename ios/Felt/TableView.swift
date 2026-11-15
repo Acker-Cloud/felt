@@ -150,6 +150,24 @@ struct TableCanvas: View {
   /* drawSolo: a trick shot's marks, the cue ball's target ring (filled faintly, a dashed edge) and the pocket the goal names
      (a gold ring) */
   private func drawSolo(_ ctx: inout GraphicsContext, _ m: Mapper) {
+    /* drawDrill: the ring (its full-marks edge, and faint where it scores nothing), the line, the break's box, the pocket */
+    if let gm = model.g, gm.mode == "drill", let S = model.drill?.S {
+      let dash = StrokeStyle(lineWidth: 2, dash: [6, 5]), W = Color.white.opacity(0.85), R = model.sim.BALL_R
+      if let z = S.zone {
+        let p = m.pt(z.at[0], z.at[1]), r = (z.full + R) * m.k, r0 = (z.zero + R) * m.k
+        let box = CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)
+        ctx.fill(Path(ellipseIn: box), with: .color(.white.opacity(0.08)))
+        ctx.stroke(Path(ellipseIn: box), with: .color(W), style: dash)
+        var c = ctx; c.opacity = 0.3; c.stroke(Path(ellipseIn: CGRect(x: p.x - r0, y: p.y - r0, width: 2 * r0, height: 2 * r0)), with: .color(W), style: dash)
+      }
+      if let L = S.line { var p = Path(); p.move(to: m.pt(L.x, 0)); p.addLine(to: m.pt(L.x, model.sim.TW)); ctx.stroke(p, with: .color(W), style: dash) }
+      if let B = S.box { var p = Path(); p.move(to: m.pt(B[0], B[1])); p.addLine(to: m.pt(B[2], B[1])); p.addLine(to: m.pt(B[2], B[3])); p.addLine(to: m.pt(B[0], B[3])); p.closeSubpath(); ctx.stroke(p, with: .color(W), style: dash) }
+      if let k = S.pocket, k < model.sim.POCKETS.count {
+        let P = model.sim.POCKETS[k], p = m.pt(P[0], P[1]), r = model.sim.POCKET_R[k] * m.k + 5
+        ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(Color(rgb: 0xf2, 0xc9, 0x4c)), lineWidth: 2.5)
+      }
+      return
+    }
     guard let gm = model.g, gm.mode == "trick", let id = gm.trick, let c = trickById(id), c.zoneR != nil || c.pocket != nil else { return }
     if let r0 = c.zoneR, let z = model.engine.trickPoints(c)[-1] {
       let p = m.pt(z[0], z[1]), r = r0 * m.k, box = CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)
@@ -547,7 +565,8 @@ struct TableCanvas: View {
      left, then the right. A dark recess (POT_RECESS) cut dark round its edge, the rail's true little ball in it, a rim
      of light on a ball under 3:1 on the recess. */
   private func drawPotRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter) {
-    guard let g = model.g, !model.potOrder.isEmpty else { return }
+    /* potGame: a game with no mode, or practice; never a trick shot or a drill */
+    guard let g = model.g, !model.potOrder.isEmpty, g.mode == nil || g.mode == "practice" else { return }
     let s = model.sim, T = model.potGeometry(m), band = T.railBand, k = m.k
     let wk = (band.rail - band.co) * k, mid = (band.co + band.rail) / 2
     let a = m.pt(0, 0), b = m.pt(s.TL, s.TW)

@@ -23,6 +23,8 @@ targets:
       - path: ../sounds
         type: folder
         buildPhase: resources
+      - path: ../tests/drill-solutions.json
+        buildPhase: resources
     dependencies:
       - package: FeltSim
         product: FeltSim

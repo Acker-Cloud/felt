@@ -27,6 +27,7 @@ struct Home: View {
   /* a practice session's layout (startPractice) */
   @State private var practicing: PracticeGo? = nil
   @State private var tricking: PracticeGo? = nil
+  @State private var drilling: PracticeGo? = nil
   struct PracticeGo: Identifiable { let layout: String; var id: String { layout } }
   /* Solo: Practice (#pracSheet, 5s) */
   private var soloSection: some View {
@@ -45,6 +46,13 @@ struct Home: View {
         }.frame(minHeight: 44, alignment: .leading)
       }
       .accessibilityIdentifier("solo-tricks")
+      NavigationLink { DrillsList { drilling = PracticeGo(layout: $0) } } label: {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Drills").font(.body.weight(.semibold))
+          Text("\(DrillStore.medals) of \(DRILL_LIB.count * 3) medals").font(.footnote).foregroundStyle(.secondary)
+        }.frame(minHeight: 44, alignment: .leading)
+      }
+      .accessibilityIdentifier("solo-drills")
     } header: { Text("Solo") }
   }
   /* #leftNote: a game left by closing the app counted as a loss, once, until OK or LEFT_MS */
@@ -141,6 +149,8 @@ struct Home: View {
       if let i = a.firstIndex(of: "-felt-stats") { statsPath = i + 1 < a.count && !a[i + 1].hasPrefix("-") ? a[i + 1] : "all" }
       /* `-felt-practice 8|9|heyball|scatter|empty`: a practice session */
       if let i = a.firstIndex(of: "-felt-practice"), i + 1 < a.count { practicing = PracticeGo(layout: a[i + 1]) }
+      /* `-felt-drill id`: that drill (`-felt-drillshots` plays its solutions) */
+      if let i = a.firstIndex(of: "-felt-drill"), i + 1 < a.count { drilling = PracticeGo(layout: a[i + 1]) }
       /* `-felt-trick id`: that trick shot (`-felt-elev` opens the elevation sheet) */
       if let i = a.firstIndex(of: "-felt-trick"), i + 1 < a.count { tricking = PracticeGo(layout: a[i + 1]) }
       /* `-felt-career`: the career's screen open */
@@ -183,6 +193,7 @@ struct Home: View {
         TableScreen(model: { let m = TableModel(game: g, tourney: t); m.onReport = { store.report($0, $1, $2, $3) }; return m }())
       }
     }
+    .fullScreenCover(item: $drilling) { d in TableScreen(model: TableModel(game: .nine, drill: d.layout)) }
     .fullScreenCover(item: $tricking) { t in TableScreen(model: TableModel(game: .eight, trick: t.layout)) }
     .fullScreenCover(item: $practicing) { p in TableScreen(model: TableModel(game: p.layout == "9" ? .nine : p.layout == "heyball" ? .heyball : .eight, practice: p.layout)) }
     .fullScreenCover(item: $party) { p in TableScreen(model: TableModel(game: p.game, party: (p.names, p.ruleset))) }
@@ -241,6 +252,7 @@ struct TableScreen: View {
     .onChange(of: model.spinOk) { _, ok in if !ok { model.elevOpen = false } }
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
     .overlay { if let r = model.trickRes, !model.paused { TrickResult(model: model, res: r, back: { dismiss() }) } }
+    .overlay { if let r = model.drillRes, !model.paused { DrillResultView(model: model, res: r, back: { dismiss() }) } }
     .onDisappear { model.abandonCpuGame() }
     .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
     .overlay { if let h = model.handoff, !model.paused { Handoff(model: model, p: h.p, first: h.first) } }
@@ -1480,5 +1492,106 @@ struct TrickResult: View {
       .padding(.horizontal, 12).padding(.bottom, 12)
     }
     .accessibilityElement(children: .contain)
+  }
+}
+
+/* the drills sheet: the list (every drill with its medal and best, the medals won of all) and a page per drill (its goal,
+   scoring, medals, best, the last scores, Start pinned at the foot) */
+struct DrillsList: View {
+  let go: (String) -> Void
+  var body: some View {
+    let all = DrillStore.all
+    List {
+      Section {
+        ForEach(Array(DRILL_LIB.enumerated()), id: \.offset) { i, d in
+          let r = all[d.id], t = r.map { drillTier(d, $0.best) } ?? 0
+          NavigationLink { DrillPage(d: d, go: go) } label: {
+            HStack(spacing: 12) {
+              Medal(n: i + 1, tier: t)
+              VStack(alignment: .leading, spacing: 2) {
+                Text(d.name).font(.body.weight(.semibold))
+                Text(r.map { "Best \($0.best)\(t > 0 ? ", \(DRILL_TIERS[t].lowercased())" : ""). \($0.n) played" } ?? d.sub).font(.footnote).foregroundStyle(.secondary)
+              }
+            }.frame(minHeight: 44)
+          }
+          .accessibilityLabel("\(d.name): \(r.map { "best \($0.best)\(t > 0 ? ", \(DRILL_TIERS[t])" : "")" } ?? "not played yet")")
+          .accessibilityIdentifier("drillRow-" + d.id)
+        }
+      } header: { Text("\(DRILL_LIB.count) drills, each a few shots scored from what the balls really did. Bronze, silver and gold by score: \(DrillStore.medals) of \(DRILL_LIB.count * 3) medals.").textCase(nil) }
+    }
+    .navigationTitle("Drills")
+  }
+}
+/* .dmedal: the drill's number in a disc, its medal's colour once won */
+struct Medal: View {
+  let n: Int, tier: Int
+  var body: some View {
+    let c: Color = [Color(white: 0.24), Color(rgb: 0xc8, 0x84, 0x52), Color(rgb: 0xc6, 0xc8, 0xcc), Color(rgb: 0xe8, 0xc1, 0x4a)][tier]
+    Text("\(n)").font(.system(size: 13, weight: .bold)).monospacedDigit().frame(width: 30, height: 30)
+      .background(Circle().fill(c)).foregroundStyle(tier > 0 ? Color.black : Color.white).accessibilityHidden(true)
+  }
+}
+struct DrillPage: View {
+  let d: Drill
+  let go: (String) -> Void
+  var body: some View {
+    let r = DrillStore.all[d.id], hist = Array((r?.hist ?? []).reversed().prefix(10))
+    List {
+      Section {
+        rule("Goal", d.goal)
+        rule("Scoring, \(d.shots) Shots", d.how + (d.hasOwnTotal ? "" : " Your score is the mean of the shots."))
+        rule("Medals", "Bronze at \(d.tiers[0]), silver at \(d.tiers[1]), gold at \(d.tiers[2]).")
+        rule("Your Best", r.map { "\($0.best) of 100\(drillTier(d, $0.best) > 0 ? ", \(DRILL_TIERS[drillTier(d, $0.best)].lowercased())" : ""), \($0.n) played." } ?? "Not played yet.")
+      }
+      if !hist.isEmpty {
+        Section("Last Scores") {
+          ForEach(Array(hist.enumerated()), id: \.offset) { _, h in
+            HStack { Text("\(h.0)\(drillTier(d, h.0) > 0 ? ", \(DRILL_TIERS[drillTier(d, h.0)].lowercased())" : "")").font(.body.weight(.semibold)); Spacer(); Text(DrillStore.dayWords(h.1)).foregroundStyle(.secondary) }
+          }
+        }
+      }
+    }
+    .safeAreaInset(edge: .bottom) {
+      Button { go(d.id) } label: { Text(titleCaseWords("Start \(d.name)")).font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+        .background(Capsule().fill(.white)).foregroundStyle(.black).padding(.horizontal, 16).padding(.vertical, 8).background(.bar)
+        .accessibilityIdentifier("drillGo")
+    }
+    .navigationTitle(d.name)
+  }
+  func rule(_ h: String, _ p: String) -> some View {
+    VStack(alignment: .leading, spacing: 3) { Text(h).font(.subheadline.weight(.semibold)); Text(p).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }.padding(.vertical, 2)
+  }
+}
+/* #drillRes: "Drill: Cut Ladder", "80 of 100, silver", the best and the next medal, each shot's score, Again and Back */
+struct DrillResultView: View {
+  let model: TableModel
+  let res: TableModel.DrillResult
+  let back: () -> Void
+  var body: some View {
+    let d = drillById(model.drill!.id)!, js = model.drill!.js, nextT = d.tiers.first { $0 > res.total }
+    VStack(spacing: 0) {
+      Spacer()
+      VStack(alignment: .leading, spacing: 10) {
+        Text("Drill: \(d.name)").font(.footnote).foregroundStyle(.secondary)
+        Text("\(res.total) of 100" + (res.tier > 0 ? ", \(DRILL_TIERS[res.tier].lowercased())" : "")).font(.title2.bold())
+        Text((res.was == nil ? "Your first score on this drill." : res.total > res.was! ? "A new best, up from \(res.was!)." : "Best: \(res.was!).")
+             + (nextT.map { " \(DRILL_TIERS[drillTier(d, $0)]) at \($0)." } ?? " Gold, the top medal.")).font(.subheadline).foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+          ForEach(0..<d.shots, id: \.self) { i in
+            let s = i < js.count ? js[i].s : nil
+            Text(s.map(String.init) ?? "-").font(.subheadline.weight(.semibold)).monospacedDigit().frame(minWidth: 36, minHeight: 30)
+              .background(RoundedRectangle(cornerRadius: 8).fill(Color(white: (s ?? 0) > 0 ? 0.26 : 0.16)))
+              .foregroundStyle((s ?? 0) > 0 ? Color.primary : Color.secondary)
+              .accessibilityLabel("Shot \(i + 1): \(s.map(String.init) ?? "not played")")
+          }
+        }
+        Button { model.startDrill(d.id) } label: { Text("Again").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+          .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("drillAgain")
+        Button("Back to Drills", action: back).frame(maxWidth: .infinity, minHeight: 44).foregroundStyle(.primary)
+      }
+      .padding(20)
+      .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
+      .padding(.horizontal, 12).padding(.bottom, 12)
+    }
   }
 }

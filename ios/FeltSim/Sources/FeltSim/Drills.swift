@@ -70,6 +70,8 @@ public struct Drill: Sendable {
   let score: @Sendable (ShotResult, DrillShot, Sim) -> DrillScore
   var end: (@Sendable (DrillJ) -> Bool)? = nil
   var total: (@Sendable ([DrillJ]) -> Int)? = nil
+  /* the page's "d.total || d.end": a drill scored otherwise than the mean of its shots */
+  public var hasOwnTotal: Bool { total != nil || end != nil }
 }
 
 public let DRILL_LIB: [Drill] = [
