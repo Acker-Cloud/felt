@@ -772,9 +772,8 @@ struct PowerBar: View {
           HStack(spacing: 6) {
             Text(lab).font(.system(size: 15, weight: .semibold)).lineLimit(1).truncationMode(.tail)
               .foregroundStyle(model.callReady ? Color(rgb: 0xec, 0xec, 0xee) : Color(rgb: 0xff, 0xd5, 0x8a))
-            if model.callMenuOffered { Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)) }
           }
-          .padding(.horizontal, 12).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+          .padding(.leading, 12).padding(.trailing, model.callMenuOffered ? 26 : 12).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         } else if model.rolling != nil || model.rp != nil {
           Text(model.rp != nil ? "Replay" : "Rolling").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -796,6 +795,14 @@ struct PowerBar: View {
       }
       .clipShape(RoundedRectangle(cornerRadius: 14))
       .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(rgb: live ? 0x74 : 0x6b, live ? 0x74 : 0x6b, live ? 0x7e : 0x74), lineWidth: 1))
+      /* #callGlyph: chevron.up.chevron.down at the bar's trailing end (on its side, its foot) while the call's menu is
+         offered and the bar is not pulled (#powerBar.calls:not(.live)) */
+      .overlay(alignment: upright ? .trailing : .bottom) {
+        if model.callMenuOffered && !live && model.rolling == nil {
+          Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color(rgb: 0xec, 0xec, 0xee)).opacity(0.8)
+            .padding(upright ? .trailing : .bottom, 10).accessibilityHidden(true).allowsHitTesting(false)
+        }
+      }
       .contentShape(Rectangle())
       .gesture(DragGesture(minimumDistance: 0).onChanged { v in
         /* a press on the bar ends a replay and is the bar's own: the pull goes on to arm and shoot */
