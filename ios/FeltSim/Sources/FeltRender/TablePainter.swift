@@ -21,7 +21,49 @@ public func feltRng(_ seed: UInt32) -> () -> Double {
   }
 }
 
-public struct ClothLook: Sendable { public let base, cushion, lamp: String; public let worsted: Bool }
+/* CLOTHS (4l): the bed and cushion, the lamp's tint, the bounce into a ball's shade, every white overlay's floor alpha, the
+   illegal ring and the call's colours, worsted (no nap), lowRim (a ball close to the cloth's colour takes the light rim), rim (all) */
+public struct ClothLook: Sendable {
+  public let base, cushion, lamp: String; public let worsted: Bool
+  public var bounce = "120,200,160", ovMin = 0.6, illegal = "#ffa597", call = "#ffe27a", lowRim = false, rim = false
+  init(base: String, cushion: String, lamp: String, worsted: Bool, bounce: String = "120,200,160", ovMin: Double = 0.6, illegal: String = "#ffa597", call: String = "#ffe27a", lowRim: Bool = false, rim: Bool = false) {
+    self.base = base; self.cushion = cushion; self.lamp = lamp; self.worsted = worsted; self.bounce = bounce; self.ovMin = ovMin; self.illegal = illegal; self.call = call; self.lowRim = lowRim; self.rim = rim
+  }
+}
+/* what the table, cue and balls wear (4l's look()): a key into each of CLOTH, CueLook, the chalks, RAILS, BallSet and ROOM */
+public struct Dress: Sendable, Hashable {
+  public var cloth, cue, chalk, rail, balls, room: String
+  public init(cloth: String, cue: String, chalk: String, rail: String, balls: String, room: String) { self.cloth = cloth; self.cue = cue; self.chalk = chalk; self.rail = rail; self.balls = balls; self.room = room }
+  /* GAME_LOOK: each game dressed as itself (8-ball the defaults) */
+  public static func game(_ kind: String) -> Dress {
+    switch kind {
+    case "9": Dress(cloth: "tourney", cue: "ebony", chalk: "blue", rail: "lacquer", balls: "tv", room: "arena")
+    case "10": Dress(cloth: "electric", cue: "carbon", chalk: "blue", rail: "ebony", balls: "measles", room: "arena")
+    case "straight": Dress(cloth: "spruce", cue: "maple", chalk: "blue", rail: "mahogany", balls: "vintage", room: "hall")
+    case "rotation": Dress(cloth: "wine", cue: "gold", chalk: "blue", rail: "cherry", balls: "classic", room: "hall")
+    case "heyball": Dress(cloth: "joy", cue: "rosewood", chalk: "blue", rail: "arena", balls: "pinkblue", room: "joy")
+    case "bumper": Dress(cloth: "olive", cue: "plain", chalk: "blue", rail: "veneer", balls: "classic", room: "rec")
+    case "carom": Dress(cloth: "blue", cue: "hall", chalk: "blue", rail: "carom", balls: "classic", room: "carom")
+    case "snooker": Dress(cloth: "baize", cue: "ash", chalk: "green", rail: "baulk", balls: "classic", room: "crucible")
+    default: Dress(cloth: "green", cue: "house", chalk: "blue", rail: "walnut", balls: "classic", room: "hall")
+    }
+  }
+  /* LOOK_DEFAULT, and CHALKS' tips */
+  public static let standard = Dress.game("8")
+  public static let CHALK = ["blue": "#4f84bd", "green": "#3f9a5c", "red": "#c0443c"]
+  /* the names Settings and the shop show (CLOTH_NAMES, each look's name), and what is never listed (dress: true) */
+  public static let NAMES: [String: [String: String]] = [
+    "cloth": ["green": "Green", "red": "Red", "blue": "Blue", "grey": "Grey", "teal": "Teal", "midnight": "Midnight", "plum": "Plum"],
+    "cue": ["house": "House", "maple": "Maple Inlay", "ebony": "Ebony and Silver", "carbon": "Carbon Weave", "gold": "Gold Ring", "legacy": "Hall of Fame", "champion": "Champion", "centurion": "Centurion"],
+    "chalk": ["blue": "Blue", "green": "Green", "red": "Red"],
+    "rail": ["walnut": "Walnut", "cherry": "Cherry", "oak": "Light Oak", "ebony": "Ebony"],
+    "balls": ["classic": "Classic", "pro": "Pro", "vintage": "Vintage", "tv": "Television"],
+  ]
+  public static let ORDER: [String: [String]] = [
+    "cloth": ["green", "red", "blue", "grey", "teal", "midnight", "plum"], "cue": ["house", "maple", "ebony", "carbon", "gold", "legacy", "champion", "centurion"],
+    "chalk": ["blue", "green", "red"], "rail": ["walnut", "cherry", "oak", "ebony"], "balls": ["classic", "pro", "vintage", "tv"],
+  ]
+}
 public struct RailLook: Sendable {
   public let base: String; public let dark, lite: [Double]; public let mat, metal, sight: String?
 }
@@ -29,6 +71,7 @@ public struct RoomLook: Sendable { public let glow: String; public let glowA: Do
 public struct TableLook: Sendable {
   public let cloth: ClothLook, rail: RailLook, room: RoomLook
   /* GAME_LOOK's cloth, rail and room for each game (index.html 4l) */
+  public static func of(_ d: Dress) -> TableLook { TableLook(cloth: CLOTH[d.cloth] ?? CLOTH["green"]!, rail: RAILS[d.rail] ?? RAILS["walnut"]!, room: ROOM[d.room] ?? ROOM["hall"]!) }
   public static func of(game: String) -> TableLook {
     switch game {
     case "9": return TableLook(cloth: CLOTH["tourney"]!, rail: RAILS["lacquer"]!, room: ROOM["arena"]!)
@@ -43,18 +86,24 @@ public struct TableLook: Sendable {
     }
   }
   public static let CLOTH: [String: ClothLook] = [
-    "green": ClothLook(base: "#1b5d47", cushion: "#1d6450", lamp: "255,248,220", worsted: false),
-    "blue": ClothLook(base: "#1d4f91", cushion: "#21579c", lamp: "235,240,255", worsted: false),
-    "tourney": ClothLook(base: "#1f5fa8", cushion: "#2367b3", lamp: "235,240,255", worsted: true),
-    "electric": ClothLook(base: "#1566b8", cushion: "#186fc4", lamp: "235,242,255", worsted: true),
-    "baize": ClothLook(base: "#1f6b3a", cushion: "#22733f", lamp: "255,248,220", worsted: false),
-    "joy": ClothLook(base: "#1e6340", cushion: "#206a45", lamp: "255,250,230", worsted: false),
-    "spruce": ClothLook(base: "#134a44", cushion: "#16524b", lamp: "245,250,235", worsted: false),
-    "wine": ClothLook(base: "#8c1f25", cushion: "#94242b", lamp: "255,196,160", worsted: false),
-    "olive": ClothLook(base: "#4f6030", cushion: "#586a35", lamp: "255,244,210", worsted: false),
+    "green": ClothLook(base: "#1b5d47", cushion: "#1d6450", lamp: "255,248,220", worsted: false, bounce: "120,200,160", ovMin: 0.6, illegal: "#ffa597", call: "#ffe27a"),
+    "red": ClothLook(base: "#9a1f26", cushion: "#a2242b", lamp: "255,196,160", worsted: false, bounce: "236,122,118", ovMin: 0.68, illegal: "#ffe27a", call: "#9ff0ff"),
+    "blue": ClothLook(base: "#1d4f91", cushion: "#21579c", lamp: "235,240,255", worsted: false, bounce: "120,160,230", ovMin: 0.66, illegal: "#ffe27a", call: "#9ff0ff"),
+    "grey": ClothLook(base: "#4a555d", cushion: "#535f68", lamp: "250,248,240", worsted: false, bounce: "170,182,192", ovMin: 0.78, illegal: "#ffe27a", call: "#9ff0ff"),
+    "teal": ClothLook(base: "#0e5a60", cushion: "#11646a", lamp: "240,255,250", worsted: false, bounce: "110,200,200", ovMin: 0.64, illegal: "#ffa597", call: "#ffe27a"),
+    "midnight": ClothLook(base: "#162039", cushion: "#1a2643", lamp: "225,232,255", worsted: false, bounce: "110,130,190", ovMin: 0.5, illegal: "#ffa597", call: "#ffe27a", rim: true),
+    "plum": ClothLook(base: "#4a1f4f", cushion: "#53245a", lamp: "255,225,245", worsted: false, bounce: "190,120,200", ovMin: 0.62, illegal: "#ffe27a", call: "#9ff0ff", rim: true),
+    "tourney": ClothLook(base: "#1f5fa8", cushion: "#2367b3", lamp: "235,240,255", worsted: true, bounce: "120,165,235", ovMin: 0.72, illegal: "#ffe27a", call: "#9ff0ff", lowRim: true),
+    "electric": ClothLook(base: "#1566b8", cushion: "#186fc4", lamp: "235,242,255", worsted: true, bounce: "110,170,240", ovMin: 0.78, illegal: "#ffe27a", call: "#9ff0ff", lowRim: true),
+    "spruce": ClothLook(base: "#134a44", cushion: "#16524b", lamp: "245,250,235", worsted: false, bounce: "110,190,175", ovMin: 0.6, illegal: "#ffa597", call: "#ffe27a", lowRim: true),
+    "wine": ClothLook(base: "#8c1f25", cushion: "#94242b", lamp: "255,196,160", worsted: false, bounce: "236,122,118", ovMin: 0.66, illegal: "#ffe27a", call: "#9ff0ff", lowRim: true),
+    "baize": ClothLook(base: "#1f6b3a", cushion: "#22733f", lamp: "255,248,220", worsted: false, bounce: "120,205,150", ovMin: 0.66, illegal: "#ffe27a", call: "#9ff0ff", lowRim: true),
+    "joy": ClothLook(base: "#1e6340", cushion: "#206a45", lamp: "255,250,230", worsted: false, bounce: "120,200,150", ovMin: 0.64, illegal: "#ffe27a", call: "#9ff0ff", lowRim: true),
+    "olive": ClothLook(base: "#4f6030", cushion: "#586a35", lamp: "255,244,210", worsted: false, bounce: "170,190,110", ovMin: 0.76, illegal: "#ffe27a", call: "#9ff0ff", lowRim: true),
   ]
   public static let RAILS: [String: RailLook] = [
     "walnut": RailLook(base: "#4f2714", dark: [44, 19, 9], lite: [140, 78, 40], mat: nil, metal: nil, sight: nil),
+    "oak": RailLook(base: "#8f6232", dark: [98, 62, 28], lite: [212, 166, 108], mat: nil, metal: nil, sight: nil),
     "ebony": RailLook(base: "#1d1613", dark: [9, 7, 6], lite: [78, 62, 52], mat: nil, metal: nil, sight: nil),
     "lacquer": RailLook(base: "#100f11", dark: [6, 6, 7], lite: [34, 33, 36], mat: "lacquer", metal: "chrome", sight: "dot"),
     "baulk": RailLook(base: "#7c5228", dark: [86, 52, 22], lite: [190, 142, 86], mat: nil, metal: "brass", sight: nil),

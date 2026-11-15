@@ -174,7 +174,7 @@ struct TableScreen: View {
     layout {
       GeometryReader { tg in
         TimelineView(.animation(paused: model.paused)) { tl in
-          TableCanvas(model: model, look: Look.of(model.game))
+          TableCanvas(model: model, look: Look.of(model.dress, game: model.game))
             .onChange(of: tl.date) { _, d in model.tick(d.timeIntervalSinceReferenceDate) }
         }
         .overlay { FlashBanner(model: model, size: tg.size) }

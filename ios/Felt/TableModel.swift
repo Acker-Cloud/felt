@@ -86,11 +86,11 @@ final class TableModel {
   func bake(_ size: CGSize, scale: CGFloat) {
     guard size.width > 0, size.height > 0, tableImage?.size != size, baking != size else { return }
     baking = size
-    let look = game.table.2, spec = spec
+    let look = dress, spec = spec
     Task.detached(priority: .userInitiated) {
       let sim = Sim(); TableModel.setUp(sim, spec)
       let m = Mapper(size: size, TL: sim.TL, TW: sim.TW)
-      let p = TablePainter(sim: sim, view: m.view, dpr: Double(scale), rail: m.rail, look: TableLook.of(game: look), pageColor: "rgb(9, 9, 10)")
+      let p = TablePainter(sim: sim, view: m.view, dpr: Double(scale), rail: m.rail, look: TableLook.of(look), pageColor: "rgb(9, 9, 10)")
       let img = p.paint(width: Int((size.width * scale).rounded()), height: Int((size.height * scale).rounded())).image()
       await MainActor.run { if self.baking == size { self.tableImage = Baked(image: img, size: size, scale: scale); self.baking = nil } }
     }
@@ -112,10 +112,9 @@ final class TableModel {
   var scaleFactor: Double { Double(painter?.2 ?? 3) }
   func ballPainter(upright: Bool, scale: CGFloat) -> BallPainter {
     if let p = painter, p.1 == upright, p.2 == scale { return p.0 }
-    let look = TableLook.of(game: game.table.2), cloth = RGBA(css: look.cloth.base)
-    let bounce = ["8": "120,200,160", "9": "120,165,235", "10": "110,170,240", "heyball": "120,200,150", "snooker": "120,205,150", "carom": "120,160,230", "bumper": "170,190,110", "straight": "110,190,175", "rotation": "236,122,118"][game.table.2] ?? "120,200,160"
-    let p = BallPainter(set: BallSet.of(game: game.table.2), bounce: bounce, dpr: Double(scale), portrait: upright,
-                        lowRim: game != .eight && game != .carom, clothBase: [cloth.r * 255, cloth.g * 255, cloth.b * 255])
+    let look = TableLook.of(dress), cloth = RGBA(css: look.cloth.base)
+    let p = BallPainter(set: BallSet.all[dress.balls] ?? BallSet.all["classic"]!, bounce: look.cloth.bounce, dpr: Double(scale), portrait: upright,
+                        lowRim: look.cloth.lowRim, rimAll: look.cloth.rim, clothBase: [cloth.r * 255, cloth.g * 255, cloth.b * 255])
     painter = (p, upright, scale); ballCache = [:]
     return p
   }
@@ -144,8 +143,10 @@ final class TableModel {
      race is one game, need 1), the lag's winner, and where the result goes */
   struct TMatch { let m: Int, foe: String, level: String, arch: String?, need: Int, points: Bool, race: Int, lag: Int, ruleset: String; var score = [0, 0], rack = 1, done = false, counted = false
     /* a career match (careerTerms): its event's calls and table, the event's own words */
-    var call: CallConfig? = nil, spec: (table: String, shape: String?, pockets: String)? = nil, career = false }
+    var call: CallConfig? = nil, spec: (table: String, shape: String?, pockets: String)? = nil, career = false, dress: Dress? = nil }
   private(set) var tmatch: TMatch?
+  /* what the table, the cue and the balls wear (4l) */
+  @ObservationIgnored var dress: Dress = .standard
   @ObservationIgnored var onReport: ((Int, Int, Int, Bool) -> Void)?
   /* the handoff: the player the device is passed to (the breaker at a rack's start), until they are ready */
   var handoff: (p: Int, first: Bool)? = nil
@@ -179,6 +180,8 @@ final class TableModel {
     engine = RulesEngine(sim: sim)
     sound.cupTable = !sim.BUMPERS.isEmpty
     tmatch = tm
+    /* the look: a career match wears the career's equipped items (lookCareer), else the settings' (look()) */
+    dress = tm?.dress ?? Prefs.dress(game.table.2)
     rerack()
     /* a test hook: `-felt-paused` opens the table with the pause menu up */
     if ProcessInfo.processInfo.arguments.contains("-felt-paused") { paused = true }
@@ -833,7 +836,7 @@ final class TableModel {
   @ObservationIgnored private var potGeo: (TablePainter, Double)?
   func potGeometry(_ m: Mapper) -> TablePainter {
     if let g = potGeo, g.1 == m.k { return g.0 }
-    let p = TablePainter(sim: sim, view: m.view, dpr: 1, rail: m.rail, look: TableLook.of(game: game.table.2))
+    let p = TablePainter(sim: sim, view: m.view, dpr: 1, rail: m.rail, look: TableLook.of(dress))
     potGeo = (p, m.k)
     return p
   }

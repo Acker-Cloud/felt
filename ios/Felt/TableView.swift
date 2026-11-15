@@ -10,13 +10,21 @@ import QuartzCore
 struct Look {
   var cloth: Color, cushion: Color, rail: Color, railDark: Color
   /* CLOTHS[...].ovMin and .illegal: every white overlay at least ovMin opaque; the illegal colour */
-  var ovMin: Double { ["8": 0.6, "9": 0.72, "10": 0.78, "heyball": 0.64, "snooker": 0.66, "carom": 0.66, "bumper": 0.76, "straight": 0.6, "rotation": 0.66][game] ?? 0.6 }
-  var illegal: Color { game == "8" || game == "straight" ? Color(hex: 0xffa597) : Color(hex: 0xffe27a) }
+  var ov: Double? = nil, ill: Color? = nil, cl: Color? = nil
+  var ovMin: Double { ov ?? ["8": 0.6, "9": 0.72, "10": 0.78, "heyball": 0.64, "snooker": 0.66, "carom": 0.66, "bumper": 0.76, "straight": 0.6, "rotation": 0.66][game] ?? 0.6 }
+  var illegal: Color { ill ?? (game == "8" || game == "straight" ? Color(hex: 0xffa597) : Color(hex: 0xffe27a)) }
   /* CL.call: the called ball's ring and pocket's glow, 3:1 and more on the cloth */
-  var call: Color { game == "8" || game == "straight" ? Color(hex: 0xffe27a) : Color(hex: 0x9ff0ff) }
+  var call: Color { cl ?? (game == "8" || game == "straight" ? Color(hex: 0xffe27a) : Color(hex: 0x9ff0ff)) }
   var game = "8"
   static func of(_ g: TableGame) -> Look {
     var l = base(g); l.game = g.table.2; return l
+  }
+  /* the look a dress makes: its cloth's colours, overlay floor, illegal and call colours; its rail's wood */
+  static func of(_ d: Dress, game g: TableGame) -> Look {
+    let c = TableLook.CLOTH[d.cloth] ?? TableLook.CLOTH["green"]!, r = TableLook.RAILS[d.rail] ?? TableLook.RAILS["walnut"]!
+    var l = Look(cloth: css(c.base), cushion: css(c.cushion), rail: css(r.base), railDark: Color(rgb: Int(r.dark[0]), Int(r.dark[1]), Int(r.dark[2])))
+    l.game = g.table.2; l.ov = c.ovMin; l.ill = css(c.illegal); l.cl = css(c.call)
+    return l
   }
   static func base(_ g: TableGame) -> Look {
     switch g {
@@ -125,10 +133,10 @@ struct TableCanvas: View {
           let u = min(1, max(0, (st.t0.map { model.now - $0 } ?? 0) / TableModel.STROKE_MS)), g0 = rest + back * min(1, max(0, st.power))
           gap = g0 + (R - g0) * u * u
         }
-        drawCue(&ctx, m, game: g, cx: c.x, cy: c.y, ang: model.aim, gap: gap)
+        drawCue(&ctx, m, game: g, dress: model.dress, cx: c.x, cy: c.y, ang: model.aim, gap: gap)
       } else if model.rolling != nil, let lc = model.lastCue, model.now - model.shotAt < 0.18 {
         let u = (model.now - model.shotAt) / 0.18, e = min(1, max(0, u * 2)), ease = e * e * (3 - 2 * e)
-        drawCue(&ctx, m, game: g, cx: lc.x, cy: lc.y, ang: lc.ang, gap: R - 0.035 * ease, alpha: 1 - u)
+        drawCue(&ctx, m, game: g, dress: model.dress, cx: lc.x, cy: lc.y, ang: lc.ang, gap: R - 0.035 * ease, alpha: 1 - u)
       }
     }
   }

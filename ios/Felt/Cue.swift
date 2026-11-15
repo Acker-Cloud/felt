@@ -29,18 +29,19 @@ struct CueLook {
     "ash": CueLook(shaft: ["#ead9b2", "#cfb384"], metal: "#c7a24a", joint: "#17100a", fore: "#16100c", pts: "#16100c", wrap: "#16100c", pat: "linen", sleeve: "#16100c", ring: "#c7a24a", cap: "#0c0a08"),
     "hall": CueLook(shaft: ["#f1e0b8", "#dabb88"], metal: "#c9ccd2", joint: "#20140c", fore: "#3a1d10", pts: nil, wrap: "#3a1d10", pat: "linen", sleeve: "#2b150b", ring: "#c9ccd2", cap: "#151515"),
     "rosewood": CueLook(shaft: ["#ead9b2", "#cfb384"], metal: "#b8bcc2", joint: "#1a0e0a", fore: "#3f1711", pts: "#3f1711", wrap: "#3f1711", pat: "linen", sleeve: "#3f1711", ring: "#d9c9a3", cap: "#0c0a08"),
+    "legacy": CueLook(shaft: ["#f3e2b8", "#dcb983"], metal: "#d4af37", joint: "#120a06", fore: "#5b0f1a", pts: "#f1ece0", wrap: "#101010", pat: "diamond", sleeve: "#5b0f1a", ring: "#d4af37", cap: "#0c0c0c"),
+    "champion": CueLook(shaft: ["#f0dcae", "#d7b07a"], metal: "#c9ccd2", joint: "#0b1430", fore: "#1d3a78", pts: "#e8eef8", wrap: "#0f1c3a", pat: "stack", sleeve: "#1d3a78", ring: "#e8eef8", cap: "#0c0c0c"),
+    "centurion": CueLook(shaft: ["#f0dcae", "#d7b07a"], metal: "#d4af37", joint: "#06180f", fore: "#0f4a32", pts: "#d4af37", wrap: "#0b2a1d", pat: "linen", sleeve: "#0f4a32", ring: "#d4af37", cap: "#0c0c0c"),
+    "plain": CueLook(shaft: ["#e0bf8a", "#c79c62"], metal: "#c79c62", joint: "#c79c62", fore: "#b98d55", pts: nil, wrap: "#b98d55", pat: "linen", sleeve: "#a97d48", ring: "#a97d48", cap: "#1c1c1c"),
   ]
-  /* GAME_LOOK's cue and chalk */
-  static func of(game: String) -> (CueLook, String) {
-    let cue = ["9": "ebony", "10": "carbon", "heyball": "rosewood", "snooker": "ash", "carom": "hall", "straight": "maple", "rotation": "gold"][game] ?? "house"
-    return (all[cue]!, game == "snooker" ? "#3f9a5c" : "#4f84bd")
-  }
+  /* the dress's cue and chalk (its tip) */
+  static func of(_ d: Dress) -> (CueLook, String) { (all[d.cue] ?? all["house"]!, Dress.CHALK[d.chalk] ?? "#4f84bd") }
 }
 
 func css(_ s: String) -> Color { let c = RGBA(css: s); return Color(.sRGB, red: c.r, green: c.g, blue: c.b, opacity: c.a) }
 
 /* drawCue(c, ang, gap, alpha): the cue's tip gap metres back from the cue ball at (cx, cy) */
-func drawCue(_ ctx: inout GraphicsContext, _ m: Mapper, game: String, cx: Double, cy: Double, ang: Double, gap: Double, alpha: Double = 1) {
+func drawCue(_ ctx: inout GraphicsContext, _ m: Mapper, game: String, dress: Dress, cx: Double, cy: Double, ang: Double, gap: Double, alpha: Double = 1) {
   let G = CueGeo.of(game: game), LEN = G.len, dx = cos(ang), dy = sin(ang), tx = cx - dx * gap, ty = cy - dy * gap, bx = tx - dx * LEN, by = ty - dy * LEN
   let nx = -dy, ny = dx, sd = m.upright ? [LIGHT[1], -LIGHT[0]] : [-LIGHT[0], -LIGHT[1]]
   var g = ctx
@@ -70,7 +71,7 @@ func drawCue(_ ctx: inout GraphicsContext, _ m: Mapper, game: String, cx: Double
   outline.addQuadCurve(to: CGPoint(x: LEN - 0.004, y: r1), control: CGPoint(x: LEN, y: r1))
   outline.addLine(to: CGPoint(x: 0, y: r0)); outline.addQuadCurve(to: CGPoint(x: 0, y: -r0), control: CGPoint(x: -0.0012, y: 0)); outline.closeSubpath()
   g.clip(to: outline)
-  let (CU, tip) = CueLook.of(game: game), SH = G.joint ?? (G.sleeve?[0] ?? 0.74), f0 = G.pool ? 0.027 : G.ferrule
+  let (CU, tip) = CueLook.of(dress), SH = G.joint ?? (G.sleeve?[0] ?? 0.74), f0 = G.pool ? 0.027 : G.ferrule
   g.fill(Path(CGRect(x: 0.02, y: -0.02, width: G.pool ? 0.73 : SH - 0.01, height: 0.04)),
          with: .linearGradient(Gradient(colors: [css(CU.shaft[0]), css(CU.shaft[1])]), startPoint: CGPoint(x: f0, y: 0), endPoint: CGPoint(x: SH, y: 0)))
   for (a, b, col) in cueParts(CU, tip, G) { rect(a, -0.02, b - a, 0.04, css(col)) }

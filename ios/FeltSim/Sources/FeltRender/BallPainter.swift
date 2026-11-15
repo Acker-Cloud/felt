@@ -28,6 +28,9 @@ public struct BallSet: Sendable {
     "classic": BallSet(col: nil, stripe: nil, ivory: "#f7f4ea", circle: 0.866, cue: [(2, 0.975, "#b3302a")]),
     "tv": BallSet(col: [1: [255, 204, 0], 2: [20, 84, 222], 3: [232, 36, 30], 4: [240, 92, 150], 5: [255, 120, 10], 6: [10, 150, 72], 7: [164, 104, 62], 8: [16, 16, 18]],
                   stripe: nil, ivory: "#fbfaf4", circle: 0.8, cue: [0, 1, 2].map { ($0, 0.986, "#1d4fb8") }),
+    "pro": BallSet(col: nil, stripe: nil, ivory: "#f7f4ea", circle: 0.866, cue: [0, 1, 2].map { ($0, 0.982, "#c4342c") }),
+    "vintage": BallSet(col: [1: [222, 170, 62], 2: [44, 70, 140], 3: [172, 52, 40], 4: [92, 58, 116], 5: [212, 116, 52], 6: [40, 102, 70], 7: [116, 44, 34], 8: [30, 26, 24]],
+                       stripe: nil, ivory: "#ece2c6", circle: 0.866, cue: []),
     "measles": BallSet(col: [1: [255, 204, 0], 2: [20, 84, 222], 3: [232, 36, 30], 4: [240, 92, 150], 5: [255, 120, 10], 6: [10, 150, 72], 7: [164, 104, 62], 8: [16, 16, 18]],
                        stripe: nil, ivory: "#fbfaf4", circle: 0.8, cue: [0, 1, 2].map { ($0, 0.986, "#c4342c") }),
     "pinkblue": BallSet(col: [1: [238, 88, 150], 2: [238, 88, 150], 3: [238, 88, 150], 4: [238, 88, 150], 5: [238, 88, 150], 6: [238, 88, 150], 7: [238, 88, 150], 8: [16, 16, 18]],
@@ -35,7 +38,7 @@ public struct BallSet: Sendable {
   ]
   /* GAME_LOOK's balls */
   public static func of(game: String) -> BallSet {
-    switch game { case "9": all["tv"]!; case "10": all["measles"]!; case "heyball": all["pinkblue"]!; default: all["classic"]! }
+    all[Dress.game(game).balls] ?? all["classic"]!
   }
 }
 

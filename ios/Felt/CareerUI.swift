@@ -2,6 +2,7 @@
    career), then the hub: where the player stands, the next match (played on the table under the event's rules, or
    simulated), time moved a week, the events open to enter, offers, the news. The engine's store (the page's
    localStorage keys and values) is kept in a file in Application Support, written as each key changes. */
+import FeltRender
 import FeltSim
 import SwiftUI
 
@@ -32,7 +33,8 @@ import SwiftUI
   }
   private func flush() { if let d = try? JSONEncoder().encode(E.store) { try? d.write(to: url, options: .atomic) } }
   var loaded: Bool { E.S != .null }
-  func touch() { rev &+= 1 }
+  /* noteLookOwn: every item a career owns unlocks its look anywhere (Settings' My Look) */
+  func touch() { rev &+= 1; if loaded { Prefs.noteLookOwn(E.S["inv"]?["own"]?.a.compactMap { $0.str } ?? []) } }
   static func T(_ k: String) -> JV { CareerEngine.const(k) }
   static func gameName(_ d: String) -> String { T("GAMES")[d]?["name"]?.str ?? d }
   static func game(_ d: String) -> TableGame? { ["8": .eight, "9": .nine, "10": .ten, "straight": .straight, "rotation": .rotation, "heyball": .heyball, "snooker": .snooker, "carom": .carom, "bumper": .bumper][d] }
@@ -60,6 +62,12 @@ import SwiftUI
     var tm = TableModel.TMatch(m: nm["match"]!.i, foe: nm["opponent"]!["name"]!.s, level: nm["level"]!.s, arch: nm["ai"]?["arch"]?.str, need: pts ? 1 : race, points: pts, race: race,
                                lag: nm["breaker"]!.i, ruleset: CR[r["ruleset"]!.s] ?? DEFAULT_RULESET[d] ?? "8-house")
     tm.call = c; tm.spec = spec; tm.career = true
+    /* lookCareer: the career's equipped items, by slot ('cloth-grey' is CLOTH grey), in the hall */
+    let eq = E.equipped(), key = { (s: String) -> String in String((eq[s]?.str ?? "").split(separator: "-", maxSplits: 1).last ?? "") }
+    let st = Dress.standard
+    tm.dress = Dress(cloth: TableLook.CLOTH[key("cloth")] != nil ? key("cloth") : st.cloth, cue: Dress.ORDER["cue"]!.contains(key("cue")) ? key("cue") : st.cue,
+                     chalk: Dress.CHALK[key("chalk")] != nil ? key("chalk") : st.chalk, rail: TableLook.RAILS[key("rail")] != nil ? key("rail") : st.rail,
+                     balls: Dress.ORDER["balls"]!.contains(key("balls")) ? key("balls") : st.balls, room: "hall")
     return (g, tm)
   }
   /* the table's result: the score against the race, or a forfeit (leaving the match) */

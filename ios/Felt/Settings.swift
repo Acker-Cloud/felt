@@ -2,6 +2,7 @@
    defaults (loadSettings): the rules for 8, 9 and 10-ball (RULESETS, the two-player sets), called shots
    (CALL_MODES), the aim guide and auto aim; the tables (pool's size and pockets for every pool game, snooker's
    table and frames, the bumper table's shape, carom's race and cushions); sound and haptics. Read when a game starts. */
+import FeltRender
 import FeltSim
 import SwiftUI
 
@@ -27,6 +28,26 @@ enum Prefs {
   static var caromRace: Int { int("caromRace", 10) }
   static var caromCush: Int { int("caromCush", 3) }
   static var sound: Bool { bool("sound", true) }
+  /* Table Dressing (settings.dress): "game" wears each game's own (GAME_LOOK), "mine" the settings' look, each slot only if
+     unlocked (else the default) */
+  static var dressMode: String { str("dress", "game") }
+  static func mine(_ slot: String) -> String { str("look." + slot, LOOK_DEFAULT[slot]!) }
+  static let LOOK_DEFAULT = ["cloth": "green", "cue": "house", "chalk": "blue", "rail": "walnut", "balls": "classic"]
+  /* LOOK_BASE and felt.looks.v1: the looks unlocked anywhere, the base and every item any career on this device has owned */
+  static let LOOK_BASE: Set<String> = ["cloth-green", "cloth-red", "cloth-blue", "cue-house", "chalk-blue", "rail-walnut", "balls-classic"]
+  static var lookOwn: Set<String> { LOOK_BASE.union(d.stringArray(forKey: "felt.looks.v1") ?? []) }
+  static func noteLookOwn(_ ids: [String]) {
+    let known = ids.filter { id in let p = id.split(separator: "-", maxSplits: 1).map(String.init); return p.count == 2 && Dress.ORDER[p[0]]?.contains(p[1]) == true }
+    let more = Set(known).subtracting(lookOwn)
+    if !more.isEmpty { d.set(Array((lookOwn.subtracting(LOOK_BASE)).union(more)).sorted(), forKey: "felt.looks.v1") }
+  }
+  static func owned(_ slot: String, _ key: String) -> Bool { lookOwn.contains(slot + "-" + key) }
+  /* look(): By Game, the game's; My Look, the settings' (falling back to the default for anything not unlocked) */
+  static func dress(_ game: String) -> Dress {
+    if dressMode != "mine" { return Dress.game(game) }
+    let pick = { (s: String) -> String in let k = mine(s); return owned(s, k) ? k : LOOK_DEFAULT[s]! }
+    return Dress(cloth: pick("cloth"), cue: pick("cue"), chalk: pick("chalk"), rail: pick("rail"), balls: pick("balls"), room: "hall")
+  }
   static var haptics: Bool { bool("haptics", true) }
   /* rulesFor: the ruleset in settings for 8, 9 and 10-ball, the call mode for all */
   static func rules(_ kind: String) -> RuleSet {
@@ -57,6 +78,12 @@ struct SettingsView: View {
   @AppStorage("felt.settings.caromCush") private var caromCush = 3
   @AppStorage("felt.settings.sound") private var sound = true
   @AppStorage("felt.settings.haptics") private var haptics = true
+  @AppStorage("felt.settings.dress") private var dressMode = "game"
+  @AppStorage("felt.settings.look.cloth") private var lookCloth = "green"
+  @AppStorage("felt.settings.look.cue") private var lookCue = "house"
+  @AppStorage("felt.settings.look.chalk") private var lookChalk = "blue"
+  @AppStorage("felt.settings.look.rail") private var lookRail = "walnut"
+  @AppStorage("felt.settings.look.balls") private var lookBalls = "classic"
 
   var body: some View {
     List {
@@ -88,6 +115,16 @@ struct SettingsView: View {
         Picker("Race", selection: $caromRace) { Text("5").tag(5); Text("10").tag(10); Text("15").tag(15) }.pickerStyle(.segmented)
         Picker("Cushions", selection: $caromCush) { Text("One").tag(1); Text("Three").tag(3) }.pickerStyle(.segmented)
       } header: { Text("Three-Cushion") }
+      /* Settings > Graphics: Table Dressing, and My Look's slots, each listing only what is unlocked; picking one switches
+         to My Look */
+      Section {
+        Picker("Table Dressing", selection: $dressMode) { Text("By Game").tag("game"); Text("My Look").tag("mine") }.pickerStyle(.segmented)
+        look("Cloth", "cloth", $lookCloth)
+        look("Cue", "cue", $lookCue)
+        look("Chalk", "chalk", $lookChalk)
+        look("Rails", "rail", $lookRail)
+        look("Balls", "balls", $lookBalls)
+      } header: { Text("Graphics") } footer: { Text("By Game dresses each game as itself: its cloth, rails, balls, cue and room. My Look wears your choices below on every game. Picking one switches to My Look. A career match wears what its player equipped.") }
       Section {
         Toggle("Sound", isOn: $sound)
         Toggle("Haptics", isOn: $haptics)
@@ -95,6 +132,12 @@ struct SettingsView: View {
     }
     .navigationTitle("Settings")
     .navigationBarTitleDisplayMode(.inline)
+  }
+  private func look(_ title: String, _ slot: String, _ sel: Binding<String>) -> some View {
+    let pick = Binding<String>(get: { sel.wrappedValue }, set: { sel.wrappedValue = $0; dressMode = "mine" })
+    return Picker(title, selection: pick) {
+      ForEach(Dress.ORDER[slot]!.filter { Prefs.owned(slot, $0) }, id: \.self) { k in Text(Dress.NAMES[slot]![k]!).tag(k) }
+    }
   }
   private func rules(_ title: String, _ kind: String, _ sel: Binding<String>) -> some View {
     Picker(title, selection: sel) { ForEach(Prefs.rulesets(kind), id: \.id) { r in Text(r.id.hasSuffix("house") ? "House Rules" : "WPA").tag(r.id) } }
