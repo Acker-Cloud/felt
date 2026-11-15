@@ -41,6 +41,18 @@ vertex OverOut overV(OverIn i [[stage_in]], constant OverU &u [[buffer(1)]]) {
   p.xy += m * l * i.sw.x / u.VP * p.w;
   o.pos = p; return o;
 }
+struct FxU { float4x4 V; float4x4 P; float3 C; float ext; float kind; float rad; float lw; float4 col; };
+struct FxOut { float4 pos [[position]]; float2 vq; };
+vertex FxOut fxV(uint id [[vertex_id]], constant float2 *q [[buffer(0)]], constant FxU &u [[buffer(1)]]) {
+  FxOut o; float4 c = u.V * float4(u.C, 1.0); o.vq = q[id] * u.ext; o.pos = u.P * float4(c.xyz + float3(o.vq, 0.0), 1.0); return o;
+}
+fragment float4 fxF(FxOut i [[stage_in]], constant FxU &u [[buffer(1)]]) {
+  float d = length(i.vq), a;
+  if (u.kind > 0.5) a = u.col.a * clamp(1.0 - d / u.rad, 0.0, 1.0);
+  else a = u.col.a * clamp(u.lw + 0.5 - abs(d - u.rad) / max(fwidth(d), 1e-7), 0.0, 1.0);
+  if (a < 0.002) discard_fragment();
+  return float4(u.col.rgb * a, a);
+}
 struct CardIn { float3 p [[attribute(0)]]; float2 uv [[attribute(1)]]; float4 c [[attribute(2)]]; };
 struct CardOut { float4 pos [[position]]; float2 v; float4 vc; };
 vertex CardOut cardV(CardIn i [[stage_in]], constant float4x4 &M [[buffer(1)]]) { CardOut o; o.v = i.uv; o.vc = i.c; o.pos = M * float4(i.p, 1.0); return o; }
@@ -126,6 +138,7 @@ private func rgb(_ s: String) -> SIMD3<Float> { let c = RGBA(css: s); return SIM
 struct MeshU { var L: SIMD3<Float>; var E: SIMD3<Float>; var lit: Float; var alpha: Float }
 struct MeshV { var M: simd_float4x4; var W: simd_float4x4 }
 struct OverU { var M: simd_float4x4; var VP: SIMD2<Float> }
+struct FxU { var V: simd_float4x4; var P: simd_float4x4; var C: SIMD3<Float>; var ext: Float; var kind: Float; var rad: Float; var lw: Float; var col: SIMD4<Float> }
 struct ShU { var M: simd_float4x4; var S: SIMD3<Float>; var ext: Float; var A: SIMD2<Float>; var B: SIMD2<Float>; var R: Float; var grow: Float; var ao: Float; var ca: Float }
 struct BallU {
   var V: simd_float4x4; var P: simd_float4x4; var Vi: simd_float3x3; var C: SIMD3<Float>; var Cv: SIMD3<Float>; var R: Float
@@ -138,6 +151,7 @@ struct BallU {
 @MainActor final class Renderer3D: NSObject, MTKViewDelegate {
   let model: TableModel
   let device: MTLDevice, queue: MTLCommandQueue
+  var fxP: MTLRenderPipelineState!, noDepth: MTLDepthStencilState!
   var cardP: MTLRenderPipelineState!, cards: (tex: MTLTexture, at: [String: [Double]])?
   var overP: MTLRenderPipelineState!, cueBuf: (key: String, b: MTLBuffer, n: Int)?
   var texP: MTLRenderPipelineState!, meshP: MTLRenderPipelineState!, shadowP: MTLRenderPipelineState!, ballP: MTLRenderPipelineState!
@@ -216,11 +230,12 @@ struct BallU {
   }
   func build() throws {
     let lib = try device.makeLibrary(source: SHADERS, options: nil)
-    func pipe(_ v: String, _ f: String, _ vd: MTLVertexDescriptor?, blend: Bool, premul: Bool = false) throws -> MTLRenderPipelineState {
+    func pipe(_ v: String, _ f: String, _ vd: MTLVertexDescriptor?, blend: Bool, premul: Bool = false, add: Bool = false) throws -> MTLRenderPipelineState {
       let p = MTLRenderPipelineDescriptor()
       p.vertexFunction = lib.makeFunction(name: v); p.fragmentFunction = lib.makeFunction(name: f); p.vertexDescriptor = vd
       p.colorAttachments[0].pixelFormat = .bgra8Unorm; p.depthAttachmentPixelFormat = .depth32Float; p.rasterSampleCount = 4
       if blend { let c = p.colorAttachments[0]!; c.isBlendingEnabled = true; c.sourceRGBBlendFactor = premul ? .one : .sourceAlpha; c.destinationRGBBlendFactor = .oneMinusSourceAlpha; c.sourceAlphaBlendFactor = .sourceAlpha; c.destinationAlphaBlendFactor = .oneMinusSourceAlpha }
+      if add { let c = p.colorAttachments[0]!; c.sourceRGBBlendFactor = .one; c.destinationRGBBlendFactor = .one; c.sourceAlphaBlendFactor = .one; c.destinationAlphaBlendFactor = .one }
       return try device.makeRenderPipelineState(descriptor: p)
     }
     let tv = MTLVertexDescriptor()
@@ -242,6 +257,9 @@ struct BallU {
     for (i, (f, o)) in [(MTLVertexFormat.float3, 0), (.float2, 12), (.float4, 20)].enumerated() { cv.attributes[i].format = f; cv.attributes[i].offset = o; cv.attributes[i].bufferIndex = 0 }
     cv.layouts[0].stride = 36
     cardP = try pipe("cardV", "cardF", cv, blend: true, premul: true)
+    fxP = try pipe("fxV", "fxF", nil, blend: true, add: true)
+    let nd = MTLDepthStencilDescriptor(); nd.depthCompareFunction = .always; nd.isDepthWriteEnabled = false
+    noDepth = device.makeDepthStencilState(descriptor: nd)
     let A = V3Room.cardAtlas()
     if let t = texture(A.image) { cards = (t, A.at) }
     let dd = MTLDepthStencilDescriptor(); dd.depthCompareFunction = .lessEqual; dd.isDepthWriteEnabled = true
@@ -469,6 +487,23 @@ struct BallU {
       if let d = o.drop { let h = toV([s.POCKETS[d.k][0], s.POCKETS[d.k][1], 0]); u.hole = SIMD4<Float>(h.x, h.y, h.z, Float(s.POCKET_R[d.k])) }
       e.setVertexBytes(&u, length: MemoryLayout<BallU>.stride, index: 1); e.setFragmentBytes(&u, length: MemoryLayout<BallU>.stride, index: 1)
       e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+    }
+    /* the hit flashes (drawFx's, the same timing and colours) as billboards at the contact, added over the balls */
+    let tn = model.now
+    let fx = model.effects.filter { tn - $0.t < $0.d }
+    if !fx.isEmpty {
+      e.setDepthStencilState(noDepth)
+      e.setRenderPipelineState(fxP)
+      e.setVertexBytes(&q, length: 32, index: 0)
+      for f in fx {
+        let u = min(1, max(0, (tn - f.t) / f.d)), a = min(1, f.v / 3) * (1 - u) * (1 - u)
+        let rail = f.kind == "rail", rad = rail ? R * 2.2 : R * (f.kind == "cue" ? 0.25 + 0.5 * u : 0.3 + 1.1 * u)
+        let col: SIMD4<Float> = rail ? [190 / 255, 1, 220 / 255, Float(0.2 * a)] : f.kind == "cue" ? [170 / 255, 205 / 255, 1, Float(0.6 * a)] : [1, 1, 1, Float(0.5 * a)]
+        var fu = FxU(V: Vm, P: P, C: f3([f.x, f.y, -R]), ext: Float(rad * 1.15 + 0.004), kind: rail ? 1 : 0, rad: Float(rad), lw: Float(0.75 * Double(view.drawableSize.width) / max(1, C.W)), col: col)
+        e.setVertexBytes(&fu, length: MemoryLayout<FxU>.stride, index: 1); e.setFragmentBytes(&fu, length: MemoryLayout<FxU>.stride, index: 1)
+        e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+      }
+      e.setDepthStencilState(depthOn)
     }
     /* the guide's ghost ball: a faint ball where the cue ball will meet, white or the illegal colour (V3_GHOST_A) */
     if let gh = sink.ghost, V3.dot(V3.sub([gh.x, gh.y, -R], C.Er), C.f) > V3.NEAR + R {
