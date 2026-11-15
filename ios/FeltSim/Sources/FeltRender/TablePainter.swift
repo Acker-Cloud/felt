@@ -132,6 +132,14 @@ public final class TablePainter {
 
   // MARK: pockets
 
+  /* the bottom rail's row (6b2): where the wood band runs (its depth from the nose, co to RAIL) and the sights on it */
+  public var railBand: (co: Double, rail: Double) { (cushionDepth(), RAIL) }
+  public func railSights() -> [[Double]] {
+    if s.TABLE == "snooker" { return [] }
+    let co = cushionDepth(), q = sightsAt(co)
+    return q.at.map { [$0[0], $0[1], $0[2] != 0 ? q.hw : q.hl, $0[2] != 0 ? q.hl : q.hw] }
+  }
+
   /* what the pot animation clips to (4c drawPots): pocket k's cap centre and back radius, and the cushion depth */
   public func potClip(_ k: Int) -> (cx: Double, cy: Double, rb: Double, co: Double) {
     let co = cushionDepth(), sp = pocketShape(k, co)

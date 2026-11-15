@@ -89,6 +89,8 @@ final class TableModel {
   /* the balls' painter for this screen (4b), and each ball's image while it has not moved or turned */
   @ObservationIgnored private var painter: (BallPainter, Bool, CGFloat)?
   @ObservationIgnored private var ballCache: [Int: (key: [Double], img: (CGImage, Double, Double))] = [:]
+  /* the screen's device px a point, as the ball painter last made */
+  var scaleFactor: Double { Double(painter?.2 ?? 3) }
   func ballPainter(upright: Bool, scale: CGFloat) -> BallPainter {
     if let p = painter, p.1 == upright, p.2 == scale { return p.0 }
     let look = TableLook.of(game: game.table.2), cloth = RGBA(css: look.cloth.base)
@@ -445,6 +447,18 @@ final class TableModel {
     }
   }
 
+
+  /* railNext (6b2): the ball to play next on a human's turn while aiming. 9, 10 and rotation: the ball on; 8-ball,
+     Chinese 8-ball and 14.1: the ball the aim meets first when it is a legal target */
+  func railNext() -> Int? {
+    guard let gm = g, gm.winner == nil, rolling == nil, stroke == nil, !cpuTurn, POCKET_KINDS.contains(gm.kind) else { return nil }
+    let lt = engine.legalTargets(gm)
+    if !is8(gm.kind) && gm.kind != "straight" { return lt.first }
+    guard let c = cue else { return nil }
+    let h = sim.aimTrace(balls, c.x, c.y, JSMath.cos(aim), JSMath.sin(aim), skip: [c.n], far: 6)
+    if h.kind == "ball", let b = h.ball, b.n > 0, lt.contains(b.n) { return b.n }
+    return nil
+  }
 
   /* the table's pocket shapes for this layout (the pot animation's clip), built with the bake's view */
   @ObservationIgnored private var potGeo: (TablePainter, Double)?

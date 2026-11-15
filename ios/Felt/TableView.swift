@@ -102,6 +102,9 @@ struct TableCanvas: View {
       ctx.scaleBy(x: sc, y: sc)
       drawFx(&ctx, m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
+      ctx.scaleBy(x: sc, y: sc)
+      drawRail(&ctx, m, bp)
+      ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       /* the cue (4f): pulled back by power while aiming, driven through during the stroke, carried a
          few centimetres on and faded as the shot starts */
       ctx.scaleBy(x: sc, y: sc)
@@ -239,6 +242,117 @@ struct TableCanvas: View {
         let col = e.kind == "cue" ? Color(.sRGB, red: 170 / 255, green: 205 / 255, blue: 1, opacity: 0.6 * a) : Color.white.opacity(0.5 * a)
         let r = rp * (e.kind == "cue" ? 0.25 + 0.5 * u : 0.3 + 1.1 * u)
         g.stroke(Path(ellipseIn: CGRect(x: s.x - r, y: s.y - r, width: 2 * r, height: 2 * r)), with: .color(col), lineWidth: 1.5)
+      }
+    }
+  }
+
+  /* 6b2, the bottom rail's row: a seat per player (chipOf) inlaid in the wood nearest the player (upright the
+     head rail, on its side the near long rail), each centred in a gap of the rail clear of every pocket and
+     sight (railSpans), the score keeper's two in the gaps nearest the middle, snooker's bar in the next. Pearl
+     ink (--ink) cut dark all round (RAIL_EDGE), the shooter lit with the lamp's glow, the other dimmed. */
+  private func drawRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter) {
+    guard let g = model.g, g.winner == nil else { return }
+    let s = model.sim, T = model.potGeometry(m), band = T.railBand
+    let ink = Color(.sRGB, red: 0xef / 255.0, green: 0xe7 / 255.0, blue: 0xda / 255.0), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85)
+    let mid = -(band.co + band.rail) / 2   /* the band's middle, metres out from the nose */
+    /* the rail's run on screen: along y (upright, the head rail at x = 0) or along x (on its side, the rail at y = TW) */
+    func at(_ u: Double) -> CGPoint { m.upright ? m.pt(mid, u) : m.pt(u, s.TW - mid) }
+    let ph = (band.rail - band.co) * m.k * 0.62, dot = ph * 0.8
+    /* the gaps: the rail's span less every pocket (hole, jaws) and sight, with their pads */
+    let len = m.upright ? s.TW : s.TL
+    var spans: [[Double]] = [[0, len]]
+    var holes: [[Double]] = []
+    for (i, p) in s.POCKETS.enumerated() {
+      let near = m.upright ? p[0] < s.TL / 2 : p[1] > s.TW / 2
+      if !near { continue }
+      let r = s.POCKET_R[i] + 4 / m.k, c = m.upright ? p[1] : p[0]
+      var lo = c - r, hi = c + r
+      for j in s.MOUTHS.indices.contains(i) ? s.MOUTHS[i] : [] { for q in [j.p, j.e] { let v = m.upright ? q[1] : q[0]; lo = Swift.min(lo, v - 4 / m.k); hi = Swift.max(hi, v + 4 / m.k) } }
+      holes.append([lo, hi])
+    }
+    for q in T.railSights() {
+      let onRail = m.upright ? q[0] < 0 : q[1] > s.TW
+      if !onRail { continue }
+      let c = m.upright ? q[1] : q[0], h = (m.upright ? q[3] : q[2]) + 1 / m.k
+      holes.append([c - h, c + h])
+    }
+    for h in holes { spans = spans.flatMap { [[$0[0], Swift.min($0[1], h[0])], [Swift.max($0[0], h[1]), $0[1]]] }.filter { $0[1] - $0[0] > 0.01 } }
+    let left = spans.filter { ($0[0] + $0[1]) / 2 < len / 2 }.sorted { $0[1] > $1[1] }, right = spans.filter { ($0[0] + $0[1]) / 2 >= len / 2 }.sorted { $0[0] < $1[0] }
+    /* upright the screen's left is the table's y = 0 side; on its side, x = 0 */
+    let seats: [(Int, [Double]?)] = [(0, left.first), (1, right.first)]
+    let next = model.railNext()
+    for (p, span) in seats {
+      guard let span else { continue }
+      let lit = p == g.turn
+      var items: [(kind: String, n: Int, text: String)] = []
+      let on = g.balls.filter { $0.on && $0.n > 0 }.map { $0.n }.sorted()
+      let nx = lit ? next : nil
+      switch g.kind {
+      case "snooker": items.append(("num", 0, String(g.score![p])))
+      case "carom": items.append(("num", C_CUE[p], String(g.score![p]))); items.append(("of", 0, "/\(g.race!)"))
+      case "straight", "rotation":
+        if let nx { items.append(("ball", nx, "")) } else if g.kind == "rotation" && lit, let f = on.first { items.append(("ball", f, "")) }
+        items.append(("num", 0, String(g.score![p]))); items.append(("of", 0, "/\(g.race!)"))
+      case "9", "10":
+        if lit, let f = nx ?? on.first { items.append(("ball", f, "")) }
+      default:
+        if let gr = g.groups[p] {
+          items.append(("grp", gr == "stripes" ? 1 : 0, ""))
+          if let nx { items.append(("ball", nx, "")) }
+          else if !on.contains(where: { model.engine.groupOf($0) == gr }) { items.append(("ball", 8, "")) }
+        } else if let nx { items.append(("ball", nx, "")) }
+      }
+      if items.isEmpty { items.append(("pip", 0, "")) }
+      /* each item's width, then laid out centred in the gap */
+      let font = Font.system(size: ph * 0.78, weight: .bold, design: .rounded).monospacedDigit()
+      let widths = items.map { it -> Double in it.kind == "num" || it.kind == "of" ? Double(ctx.resolve(Text(it.text).font(font)).measure(in: CGSize(width: 200, height: 100)).width) : dot }
+      let gap = ph * 0.22, total = widths.reduce(0, +) + gap * Double(items.count - 1)
+      let c0 = at((span[0] + span[1]) / 2)
+      var g2 = ctx
+      g2.opacity = lit ? 1 : 0.45
+      if lit { g2.addFilter(.shadow(color: Color(.sRGB, red: 1, green: 236 / 255, blue: 190 / 255, opacity: 0.75), radius: 3)) }
+      var x = Double(c0.x) - total / 2
+      for (i, it) in items.enumerated() {
+        let w = widths[i], cx = x + w / 2, cy = Double(c0.y)
+        switch it.kind {
+        case "ball":
+          let r = dot / 2 * model.scaleFactor, (img, ix, iy) = bp.ballImage(it.n, cx * model.scaleFactor, cy * model.scaleFactor, r, bp.axesOf(IDENT, screen: true))
+          g2.draw(Image(decorative: img, scale: model.scaleFactor), in: CGRect(x: ix / model.scaleFactor, y: iy / model.scaleFactor, width: Double(img.width) / model.scaleFactor, height: Double(img.height) / model.scaleFactor))
+        case "grp":
+          let rect = CGRect(x: cx - dot / 2, y: cy - dot / 2, width: dot, height: dot), disc = Path(ellipseIn: rect)
+          g2.stroke(disc, with: .color(edge), lineWidth: 1.5)
+          if it.n == 0 { g2.fill(disc, with: .color(ink)) }
+          else {
+            var c = g2; c.clip(to: disc)
+            c.fill(Path(rect), with: .color(ink)); c.fill(Path(CGRect(x: rect.minX, y: cy - dot * 0.22, width: dot, height: dot * 0.44)), with: .color(edge))
+          }
+        case "pip":
+          g2.stroke(Path(ellipseIn: CGRect(x: cx - dot * 0.3, y: cy - dot * 0.3, width: dot * 0.6, height: dot * 0.6)), with: .color(ink), lineWidth: 1.5)
+        default:
+          let col: Color = it.kind == "num" && it.n >= 70 ? { let c = ballColor(it.n); return Color(rgb: c.0, c.1, c.2) }() : ink
+          let t = Text(it.text).font(it.kind == "of" ? Font.system(size: ph * 0.6, weight: .semibold, design: .rounded) : font).foregroundColor(col)
+          var e = g2; e.addFilter(.shadow(color: edge, radius: 0.7))
+          e.draw(t, at: CGPoint(x: cx, y: cy))
+        }
+        x += w + gap
+      }
+    }
+    /* snooker's bar (6b): the ball on, the break while one runs, in the gap after the second seat */
+    if g.kind == "snooker", let S = g.snk, right.count > 1 {
+      let span = right[1], c0 = at((span[0] + span[1]) / 2)
+      var dots: [Int] = []
+      if let f = S.free { dots = S.on == .red ? [41, f] : [f] }
+      else { switch S.on { case .red: dots = [41]; case .colour: dots = S_COLS.filter { c in g.balls.contains { $0.n == c && $0.on } }; case .ball(let b): dots = [b]; case .none: dots = [] } }
+      let w = Double(dots.count) * dot * 0.9
+      var x = Double(c0.x) - w / 2 - (S.brk > 0 ? ph * 0.8 : 0)
+      for n in dots {
+        let r = dot * 0.42 * model.scaleFactor, (img, ix, iy) = bp.ballImage(n, (x + dot * 0.45) * model.scaleFactor, Double(c0.y) * model.scaleFactor, r, bp.axesOf(IDENT, screen: true))
+        ctx.draw(Image(decorative: img, scale: model.scaleFactor), in: CGRect(x: ix / model.scaleFactor, y: iy / model.scaleFactor, width: Double(img.width) / model.scaleFactor, height: Double(img.height) / model.scaleFactor))
+        x += dot * 0.9
+      }
+      if S.brk > 0 {
+        var e = ctx; e.addFilter(.shadow(color: edge, radius: 0.7))
+        e.draw(Text(String(S.brk)).font(.system(size: ph * 0.78, weight: .bold, design: .rounded).monospacedDigit()).foregroundColor(ink), at: CGPoint(x: x + ph * 0.6, y: Double(c0.y)))
       }
     }
   }
