@@ -1,14 +1,16 @@
 /* One table at play: the sim (FeltSim, index.html's physics bit for bit), the balls at rest, the
-   roll in progress and the player's aim, power and english. No rules yet: this is the web build's
-   free practice table (Practice > the rack) on every table the port has. The roll steps exactly as
-   the page's frame() does: dtMs / 1000 / SIM_DT steps a frame, the fraction carried to the next. */
+   roll in progress and the player's aim, power and english. The pocket games (8, 9, 10, Chinese
+   8-ball) are played under their default rules by FeltSim's RulesEngine (sim 1e, the page's judge),
+   two players on one device; snooker and carom are still the free practice table until their rule
+   modules are ported. The roll steps exactly as the page's frame() does: dtMs / 1000 / SIM_DT steps
+   a frame, the fraction carried to the next. */
 import Foundation
 import CoreGraphics
 import FeltRender
 import FeltSim
 import Observation
 
-enum Game: String, CaseIterable, Identifiable {
+enum TableGame: String, CaseIterable, Identifiable {
   case eight = "8-Ball", nine = "9-Ball", ten = "10-Ball", heyball = "Chinese 8-Ball", snooker = "Snooker", carom = "Three-Cushion"
   var id: String { rawValue }
   /* the sim's table, its shape, and the game whose look it wears (GAME_LOOK) */
@@ -36,7 +38,7 @@ enum Game: String, CaseIterable, Identifiable {
 
 @MainActor @Observable
 final class TableModel {
-  let game: Game
+  let game: TableGame
   @ObservationIgnored let sim = Sim()
   private(set) var balls: [Ball] = []
   private(set) var rolling: Tab?
@@ -50,6 +52,13 @@ final class TableModel {
   @ObservationIgnored private var lastT: TimeInterval?
   @ObservationIgnored private var heard = 0
   @ObservationIgnored let sound = Sound()
+  /* the rules (sim 1e): the game being played, nil on the practice tables */
+  @ObservationIgnored let engine: RulesEngine
+  private(set) var g: Game?
+  /* the status line (the page's say()) and the banner over the table (flash()) */
+  private(set) var msg = ""
+  private(set) var banner: (title: String, sub: String, until: TimeInterval)?
+  var rulesKind: String? { ["8": "8", "9": "9", "10": "10", "heyball": "heyball"][game.table.2] }
 
   /* the baked table (FeltRender: index.html's paintTable and vignette) for one screen size */
   struct Baked { let image: CGImage; let size: CGSize; let scale: CGFloat }
@@ -101,14 +110,29 @@ final class TableModel {
   var shown: [Ball] { rolling?.balls ?? balls }
   var cue: Ball? { shown.first { $0.n == cueN && $0.on } }
 
-  init(game: Game) {
+  init(game: TableGame) {
     self.game = game
     sim.setTable(game.table.0, game.table.1)
+    engine = RulesEngine(sim: sim)
     rerack()
   }
 
+  /* the game's balls as the sim's (velocities as the game left them; newTable zeroes the spin) */
+  private func syncBalls() {
+    guard let g else { return }
+    balls = g.balls.map { gb in let b = Ball(gb.n, gb.x, gb.y); b.on = gb.on; return b }
+    inHand = g.inHand != nil && g.winner == nil && g.option == nil
+  }
+
   func rerack() {
-    rolling = nil; inHand = game != .carom; potCount = 0
+    rolling = nil; inHand = game != .carom; potCount = 0; banner = nil
+    if let k = rulesKind {
+      g = engine.newGame(k)
+      syncBalls()
+      msg = "\(Words.nameOf(0)) to break."
+      randomOrient(); aimAtNearest()
+      return
+    }
     switch game {
     case .eight: balls = sim.rack("8")
     case .nine: balls = sim.rack("9")
@@ -139,11 +163,18 @@ final class TableModel {
   private(set) var shotAt: TimeInterval = 0
   private(set) var now: TimeInterval = 0
   func shoot() {
-    guard rolling == nil, stroke == nil, power > 0.01 else { power = 0; return }
+    guard rolling == nil, stroke == nil, power > 0.01, g?.option == nil, g?.winner == nil else { power = 0; return }
     markPower = power
     stroke = (power, nil)
   }
   private func strikeNow(_ pw: Double, _ t: TimeInterval) {
+    /* a shot the rules need called: the obvious call from the guide's preview, the ball it pots and its
+       pocket, else a declared safety (the page's call menu is not ported yet) */
+    if var gm = g, let need = engine.callNeed(gm) {
+      var c = ShotCall()
+      if let (_, P) = guide(), let f = P.first, P.objPot >= 0 { c.ball = f; c.pocket = P.objPot; c.auto = need.auto } else { c.safety = true }
+      gm.call = c; g = gm
+    }
     let tab = sim.newTable(balls, cue: cueN)
     if let c = cue { lastCue = (c.x, c.y, aim) }
     sim.strike(tab, aim, pw, spin)
@@ -154,6 +185,7 @@ final class TableModel {
     defer { frame &+= 1 }
     self.now = now
     pots.removeAll { now - $0.t >= TableModel.POT_MS }
+    if let b = banner, now >= b.until { banner = nil }
     effects.removeAll { now - $0.t >= $0.d }
     if let st = stroke {
       if st.t0 == nil { stroke = (st.power, now) } else if now - st.t0! >= TableModel.STROKE_MS { strikeNow(st.power, now) }
@@ -186,6 +218,7 @@ final class TableModel {
   /* the roll is over: practice puts the cue ball back (in hand behind the string) and spots a
      potted snooker colour */
   private func settle(_ r: ShotResult) {
+    if g != nil { settleRules(r); return }
     var next = r.balls
     potCount += r.potted.filter { $0 != cueN }.count
     if let c = next.first(where: { $0.n == cueN }), !c.on {
@@ -205,6 +238,59 @@ final class TableModel {
     if balls.allSatisfy({ !$0.on || $0.n == cueN }) { rerack() }
   }
 
+  /* settle() for a pocket game: the page's judge, then its words (banner and status line) */
+  private func settleRules(_ r: ShotResult) {
+    guard let before = g else { return }
+    let shot = RuleShot(r)
+    let shooter = before.turn, next = engine.judge(before, shot)
+    potCount += next.verdict?.potted.count ?? 0
+    g = next; rolling = nil; spin = Spin()
+    syncBalls()
+    words(next, shooter)
+    aimAtNearest()
+  }
+  private func words(_ gm: Game, _ shooter: Int, chose: (who: Int, kind: String, choice: String)? = nil) {
+    guard let v = gm.verdict else { return }
+    if gm.winner != nil { msg = Words.overLine(gm); banner = nil; return }
+    let who = gm.turn, lt = engine.legalTargets(gm)
+    let ballOn = ["9", "10"].contains(gm.kind) && !lt.isEmpty ? " Ball on: the \(lt[0])." : ""
+    let group = v.grouped ? "\(Words.isOf(shooter)) \(gm.groups[shooter] ?? "")." : ""
+    let onTwo = { (p: Int) in (gm.kind == "9" || gm.kind == "10") && gm.rules.threeFoul != nil && gm.fouls[p] >= 2 }
+    let warn = { (p: Int) in onTwo(p) ? "\(Words.isOf(p)) on two fouls: a third loses." : "" }
+    let extra = Words.callWords(v, gm.kind, shooter, chose: chose)
+    if let o = gm.option {
+      let w = Words.OPT[o.kind]
+      msg = extra.isEmpty ? "\(w?["head"] ?? o.kind): \(Words.nameOf(o.who)) to choose." : extra
+      return
+    }
+    if !extra.isEmpty && v.foul == nil {
+      banner = (extra, who == shooter ? "\(Words.nameOf(who)) shoots again" : Words.turnOf(who), now + 1.5)
+      msg = "\(extra) \(Words.turnOf(who)).\(ballOn)"
+    } else if let f = v.foul {
+      let hand = (extra.isEmpty ? "" : extra + "\n") + Words.handWords(who, kitchen: gm.inHand == "kitchen")
+      let w = [warn(shooter), warn(who)].filter { !$0.isEmpty }.joined(separator: "\n")
+      banner = ("Foul: \(f)", hand + (w.isEmpty ? "" : "\n" + w), now + (w.isEmpty ? 1.5 : 2.4))
+      msg = gm.inHand != nil ? Words.hint(gm.inHand) + ballOn : "Foul: \(f). \(hand).\(ballOn)"
+    } else if who != shooter {
+      let w = warn(who)
+      banner = (Words.turnOf(who), w.isEmpty ? String(group.dropLast()) : w, now + (w.isEmpty ? 0.9 : 2.0))
+      msg = "\(group.isEmpty ? "" : group + " ")\(Words.turnOf(who)).\(ballOn)"
+    } else {
+      if !group.isEmpty { banner = ("\(Words.isOf(shooter)) \(gm.groups[shooter] ?? "")", "and shoots again", now + 1.1) }
+      msg = "\(group.isEmpty ? "" : group + " ")\(Words.nameOf(who)) goes again.\(ballOn)"
+    }
+  }
+  /* a choice the rules give (game.option) made */
+  func choose(_ choice: String) {
+    guard let gm = g, let o = gm.option, let next = engine.chooseOption(gm, choice) else { return }
+    g = next; syncBalls()
+    msg = "\(Words.nameOf(o.who)): \(Words.optLabel(o.kind, choice).lowercased()). \(Words.turnOf(next.turn))."
+    if next.option != nil { words(next, gm.turn, chose: (o.who, o.kind, choice)) }
+    randomOrientIfRacked(gm, next)
+    aimAtNearest()
+  }
+  private func randomOrientIfRacked(_ a: Game, _ b: Game) { if b.breakShot && !a.breakShot { randomOrient() } }
+
   private func freeSpot(_ x: Double, _ y: Double, _ others: [Ball]) -> (Double, Double) {
     let R = sim.BALL_R
     var px = x
@@ -215,6 +301,14 @@ final class TableModel {
   /* ball in hand: put the cue ball at (x, y) if it fits there */
   func place(_ x: Double, _ y: Double) {
     guard inHand, rolling == nil, let c = balls.first(where: { $0.n == cueN }) else { return }
+    if let gm = g {
+      let R = sim.BALL_R, lo = R + 0.001
+      let px = min(max(x, lo), sim.TL - lo), py = min(max(y, lo), sim.TW - lo)
+      guard engine.canPlace(gm, px, py) else { return }
+      g = engine.placeCue(gm, px, py); c.x = px; c.y = py
+      frame &+= 1
+      return
+    }
     let R = sim.BALL_R, lo = R + 0.001
     let px = min(max(x, lo), sim.TL - lo), py = min(max(y, lo), sim.TW - lo)
     if balls.contains(where: { $0 !== c && $0.on && JSMath.hypot($0.x - px, $0.y - py) < 2 * R }) { return }

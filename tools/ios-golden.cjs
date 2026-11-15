@@ -231,7 +231,9 @@ function build() {
           g = Object.assign({}, g, { call: roll < 0.1 ? { safety: true } : roll < 0.15 ? {} : { ball: t.n, pocket: pk } });
         } else if (g.pushAvail && rnd() < 0.3) g = Object.assign({}, g, { call: { push: true } });
         if (g.call) step.call = g.call;
-        const res = S.simulateShot(g.balls, { angle: ang, power, spin: rnd() < 0.5 ? 0 : { x: rnd() - 0.5, y: rnd() - 0.5 } });
+        const shotIn = { angle: ang, power, spin: S.spinOf(rnd() < 0.5 ? 0 : { x: rnd() - 0.5, y: rnd() - 0.5 }) };
+        step.shot = { angle: hx(ang), power: hx(power), spin: { x: hx(shotIn.spin.x), y: hx(shotIn.spin.y) } };
+        const res = S.simulateShot(g.balls, shotIn);
         step.r = JSON.parse(JSON.stringify({ balls: res.balls, first: res.first, railAfter: res.railAfter, crossed: res.crossed, potted: res.potted, pocketOf: res.pocketOf, rails: res.rails, kick: res.kick }));
         const out = S.judge(g, res);
         step.out = bare(out);

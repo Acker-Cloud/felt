@@ -109,7 +109,7 @@ func encode(_ g: Game) -> [String: Any] {
 @Suite struct RulesTests {
   nonisolated(unsafe) static let games: [[String: Any]] = {
     let url = Bundle.module.url(forResource: "rules.json", withExtension: nil, subdirectory: "Fixtures")!
-    return (try! JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any])["games"] as! [[String: Any]]
+    return (ExactJSON.parse(try! Data(contentsOf: url)) as! [String: Any])["games"] as! [[String: Any]]
   }()
 
   @Test(arguments: 0..<RulesTests.games.count)
@@ -164,5 +164,36 @@ func encode(_ g: Game) -> [String: Any] {
     for (label, x) in [("turn", a), ("one ulp of x", b), ("why", c), ("missing absent vs present", d), ("inHand", e)] {
       #expect(!diffGame(want, x).isEmpty, "\(label) must show as a difference")
     }
+  }
+}
+
+/* the app's glue: a shot simulated here and turned into the rules' view (RuleShot(result)) is the
+   page's r for the same shot, for the first shots of every golden game */
+@Suite struct RuleShotTests {
+  @Test func fromResult() {
+    var checked = 0
+    for G in RulesTests.games {
+      let sim = Sim(); sim.setPockets("regulation"); sim.setTable(G["table"] as! String)
+      var prev = G["g0"] as! [String: Any]
+      for s in (G["steps"] as! [[String: Any]]).prefix(6) {
+        defer { prev = s["out"] as! [String: Any] }
+        guard let sh = s["shot"] as? [String: Any] else { continue }
+        var balls = (prev["balls"] as! [[String: Any]]).map(decodeBall)
+        if let p = s["place"] as? [NSNumber], let i = balls.firstIndex(where: { $0.n == 0 }) { balls[i].x = p[0].doubleValue; balls[i].y = p[1].doubleValue; balls[i].on = true }
+        let h = { (a: Any?) in Double(bitPattern: UInt64(a as! String, radix: 16)!) }, sp = sh["spin"] as! [String: Any]
+        let input = balls.map { gb -> Ball in let b = Ball(gb.n, gb.x, gb.y); b.on = gb.on; return b }
+        let got = RuleShot(sim.simulateShot(input, Sim.Shot(angle: h(sh["angle"]), power: h(sh["power"]), spin: Spin(x: h(sp["x"]), y: h(sp["y"])))))
+        let want = decodeShot(s["r"] as! [String: Any])
+        let fields = [("balls", got.balls == want.balls), ("first", got.first == want.first), ("railAfter", got.railAfter == want.railAfter), ("crossed", got.crossed == want.crossed),
+                      ("potted", got.potted == want.potted), ("pocketOf", got.pocketOf == want.pocketOf), ("rails", got.rails == want.rails), ("kick", got.kick == want.kick)]
+        let bad = fields.filter { !$0.1 }.map { $0.0 }
+        let ballDiff = zip(got.balls, want.balls).first { $0 != $1 }.map { "\($0.0) vs \($0.1)" } ?? ""
+        #expect(bad.isEmpty, "\(G["name"]!): RuleShot(result) differs in \(bad) \(ballDiff.prefix(400))")
+        #expect(got.balls == want.balls && got.first == want.first && got.railAfter == want.railAfter && got.crossed == want.crossed
+                && got.potted == want.potted && got.pocketOf == want.pocketOf && got.rails == want.rails && got.kick == want.kick, "\(G["name"]!): RuleShot(result)")
+        checked += 1
+      }
+    }
+    #expect(checked > 100)
   }
 }

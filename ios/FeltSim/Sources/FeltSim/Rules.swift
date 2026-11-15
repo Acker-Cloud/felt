@@ -106,6 +106,14 @@ public struct RuleShot: Sendable {
   }
 }
 
+extension RuleShot {
+  /* the rules' view of a finished shot (resultOf's fields the judge reads) */
+  public init(_ r: ShotResult) {
+    self.init(balls: r.balls.map { b in var g = GBall(n: b.n, x: b.x, y: b.y); g.vx = b.vx; g.vy = b.vy; g.on = b.on; g.wx = b.wx; g.wy = b.wy; g.wz = b.wz; return g },
+              first: r.first, railAfter: r.railAfter, crossed: r.crossed, potted: r.potted, pocketOf: r.pocketOf, rails: r.rails, kick: r.kick)
+  }
+}
+
 public struct Game: Sendable {
   public var kind: String, balls: [GBall], turn = 0, groups: [String?] = [nil, nil], open = true, breakShot = true, inHand: String? = "kitchen"
   public var fouls: [Int], winner: Int? = nil, shots = 0, dry = 0, verdict: Verdict? = nil, rules: RuleSet, call: ShotCall? = nil, option: GOption? = nil
@@ -201,6 +209,21 @@ public final class RulesEngine {
     balls[i].x = x; balls[i].y = fy; balls[i].vx = 0; balls[i].vy = 0; balls[i].on = true
   }
   func spotAll(_ balls: inout [GBall], _ list: [Int]) { for x in list.sorted() { spot(&balls, x) } }
+  /* on the cloth, clear of every cushion surface and of the pocket mouths, touching no ball, and behind
+     the head string when the hand is the kitchen (the pocket games' canPlace) */
+  public func canPlace(_ g: Game, _ x: Double, _ y: Double) -> Bool {
+    let R = sim.BALL_R
+    if !(x >= R && x <= sim.TL - R && y >= R && y <= sim.TW - R) { return false }
+    if g.inHand == "kitchen" && x > sim.HEAD_X { return false }
+    if sim.CUSH.contains(where: { sim.segGap($0[0], $0[1], $0[2], $0[3], x, y) < R - 1e-9 }) { return false }
+    if sim.POCKET_AIM.contains(where: { M.hypot($0[0] - x, $0[1] - y) < 2 * R }) { return false }
+    return g.balls.allSatisfy { $0.n == 0 || !$0.on || M.hypot($0.x - x, $0.y - y) >= 2 * R }
+  }
+  public func placeCue(_ g: Game, _ x: Double, _ y: Double) -> Game {
+    var n = g
+    if let i = n.balls.firstIndex(where: { $0.n == 0 }) { n.balls[i].x = x; n.balls[i].y = y; n.balls[i].vx = 0; n.balls[i].vy = 0; n.balls[i].on = true }
+    return n
+  }
 
   func offOf(_ r: RuleShot) -> [Int] { r.potted.filter { $0 != 0 && r.pocketOf[$0] == -1 } }
   func poolFoul(_ g: Game, _ r: RuleShot, _ R: RuleSet, _ targets: [Int], _ push: Bool, _ off: [Int]) -> String? {

@@ -12,10 +12,10 @@ struct Look {
   var ovMin: Double { ["8": 0.6, "9": 0.72, "10": 0.78, "heyball": 0.64, "snooker": 0.66, "carom": 0.66][game] ?? 0.6 }
   var illegal: Color { game == "8" ? Color(hex: 0xffa597) : Color(hex: 0xffe27a) }
   var game = "8"
-  static func of(_ g: Game) -> Look {
+  static func of(_ g: TableGame) -> Look {
     var l = base(g); l.game = g.table.2; return l
   }
-  static func base(_ g: Game) -> Look {
+  static func base(_ g: TableGame) -> Look {
     switch g {
     case .eight, .ten: Look(cloth: Color(hex: 0x1b5d47), cushion: Color(hex: 0x1d6450), rail: Color(hex: 0x4f2714), railDark: Color(rgb: 44, 19, 9))
     case .nine: Look(cloth: Color(hex: 0x1d4f91), cushion: Color(hex: 0x21579c), rail: Color(hex: 0x100f11), railDark: Color(rgb: 6, 6, 7))
@@ -150,7 +150,16 @@ struct TableCanvas: View {
       return []
     }
     let first = P.first.flatMap { f in model.balls.first { $0.n == f } }
-    let legal = model.game == .carom ? true : first != nil
+    /* guideLines' verdict: a first contact that is not a legal target, or (ball in hand in the kitchen) a
+       ball behind the string reached before the cue ball crossed it; practice: any contact */
+    var legal = model.game == .carom ? true : first != nil
+    if let gm = model.g, let f = first {
+      let E = model.engine, lt = E.legalTargets(gm)
+      let wrong = !(is8(gm.kind) && gm.breakShot) && !lt.contains(f.n)
+      let kitchen = gm.inHand == "kitchen" && !gm.breakShot && !P.crossed && f.x < s.HEAD_X
+        && (gm.rules.kitchenSpot || lt.contains { n in (gm.balls.first { $0.n == n }?.x ?? 0) >= s.HEAD_X })
+      legal = !wrong && !kitchen
+    }
     if h.t > 2 * R { strokeLine([[c.x + dx * R, c.y + dy * R], [gx - dx * R, gy - dy * R]], wa(0.5), 1.25) }
     ring(gx, gy, rp, legal ? white(0.9) : look.illegal, 1.5, fill: white(0.08))
     if let f = first, !legal { ring(f.x, f.y, rp + 3, look.illegal, 2) }

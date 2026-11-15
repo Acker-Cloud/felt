@@ -11,12 +11,12 @@ struct FeltApp: App {
 }
 
 struct Home: View {
-  @State private var playing: Game?
+  @State private var playing: TableGame?
   var body: some View {
     NavigationStack {
       List {
         Section {
-          ForEach(Game.allCases) { g in
+          ForEach(TableGame.allCases) { g in
             Button { playing = g } label: {
               VStack(alignment: .leading, spacing: 2) {
                 Text(g.rawValue).font(.body.weight(.semibold)).foregroundStyle(.primary)
@@ -35,7 +35,7 @@ struct Home: View {
     /* a test hook, like the page's window.felt: `-felt-game "9-Ball"` opens that table */
     .onAppear {
       let a = ProcessInfo.processInfo.arguments
-      if let i = a.firstIndex(of: "-felt-game"), i + 1 < a.count { playing = Game(rawValue: a[i + 1]) }
+      if let i = a.firstIndex(of: "-felt-game"), i + 1 < a.count { playing = TableGame(rawValue: a[i + 1]) }
     }
     .fullScreenCover(item: $playing) { g in TableScreen(model: TableModel(game: g)) }
   }
@@ -67,12 +67,16 @@ struct TableScreen: View {
           .accessibilityLabel("Table")
           .accessibilityIdentifier("table")
         }
+        Text(model.msg).font(.footnote).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.center)
+          .frame(maxWidth: .infinity, minHeight: 32).padding(.horizontal, 12)
+          .accessibilityIdentifier("msg")
         Controls(model: model, upright: upright, back: { dismiss() })
           .frame(width: upright ? nil : 84, height: upright ? 96 : nil)
       }
       .padding(.horizontal, upright ? 0 : 8)
     }
     .background(Color(rgb: 9, 9, 10).ignoresSafeArea())
+    .overlay { Overlays(model: model, back: { dismiss() }) }
     .tint(.primary)
     .statusBarHidden()
   }
@@ -184,5 +188,47 @@ struct PowerBar: View {
     .accessibilityLabel("Power")
     .accessibilityIdentifier("power")
     .accessibilityValue(model.rolling != nil ? "Rolling" : "\(Int(model.power * 100)) percent")
+  }
+}
+
+/* over the table: the banner after a shot (flash), a choice the rules give (5c's option box), and the
+   game over (showOver), each in the HIG's materials */
+struct Overlays: View {
+  let model: TableModel
+  let back: () -> Void
+  var body: some View {
+    if let g = model.g, g.winner != nil, model.rolling == nil {
+      card {
+        Text(Words.overLine(g)).font(.headline).multilineTextAlignment(.center)
+        Button { model.rerack() } label: { Text("Play Again").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+          .background(Capsule().fill(.white)).foregroundStyle(.black)
+        Button(action: back) { Text("Home").frame(maxWidth: .infinity, minHeight: 44) }
+      }
+    } else if let g = model.g, let o = g.option, model.rolling == nil {
+      card {
+        Text(Words.OPT[o.kind]?["head"] ?? o.kind).font(.headline)
+        Text("\(Words.nameOf(o.who)): \(Words.OPT[o.kind]?["sub"] ?? "")").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        ForEach(o.choices, id: \.self) { c in
+          Button { model.choose(c) } label: { Text(Words.optLabel(o.kind, c)).font(.body.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44) }
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
+            .accessibilityIdentifier("choice-\(c)")
+        }
+      }
+    } else if let b = model.banner {
+      VStack(spacing: 4) {
+        Text(b.title).font(.title3.weight(.semibold))
+        if !b.sub.isEmpty { Text(b.sub).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center) }
+      }
+      .padding(.horizontal, 20).padding(.vertical, 12)
+      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+      .allowsHitTesting(false)
+      .transition(.opacity)
+    }
+  }
+  private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
+    VStack(spacing: 12, content: c)
+      .padding(20).frame(maxWidth: 340)
+      .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+      .padding(24)
   }
 }

@@ -273,7 +273,7 @@ public final class Sim {
     let t = L2 != 0 ? clamp(((x - ax) * ex + (y - ay) * ey) / L2, 0, 1) : 0
     return (ax + ex * t, ay + ey * t)
   }
-  func segGap(_ ax: Double, _ ay: Double, _ bx: Double, _ by: Double, _ x: Double, _ y: Double) -> Double {
+  public func segGap(_ ax: Double, _ ay: Double, _ bx: Double, _ by: Double, _ x: Double, _ y: Double) -> Double {
     let ex = bx - ax, ey = by - ay, L2 = ex * ex + ey * ey
     let t = L2 != 0 ? clamp(((x - ax) * ex + (y - ay) * ey) / L2, 0, 1) : 0
     return M.hypot(ax + ex * t - x, ay + ey * t - y)
