@@ -368,3 +368,11 @@ extension CareerEngine {
             "titleLeaders": .arr(lead.map { ["id": .n($0.0), "name": cardOf($0.0)["name"]!, "titles": .n($0.1)] })]
   }
 }
+
+/* sponsors()' objective progress: a rank objective's current place (nil unranked), else the count since the contract */
+extension CareerEngine {
+  public func objProgress(_ o: JV) -> Int? {
+    if o["k"]!.s == "rank" { return rankOf(Self.HUMAN, .circ(o["c"]!.i)) }
+    return Int(objNow(o) - (o["base"]?.d ?? 0))
+  }
+}

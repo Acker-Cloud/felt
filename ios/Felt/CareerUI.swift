@@ -21,7 +21,9 @@ import SwiftUI
     /* a test hook: `-felt-career-demo` starts a fresh career (seed 31337) and moves it to its first match */
     if ProcessInfo.processInfo.arguments.contains("-felt-career-demo") {
       E.store = [:]
-      _ = E.create(["name": "Ada Demo", "nat": "GB", "disc": "9", "style": "potter", "difficulty": "medium", "start": "amateur", "age": 28], seed: 31337)
+      /* `-felt-career-pro`: the same player started as a pro (a test hook) */
+      let start = ProcessInfo.processInfo.arguments.contains("-felt-career-pro") ? "pro" : "amateur"
+      _ = E.create(["name": "Ada Demo", "nat": "GB", "disc": "9", "style": "potter", "difficulty": "medium", "start": .str(start), "age": 28], seed: 31337)
       for _ in 0..<12 {
         let day = E.S["day"]!.i
         if let ev = E.S["cal"]!.a.first(where: { $0["start"]!.i > day && E.eligibility($0).isEmpty }) { E.enter(ev["id"]!.s) }
@@ -29,11 +31,15 @@ import SwiftUI
       }
       /* `-felt-career-forfeit1`: the first match forfeited, so no match is due (a test hook) */
       if ProcessInfo.processInfo.arguments.contains("-felt-career-forfeit1") { E.reportMatch(CareerEngine.MatchReport(forfeit: true)) }
+      /* `-felt-career-accept1`: the first offer accepted after any play-on (a test hook) */
+      defer { if ProcessInfo.processInfo.arguments.contains("-felt-career-accept1"), let id = E.S["off"]?.a.first?["id"]?.str { E.accept(id) } }
       /* `-felt-career-retire`: retired at once (after any steps on: see below) */
       defer { if ProcessInfo.processInfo.arguments.contains("-felt-career-retire") { E.retire() } }
       /* `-felt-career-rivals`: 40 steps on (a due match simulated, else an eligible event entered and a week) */
       if ProcessInfo.processInfo.arguments.contains("-felt-career-rivals") {
-        for _ in 0..<40 {
+        /* `-felt-career-steps N` sets the count (a test hook) */
+        let n = UserDefaults.standard.integer(forKey: "felt-career-steps")
+        for _ in 0..<(n > 0 ? n : 40) {
           if E.nextMatch() != .null { E.simMatch(); continue }
           let day = E.S["day"]!.i
           if let ev = E.S["cal"]!.a.first(where: { $0["start"]!.i > day && E.eligibility($0).isEmpty }) { E.enter(ev["id"]!.s) }
@@ -324,29 +330,6 @@ struct CareerHubTop: View {
       Text(v).multilineTextAlignment(.trailing)
     }
     .font(.system(size: 15))
-  }
-}
-
-/* the offers (sponsorships, challenges, exhibitions), each to accept or decline: the page's Sponsors and Offers */
-struct CareerOffersSection: View {
-  @Bindable var store: CareerStore
-  var body: some View {
-    let _ = store.rev
-    let E = store.E, S = E.S
-      let off = S["off"]!.a
-    if !off.isEmpty {
-      Section("Offers") {
-        ForEach(off.indices, id: \.self) { i in
-          let o = off[i], id = o["id"]!.s
-          HStack {
-            Text(o["type"]!.s == "sponsor" ? "\(o["brand"]!.s): \(o["weeks"]!.i) weeks, \(JV.numberString(o["ret"]!.d)) a week" : "\(o["type"]!.s.capitalized) vs \(E.nameOf(o["opp"]!.i))").font(.subheadline)
-            Spacer()
-            Button("Decline") { E.decline(id); store.touch() }.buttonStyle(.borderless).foregroundStyle(.secondary)
-            Button("Accept") { store.msg = E.accept(id) ?? ""; store.touch() }.buttonStyle(.borderless).bold().foregroundStyle(.white)
-          }
-        }
-      }
-    }
   }
 }
 
@@ -1104,6 +1087,8 @@ struct CareerHub: View {
       CareerBracket(store: store, id: id)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-calendar") {
       if ProcessInfo.processInfo.arguments.contains("-felt-career-event"), let id = nm["event"]?.str { CareerEvent(store: store, id: id) } else { CareerCalendar(store: store) }
+    } else if ProcessInfo.processInfo.arguments.contains("-felt-career-sponsors") {
+      CareerSponsors(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-recap") {
       CareerRecap(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-stats") {
@@ -1303,27 +1288,83 @@ struct CareerShop: View {
 }
 
 /* the sponsors: each contract, its weeks left, retainer and objectives (met in weight 700) */
+/* PAGES.sponsors: Career over Sponsors; Contracts (each brand and category over Brand, Retainer, Weeks left, Bonus and
+   each objective with its progress); Offers (a sponsor's retainer, bonus, objectives and end; a challenge's or an
+   exhibition's game, race, purse and end), each Accept and Decline; the past contracts' count */
 struct CareerSponsors: View {
   @Bindable var store: CareerStore
   var body: some View {
     let _ = store.rev
-    let S = store.E.S, day = S["day"]!.d
+    let E = store.E, S = E.S, day = S["day"]!.i
+    let act = S["spons"]!.a.filter { !truthy($0["end"]) }, offs = S["off"]!.a, past = S["sph"]!.a.count
+    let note = { (t: String) in Text(t).font(.system(size: 13)).foregroundStyle(.secondary).listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)) }
     List {
-      CareerOffersSection(store: store)
-      let sp = S["spons"]!.a
-      if sp.isEmpty { Text("No sponsor yet. Offers come with results and reputation.").foregroundStyle(.secondary) }
-      ForEach(sp.indices, id: \.self) { i in
-        let c = sp[i]
-        Section(c["brand"]!.s) {
-          Text("\(JV.numberString(c["ret"]!.d)) credits a week, \(Int(((c["to"]!.d - day) / 7).rounded(.up))) weeks left").font(.subheadline)
-          ForEach(c["obj"]!.a.indices, id: \.self) { j in
-            let o = c["obj"]!.a[j]
-            Text("\(store.E.objText(o)), pays \(JV.numberString(o["pay"]!.d))").font(.footnote).fontWeight(truthy(o["done"]) ? .bold : .regular)
+      CareerTitle(kick: "Career", title: "Sponsors")
+      if !store.msg.isEmpty { Section { Text(store.msg).font(.system(size: 15)) } }
+      if act.isEmpty { Section { note("No sponsor yet. Offers come with results and reputation; two contracts at once, one per category.") } header: { CareerPageHead(t: "Contracts") } }
+      ForEach(Array(act.enumerated()), id: \.offset) { i, c in
+        Section {
+          card(c["brand"]!.s, c["cat"]!.s, [("Brand", "\(c["brand"]!.s) (\(c["cat"]!.s))"), ("Retainer", "\(CareerWords.crWords(c["ret"]!.d)) a week"),
+                ("Weeks Left", "\(max(0, Int((Double(c["to"]!.i - day) / 7).rounded(.up))))"), ("Bonus", "\(CareerWords.crWords(c["bonus"]!.d)) for every objective")]
+               + c["obj"]!.a.map { o in
+                 let done = truthy(o["done"]), pr = E.objProgress(o)
+                 return (done ? "Done" : "Objective", E.objText(o) + (done ? "" : o["k"]!.s == "rank" ? (pr.map { ", now number \($0)" } ?? ", unranked now") : ", \(pr ?? 0) so far"))
+               })
+        } header: { if i == 0 { CareerPageHead(t: "Contracts") } }
+      }
+      if offs.isEmpty { Section { note("No offers right now. They expire after a few weeks.") } header: { CareerPageHead(t: "Offers") } }
+      ForEach(Array(offs.enumerated()), id: \.offset) { i, o in
+        let id = o["id"]!.s, sp = o["type"]!.s == "sponsor"
+        Section {
+          VStack(spacing: 8) {
+          if sp {
+            card(o["brand"]!.s, "\(o["cat"]!.s), \(o["weeks"]!.i) weeks", [("Retainer", "\(CareerWords.crWords(o["ret"]!.d)) a week"), ("Bonus", CareerWords.crWords(o["bonus"]!.d))]
+                 + o["obj"]!.a.map { ("Objective", E.objText($0)) } + [("Offer Ends", "Week \(E.weekOfDay(o["exp"]!.i))")])
+          } else {
+            card(o["type"]!.s == "challenge" ? "Challenge from \(E.nameOf(o["opp"]!.i))" : "Exhibition with \(E.nameOf(o["opp"]!.i))", "Week \(E.weekOfDay(o["start"]!.i))",
+                 [("Game", CareerStore.gameName(o["disc"]!.s)), ("Race", "First to \(CareerWords.unitWords(o["disc"]!.s, o["race"]!.i))"), ("Purse", CareerWords.crWords(o["purse"]!.d)),
+                  ("Offer Ends", "Week \(E.weekOfDay(o["exp"]!.i))")])
           }
+          HStack(spacing: 8) {
+            Button { let why = E.accept(id); store.msg = why == nil ? "Accepted." : "Not accepted: \(why!)."; E.save(); store.touch() } label: { cap("Accept", true) }
+              .buttonStyle(.plain).accessibilityIdentifier("acc-" + id)
+            Button { E.decline(id); store.msg = "Declined."; E.save(); store.touch() } label: { cap("Decline", false) }
+              .buttonStyle(.plain).accessibilityIdentifier("dec-" + id)
+          }
+          .padding(.bottom, 6)
+          }
+        } header: { if i == 0 { CareerPageHead(t: "Offers") } }
+      }
+      if past > 0 { Section { note("\(past) past contract\(past == 1 ? "" : "s").") } }
+    }
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+    .onDisappear { store.msg = "" }
+  }
+  /* a cvCard: the name and its tag over the lines */
+  private func card(_ name: String, _ tag: String, _ lines: [(String, String)]) -> some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack {
+        Text(name).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.7))
+        Spacer()
+        Text(tag).font(.system(size: 13, weight: .semibold)).padding(.horizontal, 10).padding(.vertical, 4).background(Capsule().fill(Color.white.opacity(0.1)))
+      }
+      VStack(spacing: 6) {
+        ForEach(Array(lines.enumerated()), id: \.offset) { _, l in
+          HStack(alignment: .firstTextBaseline) {
+            Text(l.0).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+            Spacer(minLength: 12)
+            Text(l.1).multilineTextAlignment(.trailing)
+          }
+          .font(.system(size: 15))
         }
       }
     }
-    .navigationTitle("Sponsors")
+    .padding(.vertical, 6)
+  }
+  private func cap(_ t: String, _ primary: Bool) -> some View {
+    Text(t).font(.system(size: 17, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 50)
+      .foregroundStyle(primary ? Color.black : Color.white)
+      .background(Capsule().fill(primary ? Color.white : Color(rgb: 0x2c, 0x2c, 0x30)))
   }
 }
 
