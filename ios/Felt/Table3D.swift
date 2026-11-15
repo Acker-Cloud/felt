@@ -67,7 +67,7 @@ fragment float4 shadowF(ShOut i [[stage_in]], constant ShU &u [[buffer(1)]]) {
   return float4(0.0, 0.0, 0.0, a);
 }
 struct BallU { float4x4 V; float4x4 P; float3x3 Vi; float3 C; float3 Cv; float R; float3 Ax0; float3 Ax1; float3 Ax2; float3 base;
-  float4 cap0; float4 cap1; float4 cap2; float3 capC0; float3 capC1; float3 capC2; float num; float3 Lv; float3 bounce; float alpha; float rim; };
+  float4 cap0; float4 cap1; float4 cap2; float3 capC0; float3 capC1; float3 capC2; float num; float3 Lv; float3 bounce; float alpha; float rim; float4 hole; float3 bedN; float dark; };
 struct BallOut { float4 pos [[position]]; float3 vp; float2 vq; };
 vertex BallOut ballV(uint id [[vertex_id]], constant float2 *q [[buffer(0)]], constant BallU &u [[buffer(1)]]) {
   BallOut o; float4 c = u.V * float4(u.C, 1.0); float3 pv = c.xyz + float3(q[id] * u.R * 1.35, 0.0); o.vp = pv; o.vq = q[id] * 1.35; o.pos = u.P * float4(pv, 1.0); return o;
@@ -80,7 +80,16 @@ fragment BallFrag ballF(BallOut i [[stage_in]], constant BallU &u [[buffer(1)]],
   float cov = clamp(edge / fw + 0.5, 0.0, 1.0);
   if (cov <= 0.0) discard_fragment();
   float disc = max(u.R * u.R - pr2, 0.0), t = b - sqrt(disc);
-  float3 hit = d * t, nv = (hit - u.Cv) / u.R;
+  float3 hit = d * t, nv = (hit - u.Cv) / u.R, dp = hit;
+  /* a ball dropping into a pocket: under the bed it is seen only through the hole, at the depth where the eye's ray
+     crosses the bed */
+  if (u.hole.w > 0.0 && dot(hit - u.hole.xyz, u.bedN) > 0.0) {
+    float dn = dot(d, u.bedN);
+    if (dn <= 1e-6) discard_fragment();
+    float3 pb = d * (dot(u.hole.xyz, u.bedN) / dn);
+    if (length(pb - u.hole.xyz) > u.hole.w) discard_fragment();
+    dp = pb * 0.996;
+  }
   float3 nr = u.Vi * nv, np = float3(nr.x, nr.y, -nr.z), l = float3(dot(u.Ax0, np), dot(u.Ax1, np), dot(u.Ax2, np));
   float3 c = u.base;
   c = paintCap(c, u.cap0, u.capC0, l); c = paintCap(c, u.cap1, u.capC1, l); c = paintCap(c, u.cap2, u.capC2, l);
@@ -94,7 +103,8 @@ fragment BallFrag ballF(BallOut i [[stage_in]], constant BallU &u [[buffer(1)]],
   float3 col = c * (0.3 + 0.78 * df) + u.bounce * 0.2 * max(-np.z, 0.0) * c + float3(1.0) * (0.95 * sp + 0.07 * sh) + float3(0.06) * fr;
   col *= 1.0 - 0.35 * smoothstep(0.2, 0.95, -np.z);
   if (u.rim > 0.5 && edge < u.R * 0.09) col = mix(col, float3(0.77), 0.85);
-  float4 cl = u.P * float4(hit, 1.0);
+  col *= 1.0 - u.dark;
+  float4 cl = u.P * float4(dp, 1.0);
   BallFrag o; o.color = float4(col, u.alpha * cov); o.depth = clamp(cl.z / cl.w, 0.0, 1.0); return o;
 }
 """
@@ -118,6 +128,7 @@ struct BallU {
   var Ax0: SIMD3<Float>; var Ax1: SIMD3<Float>; var Ax2: SIMD3<Float>; var base: SIMD3<Float>
   var cap0: SIMD4<Float>; var cap1: SIMD4<Float>; var cap2: SIMD4<Float>; var capC0: SIMD3<Float>; var capC1: SIMD3<Float>; var capC2: SIMD3<Float>
   var num: Float; var Lv: SIMD3<Float>; var bounce: SIMD3<Float>; var alpha: Float; var rim: Float
+  var hole = SIMD4<Float>(0, 0, 0, 0); var bedN = SIMD3<Float>(0, 0, 0); var dark: Float = 0
 }
 
 @MainActor final class Renderer3D: NSObject, MTKViewDelegate {
@@ -130,6 +141,63 @@ struct BallU {
   var geo: (key: String, tex: MTLTexture, planes: MTLBuffer, nBed: Int, nTop: Int, mesh: MTLBuffer, nFaces: Int, nPosts: Int, bounce: [Double])?
   var numTex: MTLTexture!
   let quad: [SIMD2<Float>] = [[-1, -1], [1, -1], [-1, 1], [1, 1]]
+  /* V3's seat and moves (v3Update, v3Go): the pivot and yaw, what the seat was set for, the overview and a move */
+  var px = Double.nan, py = Double.nan, yaw = 0.0, seatSet = false, seatShot = -1.0, seatTurn = -1, seatPlan: Double? = nil
+  var ovOn = false, ovYaw = 0.0, ov: (key: String, o: V3.Overview)? = nil, mv: (from: V3.Orbit, t0: Double, ms: Double)? = nil, rolled = false
+  var still: Bool { UIAccessibility.isReduceMotionEnabled }
+  /* v3Go: a move to the overview (out) or back behind the cue ball; Reduce Motion, or no pose yet: a cut */
+  func go(_ out: Bool, _ now: Double) {
+    ovOn = out
+    guard let (C, _) = model.v3Cam, !still else { mv = nil; return }
+    mv = (V3.orbitOf(C.E, C.T), now, out ? V3.OUT_MS : V3.BACK_MS)
+  }
+  func cut(_ now: Double) { if ovOn { go(false, now) } else { mv = nil } }
+  /* v3Update: the strike pulls back to the overview (After the Shot), held to the roll's end; the turn's cut is a move
+     back down; the seat follows the player's aim, cuts on a new turn, a moved cue ball, the CPU's line */
+  func update(_ now: Double) {
+    let s = model.sim
+    if model.rolling != nil {
+      if !rolled {
+        rolled = true
+        let after = Prefs.viewAfter
+        if after == "top" { model.v3Top2d = true } else if after != "stay" { ovYaw = yaw; ov = nil; go(true, now) }
+      }
+    } else { rolled = false }
+    var cutTo: Double? = nil
+    if let c = model.cue, model.rolling == nil {
+      if !model.cpuTurn {
+        let moved = abs(c.x - px) > 1e-9 || abs(c.y - py) > 1e-9 || !px.isFinite
+        if !seatSet || moved || seatShot != model.shotAt || seatTurn != (model.g?.turn ?? 0) || seatPlan != nil { cutTo = model.aim } else { yaw = model.aim }
+        seatShot = model.shotAt; seatTurn = model.g?.turn ?? 0; seatPlan = nil
+      } else if model.stroke != nil || !model.cpuThinking {
+        if seatPlan != model.aim { seatPlan = model.aim; cutTo = model.aim }
+      } else if !seatSet { cutTo = model.aim }
+      if let a = cutTo { px = c.x; py = c.y; yaw = a; seatSet = true; cut(now) }
+    }
+    if !seatSet { px = s.TL / 4; py = s.TW / 2; yaw = 0; seatSet = true }
+  }
+  /* v3Pose with the moves: the aim's pose, or the overview, or a move between them (an ease in and out) */
+  func pose(_ box: V3.Box, _ now: Double) -> V3.Cam {
+    let s = model.sim
+    var C = V3.pose(s, box, px: px, py: py, yaw: yaw, pitch: model.v3Pitch, dist: model.v3Dist)
+    if mv != nil || ovOn {
+      var goal: V3.Orbit? = nil
+      if ovOn {
+        let key = "\(s.TL)|\(s.TW)|\(box.width)|\(box.height)|\(ovYaw)"
+        if ov?.key != key { ov = (key, V3.overview(s, box, ovYaw)) }
+        goal = ov!.o.o
+      }
+      if let m = mv {
+        let u = min(1, max(0, (now - m.t0) / m.ms))
+        if u >= 1 { mv = nil } else {
+          let o = V3.lerp(m.from, goal ?? V3.orbitOf(C.E, C.T), 0.5 - 0.5 * cos(Double.pi * u)), q = V3.eyeOf(o)
+          C = V3.mats(q.E, q.T, box.width, box.height); C.yaw = o.yaw; C.phase = goal != nil ? "out" : "back"; C.mu = u
+        }
+      }
+      if mv == nil, let g = goal { let q = V3.eyeOf(g); C = V3.mats(q.E, q.T, box.width, box.height); C.yaw = g.yaw; C.phase = "ov" }
+    }
+    return C
+  }
 
   init?(model: TableModel) {
     guard let d = MTLCreateSystemDefaultDevice(), let q = d.makeCommandQueue() else { return nil }
@@ -224,8 +292,9 @@ struct BallU {
     guard let e = cb.makeRenderCommandEncoder(descriptor: pass) else { return }
     let s = model.sim, R = s.BALL_R, W = Double(view.bounds.width), H = Double(view.bounds.height)
     let box = V3.Box(left: 0, top: 0, width: W, height: H)
-    let cue = model.cue, px = cue?.x ?? s.TL * 0.25, py = cue?.y ?? s.TW / 2
-    let C = V3.pose(s, box, px: px, py: py, yaw: model.aim, pitch: model.v3Pitch, dist: model.v3Dist)
+    let now = CACurrentMediaTime() * 1000
+    update(now)
+    let C = pose(box, now)
     model.v3Cam = (C, box)
     let M = glToMetal(C.M), P = glToMetal(C.P), Vm = m4(C.V)
     var Mv = M
@@ -250,7 +319,17 @@ struct BallU {
     }
     /* the balls on the table, far to near */
     let balls = (model.rolling?.balls ?? model.balls).filter { $0.on }
-    var vis = balls.map { b -> (Ball, Double) in (b, V3.dot(V3.sub([b.x, b.y, -R], C.Er), C.f)) }.filter { $0.1 > V3.NEAR + R }
+    /* v3Drops: each pot falls on toward the pocket's middle and below the bed, darkening and fading, over HERO_DROP_MS */
+    struct Drawn { let n: Int, x: Double, y: Double, z: Double, a: Double, dark: Double, drop: (k: Int, u: Double)? }
+    var drawn = balls.map { Drawn(n: $0.n, x: $0.x, y: $0.y, z: R, a: 1, dark: 0, drop: nil) }
+    let dur = 260 / model.speed, tnow = model.now
+    for p in model.pots where p.k >= 0 && p.k < s.POCKETS.count && !balls.contains(where: { $0.n == p.n }) {
+      let u = (tnow - p.t) * 1000 / dur, P = s.POCKETS[p.k]
+      if !(u >= 0 && u < 1) { continue }
+      let e1 = 1 - (1 - u) * (1 - u)
+      drawn.append(Drawn(n: p.n, x: p.from.0 + (P[0] - p.from.0) * e1, y: p.from.1 + (P[1] - p.from.1) * e1, z: R * (1 - 2.6 * u * u), a: 1 - pow(u, 1.4), dark: min(1, 1.6 * u), drop: (p.k, u)))
+    }
+    var vis = drawn.map { b -> (Drawn, Double) in (b, V3.dot(V3.sub([b.x, b.y, -b.z], C.Er), C.f)) }.filter { $0.1 > V3.NEAR + R }
     vis.sort { $0.1 > $1.1 }
     /* their shadows on the bed (drawCast's lamp and lean) */
     e.setDepthStencilState(depthRead)
@@ -259,10 +338,12 @@ struct BallU {
     e.setVertexBytes(&q, length: 32, index: 0)
     let key = [-LIGHT[0], -LIGHT[1]]
     for (o, _) in vis {
+      if let d = o.drop, d.u > 0.4 { continue }
+      let fa = o.drop.map { max(0, 1 - 2.5 * $0.u) } ?? 1
       let dx = o.x - s.TL / 2, dy = o.y - s.TW / 2, t = R / (BallPainter.LAMP_H - R), lean = R * 0.2
       let bx = o.x + dx * t + key[0] * lean, by = o.y + dy * t + key[1] * lean, grow = 1 + 0.1 * min(1, JSMath.hypot(dx, dy) / 1.2)
       var u = ShU(M: M, S: SIMD3<Float>(Float((o.x + bx) / 2), Float((o.y + by) / 2), -0.0008), ext: Float(R * 1.6 * grow + JSMath.hypot(bx - o.x, by - o.y)),
-                  A: SIMD2<Float>(Float(o.x), Float(o.y)), B: SIMD2<Float>(Float(bx), Float(by)), R: Float(R), grow: Float(grow), ao: 1, ca: 1)
+                  A: SIMD2<Float>(Float(o.x), Float(o.y)), B: SIMD2<Float>(Float(bx), Float(by)), R: Float(R), grow: Float(grow), ao: Float(fa * o.a), ca: Float(fa * o.a))
       e.setVertexBytes(&u, length: MemoryLayout<ShU>.stride, index: 1); e.setFragmentBytes(&u, length: MemoryLayout<ShU>.stride, index: 1)
       e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
@@ -285,7 +366,7 @@ struct BallU {
     let Vi = simd_float3x3(f3(C.r), f3(C.u), -f3(C.f))
     let painter = model.ballPainter(upright: true, scale: view.contentScaleFactor)
     for (o, _) in vis {
-      let p = painter.paintOf(o.n), m = model.orient[o.n] ?? IDENT, Cw = [o.x, o.y, -R]
+      let p = painter.paintOf(o.n), m = model.orient[o.n] ?? IDENT, Cw = [o.x, o.y, -o.z]
       func cap(_ i: Int) -> (SIMD4<Float>, SIMD3<Float>) {
         guard i < p.caps.count else { return (SIMD4<Float>(0, 2, 0, 0), SIMD3<Float>(0, 0, 0)) }
         let c = p.caps[i]; return (SIMD4<Float>(Float(c.0), Float(c.1), 0, 1), rgb(c.2))
@@ -293,7 +374,9 @@ struct BallU {
       let c0 = cap(0), c1 = cap(1), c2 = cap(2)
       var u = BallU(V: Vm, P: P, Vi: Vi, C: f3(Cw), Cv: toV(Cw), R: Float(R), Ax0: SIMD3<Float>(Float(m[0]), Float(m[3]), Float(m[6])), Ax1: SIMD3<Float>(Float(m[1]), Float(m[4]), Float(m[7])),
                     Ax2: SIMD3<Float>(Float(m[2]), Float(m[5]), Float(m[8])), base: rgb(p.base), cap0: c0.0, cap1: c1.0, cap2: c2.0, capC0: c0.1, capC1: c1.1, capC2: c2.1,
-                    num: Float(o.n > 0 && o.n < 16 ? o.n : 0), Lv: toV(lamp), bounce: f3(G.bounce), alpha: 1, rim: painter.rim3(o.n) ? 1 : 0)
+                    num: Float(o.n > 0 && o.n < 16 ? o.n : 0), Lv: toV(lamp), bounce: f3(G.bounce), alpha: Float(o.a), rim: painter.rim3(o.n) ? 1 : 0)
+      u.bedN = SIMD3<Float>(Float(C.V[8]), Float(C.V[9]), Float(C.V[10])); u.dark = Float(o.dark)
+      if let d = o.drop { let h = toV([s.POCKETS[d.k][0], s.POCKETS[d.k][1], 0]); u.hole = SIMD4<Float>(h.x, h.y, h.z, Float(s.POCKET_R[d.k])) }
       e.setVertexBytes(&u, length: MemoryLayout<BallU>.stride, index: 1); e.setFragmentBytes(&u, length: MemoryLayout<BallU>.stride, index: 1)
       e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }

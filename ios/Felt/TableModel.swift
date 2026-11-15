@@ -152,6 +152,8 @@ final class TableModel {
   @ObservationIgnored var v3Pitch = Prefs.viewPitch
   @ObservationIgnored var v3Dist = Prefs.viewDist
   @ObservationIgnored var v3Cam: (V3.Cam, V3.Box)? = nil
+  /* After the Shot 'top': the roll drawn top-down, the setting staying 3D (V3.top2d), until the turn's end */
+  var v3Top2d = false
   @ObservationIgnored var onReport: ((Int, Int, Int, Bool) -> Void)?
   /* the handoff: the player the device is passed to (the breaker at a rack's start), until they are ready */
   var handoff: (p: Int, first: Bool)? = nil
@@ -357,7 +359,7 @@ final class TableModel {
       }
     }
     next = next.map { $0.copy() }
-    balls = next; rolling = nil
+    balls = next; rolling = nil; v3Top2d = false
     if balls.allSatisfy({ !$0.on || $0.n == cueN }) { rerack() }
   }
 
@@ -370,7 +372,7 @@ final class TableModel {
     let shooter = before.turn, next = engine.judge(before, shot)
     potCount += next.verdict?.potted.count ?? 0
     if let gm0 = gBefore, gm0.turn < 4 { pottedBy[gm0.turn] += next.verdict?.potted.filter { $0 > 0 } ?? [] }
-    g = next; rolling = nil; spin = Spin()
+    g = next; rolling = nil; spin = Spin(); v3Top2d = false
     /* a party: the device is handed over each time the turn goes to another player (or a choice to another) */
     if party != nil, next.winner == nil, (next.option?.who ?? next.turn) != shooter { handoff = (next.option?.who ?? next.turn, false) }
     syncBalls()

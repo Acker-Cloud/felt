@@ -33,6 +33,8 @@ enum Prefs {
   static var dressMode: String { str("dress", "game") }
   /* Table View (settings.view): "top" or "3d", with the 3D camera's pitch (8-70 deg) and distance (0.45-3.2 m), clamped */
   static var view: String { str("view", "top") }
+  /* After the Shot (settings.viewAfter): 'pull' to the overview, 'top' the roll top-down, 'stay' the aiming pose */
+  static var viewAfter: String { str("viewAfter", "pull") }
   static var viewPitch: Double { min(V3.PITCH[1], max(V3.PITCH[0], d.object(forKey: "felt.settings.viewPitch") as? Double ?? V3.PITCH0)) }
   static var viewDist: Double { min(V3.DIST[1], max(V3.DIST[0], d.object(forKey: "felt.settings.viewDist") as? Double ?? V3.DIST0)) }
   static func mine(_ slot: String) -> String { str("look." + slot, LOOK_DEFAULT[slot]!) }
@@ -84,6 +86,7 @@ struct SettingsView: View {
   @AppStorage("felt.settings.haptics") private var haptics = true
   @AppStorage("felt.settings.dress") private var dressMode = "game"
   @AppStorage("felt.settings.view") private var tableView = "top"
+  @AppStorage("felt.settings.viewAfter") private var viewAfter = "pull"
   @AppStorage("felt.settings.look.cloth") private var lookCloth = "green"
   @AppStorage("felt.settings.look.cue") private var lookCue = "house"
   @AppStorage("felt.settings.look.chalk") private var lookChalk = "blue"
@@ -124,6 +127,7 @@ struct SettingsView: View {
          to My Look */
       Section {
         Picker("Table View", selection: $tableView) { Text("Top Down").tag("top"); Text("3D").tag("3d") }.pickerStyle(.segmented)
+        if tableView == "3d" { Picker("After the Shot", selection: $viewAfter) { Text("Pull Back").tag("pull"); Text("Top Down").tag("top"); Text("Stay").tag("stay") } }
         Picker("Table Dressing", selection: $dressMode) { Text("By Game").tag("game"); Text("My Look").tag("mine") }.pickerStyle(.segmented)
         look("Cloth", "cloth", $lookCloth)
         look("Cue", "cue", $lookCue)

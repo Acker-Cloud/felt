@@ -174,7 +174,7 @@ struct TableScreen: View {
     layout {
       GeometryReader { tg in
         TimelineView(.animation(paused: model.paused)) { tl in
-          Group { if model.view3d { Table3DView(model: model) } else { TableCanvas(model: model, look: Look.of(model.dress, game: model.game)) } }
+          Group { if model.view3d && !model.v3Top2d { Table3DView(model: model) } else { TableCanvas(model: model, look: Look.of(model.dress, game: model.game)) } }
             .onChange(of: tl.date) { _, d in model.tick(d.timeIntervalSinceReferenceDate) }
         }
         .overlay { FlashBanner(model: model, size: tg.size) }
