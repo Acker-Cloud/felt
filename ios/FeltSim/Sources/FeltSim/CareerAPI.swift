@@ -376,3 +376,16 @@ extension CareerEngine {
     return Int(objNow(o) - (o["base"]?.d ?? 0))
   }
 }
+
+/* Career.shop(): every item with owned, equipped, locked (its achievement not reached) and needWords */
+extension CareerEngine {
+  public func shop() -> [JV] {
+    let eq = equipped()
+    return Self.c("SHOP").a.map { i in
+      var v = i, id = i["id"]!.s, need = i["need"]?.str
+      v["owned"] = .bool(owns(id)); v["equipped"] = .bool(eq[i["slot"]!.s]?.str == id)
+      v["locked"] = .bool(!needMet(need)); v["needWords"] = need.flatMap { Self.c("NEED_WORDS")[$0] } ?? .null
+      return v
+    }
+  }
+}

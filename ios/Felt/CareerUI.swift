@@ -1087,6 +1087,8 @@ struct CareerHub: View {
       CareerBracket(store: store, id: id)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-calendar") {
       if ProcessInfo.processInfo.arguments.contains("-felt-career-event"), let id = nm["event"]?.str { CareerEvent(store: store, id: id) } else { CareerCalendar(store: store) }
+    } else if ProcessInfo.processInfo.arguments.contains("-felt-career-shop") {
+      CareerShop(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-sponsors") {
       CareerSponsors(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-recap") {
@@ -1259,31 +1261,117 @@ struct CareerStats: View {
 }
 
 /* the shop: each item's price or lock, Buy, and Equip for what is owned; a checkmark on what is worn */
+/* PAGES.shop: credits to spend over Shop; the note; each slot's group (Cues, Cloths, Chalk, Rails, Ball Sets, Profile
+   Frames, Prestige, Venues): the swatch, the name, Equipped / Owned / the achievement / the price, and Equip, Buy or
+   Claim (dimmed when locked or short of credits) */
 struct CareerShop: View {
   @Bindable var store: CareerStore
-  @State private var msg = ""
+  static let GROUPS = [("cue", "Cues"), ("cloth", "Cloths"), ("chalk", "Chalk"), ("rail", "Rails"), ("balls", "Ball Sets"), ("ring", "Profile Frames"), ("prestige", "Prestige"), ("venue", "Venues")]
+  static let RINGS = ["silver": "#c9ccd2", "gold": "#f2c94c", "champion": "#7cb6ff", "centurion": "#5fd68f", "drill": "#f2c94c", "legacy": "#ff9f8a"]
   var body: some View {
     let _ = store.rev
-    let E = store.E, eq = E.equipped(), items = CareerEngine.const("SHOP").a
-    let slots = CareerEngine.const("SHOP_SLOTS").a.map { $0.s }
+    let E = store.E, items = E.shop(), money = E.S["me"]!["money"]!.d
     List {
-      Section { Text("Credits: \(JV.numberString(E.S["me"]!["money"]!.d))") ; if !msg.isEmpty { Text(msg).font(.footnote).foregroundStyle(.secondary) } }
-      ForEach(slots, id: \.self) { slot in
-        Section(slot.capitalized) {
-          ForEach(items.indices.filter { items[$0]["slot"]?.str == slot }, id: \.self) { i in
-            let it = items[i], id = it["id"]!.s, owned = E.owns(id), worn = eq[slot]?.str == id
-            HStack {
-              Text(it["name"]!.s).fontWeight(worn ? .bold : .regular)
-              if worn { Image(systemName: "checkmark").foregroundStyle(.white) }
+      CareerTitle(kick: "\(CareerWords.crWords(money)) to spend", title: "Shop")
+      if !store.msg.isEmpty { Section { Text(store.msg).font(.system(size: 15)) } }
+      Section {} footer: {
+        Text("Cosmetic only: nothing here changes a shot, a table or the odds. What you equip is what your career matches show: the cloth, the rails and the balls on the table, the cue and its chalk as you aim, and the frame round your picture on this page. Everything you own here can also be worn in any game from Settings, Graphics. Items cost career credits at a fixed price; the ones marked with an achievement are free once you reach it. There is no real money and nothing random.")
+          .font(.system(size: 13))
+      }
+      ForEach(Self.GROUPS, id: \.0) { slot, name in
+        Section {
+          ForEach(Array(items.filter { $0["slot"]?.str == slot }.enumerated()), id: \.offset) { _, i in
+            let id = i["id"]!.s, price = i["price"]!.d, eqd = truthy(i["equipped"]), own = truthy(i["owned"]), locked = truthy(i["locked"])
+            HStack(spacing: 12) {
+              Self.swatch(id).frame(width: 32, height: 32)
+              VStack(alignment: .leading, spacing: 1) {
+                Text(i["name"]!.s).font(.system(size: 17))
+                Text(eqd ? "Equipped" : own ? "Owned" : locked ? (i["needWords"]?.str ?? "") : i["need"]?.str != nil ? "Unlocked: \(price > 0 ? CareerWords.crWords(price) : "free")" : price > 0 ? CareerWords.crWords(price) : "Free")
+                  .font(.system(size: 15)).foregroundStyle(.secondary)
+              }
               Spacer()
-              if owned { if !worn { Button("Equip") { E.equip(id); E.save(); store.touch() }.buttonStyle(.borderless).foregroundStyle(.white) } }
-              else { Button("Buy, \(JV.numberString(it["price"]!.d))") { msg = E.buy(id).map { "Can't buy: \($0)." } ?? "Bought \(it["name"]!.s)."; E.save(); store.touch() }.buttonStyle(.borderless).foregroundStyle(.white) }
+              if !eqd {
+                if own {
+                  mini("Equip", go: true) { E.equip(id); E.save(); store.touch() }.accessibilityLabel("Equip \(i["name"]!.s)")
+                } else {
+                  let can = !locked && money >= price
+                  mini(price > 0 ? "Buy" : "Claim", go: can) {
+                    let why = E.buy(id)
+                    store.msg = why == nil ? "\(price > 0 ? "Bought" : "Claimed"): \(i["name"]!.s)." : "Not bought: \(why!)."
+                    E.save(); store.touch()
+                  }
+                  .disabled(!can).accessibilityLabel("\(price > 0 ? "Buy" : "Claim") \(i["name"]!.s)")
+                }
+              }
+            }
+            .accessibilityIdentifier("shop-" + id)
+          }
+        } header: { CareerPageHead(t: name) }
+        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+      }
+    }
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+    .onDisappear { store.msg = "" }
+  }
+  private func mini(_ t: String, go: Bool, _ act: @escaping () -> Void) -> some View {
+    Button(action: act) {
+      Text(t).font(.system(size: 17, weight: .semibold)).padding(.horizontal, 16).frame(minHeight: 40)
+        .foregroundStyle(go ? Color.black : Color.white.opacity(0.35))
+        .background(Capsule().fill(go ? Color.white : Color(rgb: 0x2c, 0x2c, 0x30)))
+    }
+    .buttonStyle(.borderless)
+  }
+  /* shopSwatch: the item's look in a 32 pt tile (cloth with a ball, rail grain, chalk's tip, the cue's butt, a ball of
+     the set, the frame's ring); prestige and venues are plain */
+  @ViewBuilder static func swatch(_ id: String) -> some View {
+    let parts = id.split(separator: "-", maxSplits: 1).map(String.init), slot = parts.first ?? "", key = parts.count > 1 ? parts[1] : ""
+    let tile = RoundedRectangle(cornerRadius: 9, style: .continuous)
+    ZStack {
+      tile.fill(Color(rgb: 0x2a, 0x2a, 0x2e))
+      switch slot {
+      case "cloth":
+        if let c = TableLook.CLOTH[key] {
+          tile.fill(css(c.base))
+          Circle().fill(Color(rgb: 0xf6, 0xf4, 0xec)).frame(width: 8, height: 8).offset(x: 32 * 0.36 - 16, y: 0)
+        }
+      case "rail":
+        if let r = TableLook.RAILS[key] {
+          tile.fill(LinearGradient(stops: [.init(color: Color(red: r.lite[0] / 255, green: r.lite[1] / 255, blue: r.lite[2] / 255), location: 0), .init(color: css(r.base), location: 0.55),
+                                           .init(color: Color(red: r.dark[0] / 255, green: r.dark[1] / 255, blue: r.dark[2] / 255), location: 1)], startPoint: .topLeading, endPoint: .bottomTrailing))
+        }
+      case "chalk":
+        if let t = Dress.CHALK[key] { Circle().fill(css(t)).frame(width: 16, height: 16) }
+      case "cue":
+        if let o = CueLook.all[key] {
+          GeometryReader { g in
+            let w = g.size.width, h = g.size.height * 0.2, y = g.size.height * 0.4
+            ZStack(alignment: .topLeading) {
+              Rectangle().fill(css(o.shaft[0])).frame(width: w * 0.34, height: h).offset(y: y)
+              Rectangle().fill(css(o.metal)).frame(width: w * 0.04, height: h).offset(x: w * 0.34, y: y)
+              Rectangle().fill(css(o.fore)).frame(width: w * 0.26, height: h).offset(x: w * 0.38, y: y)
+              Rectangle().fill(css(o.wrap)).frame(width: w * 0.20, height: h).offset(x: w * 0.64, y: y)
+              Rectangle().fill(css(o.sleeve)).frame(width: w * 0.16, height: h).offset(x: w * 0.84, y: y)
             }
           }
         }
+      case "balls":
+        if let b = BallSet.all[key] {
+          let c = (b.col?[1] ?? colorOf(1))
+          Circle().fill(Color(red: c[0] / 255, green: c[1] / 255, blue: c[2] / 255)).frame(width: 22, height: 22)
+          Circle().fill(css(b.ivory)).frame(width: 9, height: 9)
+        }
+      case "ring":
+        if let col = RINGS[key] {
+          Circle().fill(css(col)).frame(width: 24, height: 24)
+          Circle().fill(Color(rgb: 0x3a, 0x3a, 0x41)).frame(width: 18, height: 18)
+        }
+      default: EmptyView()
       }
     }
-    .navigationTitle("Shop")
+    .clipShape(tile)
+    .overlay(tile.strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
+    .accessibilityHidden(true)
   }
 }
 
