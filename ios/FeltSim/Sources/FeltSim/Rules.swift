@@ -161,8 +161,8 @@ public struct Game: Sendable {
   public var mode: String? = nil
   /* practice's (sim 1e+): its layout ('8', '9', 'heyball', 'scatter', 'empty'), the scatter's seed, the ball-in-hand toggle */
   public var layout: String? = nil, seed: UInt32 = 0, hand = false
-  /* a trick shot's (sim 1h): its id */
-  public var trick: String? = nil
+  /* a trick shot's (sim 1h): its id; a drill's (sim 1m): its id and the shot's index */
+  public var trick: String? = nil, drill: String? = nil, shotN = 0
   /* snooker's frame (sim 1j): nil on the pocket games */
   public var snk: SnkState? = nil
   /* carom's (sim 1k): the shooter's cue ball, the cushions a point needs, innings per player */
