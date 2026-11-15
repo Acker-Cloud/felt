@@ -897,6 +897,60 @@ struct PowerBar: View {
 
 /* the quick tournament (6f): its setup (game, size, format, race, field), then the player's next match, the bracket
    round by round (simulated matches marked), and the places at the end */
+/* MD_PAGES.tsetup: the new tournament page: Game, Rules (where the game has more than one) with the ruleset's note
+   (`name (source). description`), Players, Format, the race, Opponents, the note, Start Tournament pinned */
+struct TourneySetup: View {
+  @Bindable var store: TourneyStore
+  @State private var kind = "9"
+  @State private var ruleset = "9-house"
+  @State private var size = 8
+  @State private var fmt = "single"
+  @State private var race = 3
+  @State private var field = "mixed"
+  /* rulesetsFor(kind) for the tournament's games (RULESETS: id, name, source, description) */
+  static let SETS: [String: [(String, String, String, String)]] = [
+    "8": [("8-house", "8-ball, house rules", "felt house rule", "Hit one of your group first, pot it to carry on. No calls unless your settings ask for them. An 8 on the break is spotted and the breaker carries on."),
+          ("8-wpa", "8-ball, WPA", "WPA world standardized rules", "Call every shot that is not obvious, and the 8 always with its pocket. A legal break pots a ball or drives four to the cushions. An 8 on the break: spot it or re-rack. A ball off the table on the break: the table as it lies, or ball in hand behind the head string.")],
+    "9": [("9-house", "9-ball, house rules", "felt house rule", "Lowest ball first. A legal 9 wins, early or on the break. Three fouls in a row lose."),
+          ("9-wpa", "9-ball, WPA", "WPA world standardized rules", "Lowest ball first, any legal 9 wins. Push out on the shot after the break; your opponent may hand it back. A legal break pots a ball or drives four to the cushions, and three must drop or lie past the head string, or your opponent may hand it back and any 9 is spotted. Three fouls lose.")],
+    "10": [("10-wpa", "10-ball, WPA", "WPA world standardized rules", "Lowest ball first, and call your shots; an obvious one is called from your aim, and there is no safety. The 10 wins only when called as the last ball; on the break or early it is spotted. Push out after the break. Three fouls lose.")],
+    "straight": [("straight-wpa", "Straight pool (14.1), WPA", "WPA world standardized rules", "Any ball, called with its pocket: a point each. With one ball left the other 14 are racked again. A foul costs a point, three in a row 15 more and a new break.")],
+    "rotation": [("rotation", "Rotation (61)", "felt house rule, after the BCA game", "Lowest ball first; every ball potted on a legal shot scores its number. 61 wins. Balls potted on a foul are spotted.")],
+    "heyball": [("heyball", "Chinese 8-ball", "WPA Rules of Heyball, effective 2025-08-16", "Balls potted on the break leave the table open: the first legal pot after it chooses your group, the group of the ball you hit first. A legal break pots a ball or drives four to the cushions. A foul on the break: ball in hand behind the head string, or a re-rack. Any other foul: ball in hand anywhere. The 8 last, in any pocket: nothing is called.")],
+    "snooker": [("snooker", "Snooker", "WPBSA rules, simplified", "A red, then a colour, until the reds are gone; then the colours in order.")],
+    "carom": [("carom", "Three-cushion", "UMB rules, simplified", "Your cue ball meets both others, with three cushions before the second. A point each.")],
+  ]
+  /* ruleWord: the part of the name after the comma, title-cased */
+  static func ruleWord(_ name: String) -> String {
+    let w = name.components(separatedBy: ", ").dropFirst().first ?? name
+    return w.split(separator: " ").map { $0 == "WPA" ? String($0) : $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+  }
+  var body: some View {
+    let sets = Self.SETS[kind] ?? [], R = sets.first { $0.0 == ruleset } ?? sets.first
+    ModeForm(kicker: "Quick Tournament", title: "New Tournament", action: "Start Tournament", actionID: "tourney-start", go: {
+      store.start(Tourney.make(kind: kind, ruleset: R?.0, size: size, fmt: fmt, race: race, field: field, seed: Int.random(in: 1...0x7fffffff)))
+    }) {
+      ModeField("Game") { ModePop(selection: $kind, items: Tourney.KINDS.map { ($0, TourneyView.kindName($0)) }) }
+      if sets.count > 1 { ModeField("Rules") { ModePop(selection: $ruleset, items: sets.map { ($0.0, Self.ruleWord($0.1)) }) } }
+      if let R { ModeNote("\(R.1) (\(R.2)). \(R.3)") }
+      ModeField("Players") { Picker("Players", selection: $size) { ForEach(Tourney.SIZES, id: \.self) { Text("\($0)").tag($0) } }.pickerStyle(.segmented).labelsHidden() }
+      ModeField("Format") { ModePop(selection: $fmt, items: [("single", "Single Elimination"), ("double", "Double Elimination")]) }
+      ModeField(Tourney.points(kind) ? "Race to (Points, One Game a Match)" : kind == "snooker" ? "Race to (Frames)" : "Race to (Racks)") {
+        Picker("Race", selection: $race) { ForEach(Tourney.races(kind), id: \.self) { Text("\($0)").tag($0) } }.pickerStyle(.segmented).labelsHidden()
+      }
+      ModeField("Opponents") {
+        Picker("Opponents", selection: $field) { Text("Mixed").tag("mixed"); Text("Easy").tag("easy"); Text("Medium").tag("medium"); Text("Hard").tag("hard") }.pickerStyle(.segmented).labelsHidden()
+      }
+      ModeNote("Your matches are played on the table. Every other match is settled by the career's match model from the players' strengths, and shown as simulated.")
+      if let t = store.tour, !t.done { ModeNote("Starting a new tournament ends the one under way.") }
+    }
+    .onChange(of: kind) { _, k in
+      ruleset = DEFAULT_RULESET[k] ?? (Self.SETS[k]?.first?.0 ?? "")
+      if !Tourney.races(k).contains(race) { race = ["straight": 50, "snooker": 2, "carom": 10][k] ?? 3 }
+    }
+  }
+}
+
 struct TourneyView: View {
   @Bindable var store: TourneyStore
   let play: () -> Void
@@ -909,10 +963,13 @@ struct TourneyView: View {
   static func game(_ k: String) -> TableGame? { ["8": .eight, "9": .nine, "10": .ten, "straight": .straight, "rotation": .rotation, "heyball": .heyball, "snooker": .snooker, "carom": .carom][k] }
   static func placeWords(_ p: Int) -> String { p == 1 ? "Champion" : p == 2 ? "Runner-up" : "Place \(p)" }
   var body: some View {
+    if store.tour == nil { TourneySetup(store: store) } else { list }
+  }
+  private var list: some View {
     List {
-      if let t = store.tour, !t.done { running(t) } else {
-        if let t = store.tour, t.done { results(t) }
-        setup
+      if let t = store.tour, !t.done { running(t) } else if let t = store.tour, t.done {
+        results(t)
+        Section { NavigationLink { TourneySetup(store: store) } label: { Text("New Tournament").font(.headline) } }
       }
     }
     .navigationTitle("Quick Tournament").navigationBarTitleDisplayMode(.inline)
