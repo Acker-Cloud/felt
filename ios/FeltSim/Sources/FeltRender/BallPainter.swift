@@ -58,6 +58,8 @@ func cssRgb(_ c: [Double]) -> String { "rgb(\(Int(c[0])),\(Int(c[1])),\(Int(c[2]
 public final class BallPainter {
   public let set: BallSet, bounce: String, dpr: Double, portrait: Bool
   public let lowRim: Bool, rimAll: Bool, clothBase: [Double]
+  /* settings.marks: the colour-blind safe badge on every ball (drawMark) */
+  public var marks = false
   struct Paint { let base: String; let caps: [(Int, Double, String)] }
   /* a ball's paint (PAINT[n]: its base and caps), for the 3D view's ball shader */
   public func paintOf(_ n: Int) -> (base: String, caps: [(Int, Double, String)]) { let p = paint[n] ?? paint[0]!; return (p.base, p.caps) }
@@ -194,8 +196,30 @@ public final class BallPainter {
       g.strokeStyle("#c4c4c4"); g.lineWidth = max(dpr, r * 0.08)
       g.beginPath(); g.arc(X, Y, r - g.lineWidth / 2, 0, Double.pi * 2); g.stroke()
     }
+    if marks { drawMark(g, n, X, Y, r) }
     if dark > 0 { g.fillStyle = .color(RGBA(0, 0, 0, dark)); g.beginPath(); g.arc(X, Y, r + 0.5, 0, Double.pi * 2); g.fill() }
     g.globalAlpha = 1
+  }
+  /* markOf: colour-blind safe marks, read by lightness and by their words, never by hue: pool's solids (and the 8) a light
+     badge with a dark number, stripes a dark badge with a light one; snooker's colours their value (2 yellow to 7 black,
+     reds none); carom's yellow Y (dark) and red R (light), the white none; bumper pool's reds R. [text, dark] */
+  public static func markOf(_ n: Int) -> (String, Bool)? {
+    if n >= 1 && n <= 15 { return (String(n), n > 8) }
+    if n >= 57 && n <= 62 { return (String(n - 55), n == 62) }
+    if n == 71 { return ("Y", true) }
+    if n == 72 { return ("R", false) }
+    if n >= 21 && n <= 25 { return ("R", true) }
+    return nil
+  }
+  /* drawMark: an upright badge, 0.6 of the ball across, ringed in the other tone, its words in the bold number face */
+  func drawMark(_ g: Canvas2D, _ n: Int, _ X: Double, _ Y: Double, _ r: Double) {
+    guard let m = BallPainter.markOf(n) else { return }
+    let R = r * 0.6, dark = m.1, ivory = "#f7f4ea", ink = "#141414"
+    g.setTransform(1, 0, 0, 1, 0, 0)
+    g.fillStyle(dark ? ink : ivory); g.beginPath(); g.arc(X, Y, R, 0, Double.pi * 2); g.fill()
+    g.strokeStyle(dark ? ivory : ink); g.lineWidth = max(dpr * 0.75, r * 0.07); g.stroke()
+    g.fillStyle(dark ? ivory : ink)
+    g.fillTextCentered(m.0, X, Y + R * 0.06, size: (R * (m.0.count > 1 ? 1.0 : 1.2) * 10).rounded() / 10)
   }
   /* setBall: a ball's colour in this set and the set's ivory (the rail's flat inlay, nextBallEl) */
   public func flatOf(_ n: Int) -> (col: [Double], iv: String) { ((n >= 1 && n <= 15 ? setCol(n) : nil) ?? colorOf(n), set.ivory) }

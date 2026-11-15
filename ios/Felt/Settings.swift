@@ -109,6 +109,7 @@ struct SettingsView: View {
   @AppStorage("felt.settings.replays") private var replays = true
   @AppStorage("felt.settings.reduceMotion") private var reduceMotion = false
   @AppStorage("felt.settings.hcAim") private var hcAim = false
+  @AppStorage("felt.settings.marks") private var marks = false
   @AppStorage("felt.settings.bar") private var bar = "mid"
   /* the list (prefsList): a row per page (PREF_PAGES), its icon, name and line, pushed from the right. The page's
      Accessibility page is not here: none of its settings (ball marks, high-contrast aim, text size, Space on the bar)
@@ -120,7 +121,7 @@ struct SettingsView: View {
         NavigationLink { page("Controls") { controls } } label: { PrefRow(icon: "switch.2", name: "Controls", line: "Auto aim, layout, power bar") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("Graphics") { graphics } } label: { PrefRow(icon: "photo", name: "Graphics", line: "Cloth, camera, replay, motion") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("Audio and Haptics") { audio } } label: { PrefRow(icon: "speaker.wave.2.fill", name: "Audio and Haptics", line: "Volume, table sounds, haptics") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-        NavigationLink { page("Accessibility") { a11y } } label: { PrefRow(icon: "figure.stand", name: "Accessibility", line: "High-contrast aim, reduce motion") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        NavigationLink { page("Accessibility") { a11y } } label: { PrefRow(icon: "figure.stand", name: "Accessibility", line: "Ball marks, high-contrast aim, motion") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("About") { about } } label: { PrefRow(icon: "info.circle", name: "About", line: "This build") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
       } header: {
         /* the page's header row: "Settings" in Title 1, by the back button */
@@ -207,9 +208,10 @@ struct SettingsView: View {
   /* ppA11y: Seeing the Table (the page's ball marks, text size and keyboard rows are not ported) */
   @ViewBuilder private var a11y: some View {
     Section {
+      Toggle("Colour-Blind Safe Ball Marks", isOn: $marks)
       Toggle("High-Contrast Aim Line", isOn: $hcAim)
       Toggle("Reduce Motion", isOn: $reduceMotion)
-    } header: { Text("Seeing the Table") } footer: { Text("High contrast draws the aim line, the ghost ball and the paths wider, white over a near-black edge, on any cloth. Reduce Motion: no sliding sheets, swings or pulses, whatever the system says.") }
+    } header: { Text("Seeing the Table") } footer: { Text("Ball marks put an upright badge on every ball: solids light with a dark number, stripes dark with a light one, snooker's colours their value, carom's yellow Y and red R, bumper pool's reds R. Tell them apart without colour. High contrast draws the aim line, the ghost ball and the paths wider, white over a near-black edge, on any cloth.") }
   }
   /* ppAbout: felt, and the sound credits (CREDITS.md) */
   @ViewBuilder private var about: some View {

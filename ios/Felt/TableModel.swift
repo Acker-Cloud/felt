@@ -137,10 +137,11 @@ final class TableModel {
     return (img, sc)
   }
   func ballPainter(upright: Bool, scale: CGFloat) -> BallPainter {
-    if let p = painter, p.1 == upright, p.2 == scale { return p.0 }
+    if let p = painter, p.1 == upright, p.2 == scale, p.0.marks == Prefs.bool("marks", false) { return p.0 }
     let look = TableLook.of(dress), cloth = RGBA(css: look.cloth.base)
     let p = BallPainter(set: BallSet.all[dress.balls] ?? BallSet.all["classic"]!, bounce: look.cloth.bounce, dpr: Double(scale), portrait: upright,
                         lowRim: look.cloth.lowRim, rimAll: look.cloth.rim, clothBase: [cloth.r * 255, cloth.g * 255, cloth.b * 255])
+    p.marks = Prefs.bool("marks", false)
     painter = (p, upright, scale); ballCache = [:]
     return p
   }

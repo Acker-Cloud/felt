@@ -807,10 +807,14 @@ struct TableCanvas: View {
       g.stroke(disc, with: .color(Color(.sRGB, red: 25 / 255, green: 10 / 255, blue: 4 / 255, opacity: 0.6)), lineWidth: 2)
     }
     let ir = r.insetBy(dx: d * inset, dy: d * inset)
-    g.fill(Path(ellipseIn: ir), with: .color(I))
+    /* .cb: with marks on, the mark's badge in place of the number's circle (dark or light, its words in the other) */
+    let mk = bp.marks ? BallPainter.markOf(n) : nil
+    let face = mk.map { $0.1 ? Color(rgb: 0x14, 0x14, 0x14) : I } ?? I, ink = mk.map { $0.1 ? I : Color(rgb: 0x14, 0x14, 0x14) } ?? Color(rgb: 0x14, 0x14, 0x14)
+    g.fill(Path(ellipseIn: ir), with: .color(face))
     var t = g
-    if n > 9 { t.translateBy(x: c.x, y: c.y); t.scaleBy(x: 0.8, y: 1); t.translateBy(x: -c.x, y: -c.y) }
-    t.draw(Text(String(n)).font(.system(size: d * (pot ? 0.46 : 0.5), weight: .heavy)).foregroundColor(Color(rgb: 0x14, 0x14, 0x14)), at: c)
+    let word = mk?.0 ?? String(n)
+    if word.count > 1 { t.translateBy(x: c.x, y: c.y); t.scaleBy(x: 0.8, y: 1); t.translateBy(x: -c.x, y: -c.y) }
+    t.draw(Text(word).font(.system(size: d * (pot ? 0.46 : 0.5), weight: .heavy)).foregroundColor(ink), at: c)
     if pot {
       /* #potRail .nb::after, the lamp's light: a highlight up and to the left, the far side in shade (CSS radial
          gradients reach the box's farthest corner); its edge inset .5px rgba(0,0,0,.45) */
