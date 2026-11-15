@@ -129,7 +129,9 @@ extension RulesEngine {
    of powers, and a fan all round), the physics decides (bRun, judged and scored by bValue), the best refined, the
    finalists re-run mis-hit and scored on the mean. Every draw in the page's order. */
 public struct BumperProfile: Sendable {
-  public let sims: Int, fan: Int, ladder: [Double], refine: Int, robust: Int, noise: Double, pnoise: Double, strikers: Int
+  public let sims: Int, fan: Int, ladder: [Double], refine: Int, robust: Int
+  public var noise: Double, pnoise: Double
+  public let strikers: Int
   public static func level(_ lv: String) -> BumperProfile {
     switch lv {
     case "easy": return BumperProfile(sims: 26, fan: 8, ladder: [1.1, 1.7], refine: 6, robust: 0, noise: 0.03, pnoise: 0.08, strikers: 1)
@@ -179,7 +181,10 @@ extension CPU {
   final class BRec { let shot: BShot; let value: Double; var mean = 0.0; init(_ s: BShot, _ v: Double) { shot = s; value = v } }
 
   public func cpuBumper(_ g: Game, seed: Double, level: String) -> CPUShot {
-    let L = BumperProfile.level(level), rnd = cpuRng(seed * 2654435761 + 7), me = g.turn, T = s.POCKETS[1 - me]
+    /* cpuRecord(P, 'bumper'): the level's table, its noise scaled by the person's (exactly the table at a bare level) */
+    var L = BumperProfile.level(level); let P = CPUProfile.make(level, arch: arch, hill: hill)
+    if !(P.nscale == 1 && P.pscale == 1) { L.noise *= P.nscale; L.pnoise *= P.pscale }
+    let rnd = cpuRng(seed * 2654435761 + 7), me = g.turn, T = s.POCKETS[1 - me]
     func gauss() -> Double { (rnd() + rnd() + rnd() - 1.5) * 2 }
     func play(_ sh: BShot, _ intent: (String, Double)) -> CPUShot {
       let a = sh.angle + gauss() * L.noise

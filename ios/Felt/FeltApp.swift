@@ -19,7 +19,7 @@ struct Home: View {
   @State private var playingTourney = false
   @State private var showTourney = false
   struct PartyGo: Identifiable { let game: TableGame, names: [String], ruleset: String; var id: String { ruleset + names.joined() } }
-  struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var id: String { game.rawValue + levels.joined() } }
+  struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var archs: [String] = ["allround", "allround"]; var id: String { game.rawValue + levels.joined() + archs.joined() } }
   var body: some View {
     NavigationStack {
       List {
@@ -93,7 +93,7 @@ struct Home: View {
       }
     }
     .fullScreenCover(item: $playing) { g in TableScreen(model: TableModel(game: g, cpu: opponent == "two" ? nil : opponent)) }
-    .fullScreenCover(item: $exhibit) { e in TableScreen(model: TableModel(game: e.game, exhib: e.levels)) }
+    .fullScreenCover(item: $exhibit) { e in TableScreen(model: TableModel(game: e.game, exhib: e.levels, exhibArch: e.archs)) }
     .fullScreenCover(isPresented: $playingTourney) {
       if let t = store.tour, let g = TourneyView.game(t.kind) {
         TableScreen(model: { let m = TableModel(game: g, tourney: t); m.onReport = { store.report($0, $1, $2, $3) }; return m }())
@@ -580,15 +580,22 @@ struct ExhibitionSetup: View {
   @State private var game: TableGame = .eight
   @State private var a = "medium"
   @State private var b = "hard"
+  @State private var archA = "allround"
+  @State private var archB = "allround"
+  /* ARCH_WORDS: the career's archetypes as styles */
+  static let STYLES = [("allround", "All-Round"), ("potter", "Potter"), ("shotmaker", "Shotmaker"), ("defender", "Defender"), ("positional", "Positional"),
+                       ("breaker", "Breaker"), ("banker", "Banker"), ("grinder", "Grinder"), ("clutch", "Clutch")]
   var body: some View {
     List {
       Section { Picker("Game", selection: $game) { ForEach(TableGame.allCases) { Text($0.rawValue).tag($0) } } }
       Section {
         Picker("Player 1", selection: $a) { Text("Rookie").tag("easy"); Text("Regular").tag("medium"); Text("Hustler").tag("hard") }
+        Picker("Player 1 Style", selection: $archA) { ForEach(Self.STYLES, id: \.0) { Text($0.1).tag($0.0) } }
         Picker("Player 2", selection: $b) { Text("Rookie").tag("easy"); Text("Regular").tag("medium"); Text("Hustler").tag("hard") }
+        Picker("Player 2 Style", selection: $archB) { ForEach(Self.STYLES, id: \.0) { Text($0.1).tag($0.0) } }
       } header: { Text("Players") } footer: { Text("Each searches at its own level through the same physics and rules as any CPU turn.") }
       Section {
-        Button { start(Home.Exhibit(game: game, levels: [a, b])) } label: { Text("Start").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+        Button { start(Home.Exhibit(game: game, levels: [a, b], archs: [archA, archB])) } label: { Text("Start").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black).listRowBackground(Color.clear).accessibilityIdentifier("exhibit-start")
       }
     }

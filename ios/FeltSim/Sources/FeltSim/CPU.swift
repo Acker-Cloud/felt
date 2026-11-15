@@ -14,14 +14,69 @@ public struct CPUProfile: Sendable {
   public var minCos: Double, position: Bool, look: Bool, retry: Bool, noise: Double, pnoise: Double, brk: Double
   public var plan = 0, kickPot = 0.0, elev = 0.0, special = 0
   public var snoise = 0.0, riskBonus = 0.0, safeBonus = 0.0, posW = 1.0, take = 0.3, push = 4, bank = 0.0, kick = 0.0, combo = 0.0
-  /* cpuRecord(P, 'snooker'): the level over SNK_CPU's leaner record, and never the raised cue (a jump is a foul there) */
-  public static func record(_ lv: String, kind: String) -> CPUProfile {
-    var L = level(lv)
+  /* the bumper and carom searches' noise multipliers (P.nscale, P.pscale), and the visible think time's */
+  public var nscale = 1.0, pscale = 1.0, think = 1.0, dsafe = 0, arch: String? = nil
+  /* cpuRecord(P, 'snooker'): the profile over SNK_CPU's leaner record (a personality's extra safeties kept), and never the
+     raised cue (a jump is a foul there) */
+  public static func record(_ P: CPUProfile, kind: String) -> CPUProfile {
+    var L = P
     if kind == "snooker" {
-      switch L.level { case "easy": L.sims = 10; case "hard": L.sims = 90; L.lines = 10; L.safe = 14; default: L.sims = 32; L.lines = 7 }
+      var safe: Int? = nil
+      switch L.level { case "easy": L.sims = 10; case "hard": L.sims = 90; L.lines = 10; safe = 14; default: L.sims = 32; L.lines = 7 }
+      if let s = safe { L.safe = s; if P.dsafe != 0 { L.safe = Swift.max(1, s + P.dsafe) } }
       L.elev = 0
     }
     return L
+  }
+  /* CPU_ARCH: each archetype's offsets from the level (index.html 1f) */
+  static let ARCH: [String: [String: Double]] = [
+    "allround": [:],
+    "potter": ["risk": 0.3, "safety": -0.2, "take": -0.08, "push": -2, "think": 0.7, "elev": 0.3],
+    "shotmaker": ["risk": 0.4, "safety": -0.15, "minCos": -0.1, "combo": 0.8, "bank": 0.4, "posW": -0.3, "think": 0.8, "elev": 0.6],
+    "defender": ["risk": -0.3, "safety": 0.45, "dsafe": 6, "take": 0.12, "push": 3, "kick": 0.6, "think": 1.3],
+    "positional": ["depth": 1, "posW": 0.5, "dspin": 2, "think": 1.15],
+    "breaker": ["brk": 0.1, "risk": 0.1, "think": 0.85],
+    "banker": ["bank": 1, "kick": 1, "think": 1.1],
+    "grinder": ["pnoiseK": 0.7, "risk": -0.15, "safety": 0.15, "think": 1.35],
+    "clutch": ["hillK": 0.3],
+  ]
+  static func clampD(_ v: Double, _ lo: Double, _ hi: Double) -> Double { Swift.max(lo, Swift.min(hi, v)) }
+  /* cpuProfile({ level, arch }, { hill }): a person at a level. A bare level (arch nil) is CPU_LEVELS exactly, the
+     personality knobs neutral; the noise scales computed as the page computes them, (base x hill) / base */
+  public static func make(_ lv: String, arch: String?, hill: Bool = false) -> CPUProfile {
+    let base = level(lv)
+    guard let arch else { return base }
+    let a = ARCH[arch] ?? ARCH["allround"]!, g = { (k: String) in a[k] ?? 0 }
+    let risk = g("risk"), safety = g("safety"), pos = 0.0, bankW = 0.5
+    let h = hill ? 1 + (1.25 - 1) * (a["hillK"] ?? 1) : 1.0
+    var P = base
+    P.arch = ARCH[arch] != nil ? arch : "allround"
+    P.noise = base.noise * h
+    P.pnoise = base.pnoise * (a["pnoiseK"] ?? 1) * h
+    P.snoise = clampD(P.noise * 10, 0.004, 0.08)
+    P.riskBonus = CareerLib.round(150 * risk)
+    P.safeBonus = CareerLib.round(150 * safety)
+    P.safeBar = base.safeBar + CareerLib.round(200 * safety - 150 * risk)
+    P.minCos = clampD(base.minCos + g("minCos") - 0.2 * risk, 0.12, 0.7)
+    P.safe = Swift.max(1, base.safe + Int(g("dsafe")))
+    if g("dspin") != 0 { P.spin = base.spin + Int(g("dspin")); if base.spins.isEmpty { P.spins = level("medium").spins } }
+    let depth = Int(clampD(Double((base.position ? 1 : 0) + (base.look ? 1 : 0)) + g("depth") + (pos > 0.3 ? 1 : 0), 0, 2))
+    P.position = depth >= 1; P.look = depth >= 2
+    P.plan = P.look ? Swift.max(base.plan, 1) + Int(g("depth")) : 0
+    P.kickPot = clampD(base.kickPot + (g("kick") >= 1 ? 1 : 0), 0, 1)
+    P.elev = lv == "easy" ? 0 : clampD(base.elev + g("elev"), 0, 1)
+    P.special = P.kickPot != 0 || P.elev != 0 ? Swift.max(base.special, 2) : 0
+    P.posW = clampD(1 + g("posW") + 0.8 * pos, 0.3, 2)
+    P.brk = clampD(base.brk + g("brk"), 0.6, 1)
+    P.take = clampD(0.3 + g("take") - 0.15 * risk, 0.1, 0.6)
+    P.push = Int(clampD(4 + g("push") + CareerLib.round(4 * safety), 0, 8))
+    P.bank = clampD(g("bank") + Swift.max(0, bankW - 0.6) * 2.5, 0, 1)
+    P.kick = clampD(g("kick") + Swift.max(0, bankW - 0.6) * 2.5, 0, 1)
+    P.combo = clampD(g("combo") + Swift.max(0, risk - 0.15), 0, 1)
+    P.think = a["think"] ?? 1
+    P.nscale = P.noise / base.noise; P.pscale = P.pnoise / base.pnoise
+    P.dsafe = P.safe - base.safe
+    return P
   }
   public static func level(_ lv: String) -> CPUProfile {
     switch lv {
@@ -88,6 +143,8 @@ let CPU_JUMP_E = [0.75, 0.95], CPU_SWERVE_E = 0.35
 
 public final class CPU {
   let E: RulesEngine
+  /* the person searching (cpuProfile's { level, arch } and the hill): nil arch is a bare level */
+  public var arch: String? = nil, hill = false
   var s: Sim { E.sim }
   struct Cal { var key: [Double], speed: [Double], roll: Double, keep: Double }
   var cal: Cal? = nil
@@ -235,6 +292,70 @@ public final class CPU {
   }
   func cpuAim(_ l: CPULine, _ psi: Double) -> Double { M.atan2(l.ty - 2 * s.BALL_R * M.sin(psi) - l.cy, l.tx - 2 * s.BALL_R * M.cos(psi) - l.cx) }
   func cpuPotBall(_ l: CPULine) -> Int { l.pot ?? l.n }
+  /* cpuGhost: the cue angle that sends ball t along psi from (cx, cy), or nil (the ghost off the bed, too thin, blocked) */
+  func cpuGhost(_ balls: [GBall], _ cx: Double, _ cy: Double, _ t: GBall, _ psi: Double, minCos: Double) -> (angle: Double, cos: Double, d1: Double)? {
+    let R = s.BALL_R, gx = t.x - 2 * R * M.cos(psi), gy = t.y - 2 * R * M.sin(psi)
+    if gx < R || gx > s.TL - R || gy < R || gy > s.TW - R { return nil }
+    let ax = gx - cx, ay = gy - cy, d1 = M.hypot(ax, ay)
+    if d1 < 1e-6 { return nil }
+    let cos = (ax * M.cos(psi) + ay * M.sin(psi)) / d1
+    if cos < minCos || !cpuClear(balls, cx, cy, gx, gy, t.n) { return nil }
+    return (M.atan2(ay, ax), cos, d1)
+  }
+  /* cpuBankLines (a personality's, L.bank > 0): ball t off a cushion into pocket k, the pocket mirrored across the
+     ball's centre line at that cushion, its depth over the rubber's restitution at about 1 m/s */
+  func cpuBankLines(_ balls: [GBall], _ cx: Double, _ cy: Double, _ targets: [Int], _ L: CPUProfile) -> [CPULine] {
+    var out: [CPULine] = []
+    let R = s.BALL_R, lo = R, hx = s.TL - R, hy = s.TW - R, RE = s.RAIL_E, e = Swift.max(RE[2], Swift.min(RE[0], RE[0] - RE[1]))
+    for n in targets {
+      guard let t = balls.first(where: { $0.n == n }), t.on else { continue }
+      for k in s.POCKET_AIM.indices {
+        let p = s.POCKET_AIM[k], m = s.CPU_MOUTH_N[k], side = k == 1 || k == 4
+        for (axis, at) in [(0, lo), (0, hx), (1, lo), (1, hy)] {
+          let dp = axis != 0 ? p[1] - at : p[0] - at, dt = axis != 0 ? t.y - at : t.x - at
+          if dp * dt <= 0 { continue }
+          let mx = axis != 0 ? p[0] : at - dp / e, my = axis != 0 ? at - dp / e : p[1]
+          let ex = mx - t.x, ey = my - t.y, u = axis != 0 ? (at - t.y) / ey : (at - t.x) / ex
+          if !(u > 0.02 && u < 0.98) { continue }
+          let rx = t.x + ex * u, ry = t.y + ey * u
+          if s.POCKET_AIM.enumerated().contains(where: { j, q in M.hypot(q[0] - rx, q[1] - ry) < (j == 1 || j == 4 ? s.SIDE_W : s.CORNER_W) / 2 + 1.5 * R }) { continue }
+          let l2 = M.hypot(p[0] - rx, p[1] - ry), entry = -((p[0] - rx) * m[0] + (p[1] - ry) * m[1]) / Swift.max(l2, 1e-6)
+          if entry < (side ? 0.6 : 0.5) { continue }
+          if !cpuClear(balls, t.x, t.y, rx, ry, n) || !cpuClear(balls, rx, ry, p[0], p[1], n) { continue }
+          let psi = M.atan2(ey, ex)
+          guard let c = cpuGhost(balls, cx, cy, t, psi, minCos: L.minCos) else { continue }
+          let d2 = M.hypot(rx - t.x, ry - t.y) + l2, w = 0.03 * (side ? entry : entry.squareRoot())
+          let tol = 0.5 * w * 2 * R * c.cos / (Swift.max(c.d1, 0.1) * Swift.max(d2, 0.05))
+          let l = CPULine(n: n, k: k, cx: cx, cy: cy, tx: t.x, ty: t.y, psi0: psi, psi: psi, angle: c.angle, cos: c.cos, d1: c.d1, d2: d2 * 1.3, q: M.tanh(0.8 * tol / L.noise) * L.bank)
+          l.bank = true; out.append(l)
+        }
+      }
+    }
+    return out
+  }
+  /* cpuComboLines (L.combo > 0): legal ball t into ball u (within a metre) into pocket k; the second leg cpuLine from t
+     (its tolerance at unit noise), the first t to u's ghost */
+  func cpuComboLines(_ balls: [GBall], _ cx: Double, _ cy: Double, _ targets: [Int], _ L: CPUProfile) -> [CPULine] {
+    var out: [CPULine] = []
+    let R = s.BALL_R
+    for n in targets {
+      guard let t = balls.first(where: { $0.n == n }), t.on else { continue }
+      for u in balls {
+        if !u.on || u.n == 0 || u.n == n || M.hypot(u.x - t.x, u.y - t.y) > 1 { continue }
+        for k in s.POCKET_AIM.indices {
+          let p = s.POCKET_AIM[k]
+          guard let l2 = cpuLine(balls, t.x, t.y, u, k, M.atan2(p[1] - u.y, p[0] - u.x), minCos: L.minCos, noise: 1), cpuClear(balls, cx, cy, t.x, t.y, n) else { continue }
+          let gx = u.x - 2 * R * M.cos(l2.psi), gy = u.y - 2 * R * M.sin(l2.psi), psi = M.atan2(gy - t.y, gx - t.x)
+          guard let c = cpuGhost(balls, cx, cy, t, psi, minCos: L.minCos) else { continue }
+          let tol = M.atanh(Swift.min(l2.q, 0.999)) / 0.8 * 2 * R * c.cos / Swift.max(c.d1, 0.1)
+          let l = CPULine(n: n, k: k, cx: cx, cy: cy, tx: t.x, ty: t.y, psi0: psi, psi: psi, angle: c.angle, cos: c.cos * l2.cos, d1: c.d1, d2: l2.d1 + 1.4 * l2.d2 + 0.1,
+                          q: 0.7 * M.tanh(0.8 * tol / L.noise) * L.combo)
+          l.pot = u.n; l.combo = true; out.append(l)
+        }
+      }
+    }
+    return out
+  }
 
   /* one-rail kick pots (hard) */
   func cpuKickLines(_ balls: [GBall], _ cx: Double, _ cy: Double, _ targets: [Int], _ L: CPUProfile) -> [CPULine] {
@@ -561,7 +682,7 @@ public final class CPU {
   public func cpuShot(_ g: Game, seed: Double, level: String) -> CPUShot {
     if g.kind == "bumper" { return cpuBumper(g, seed: seed, level: level) }
     if g.kind == "carom" { return cpuCarom(g, seed: seed, level: level) }
-    let L = CPUProfile.record(level, kind: g.kind)
+    let L = CPUProfile.record(CPUProfile.make(level, arch: arch, hill: hill), kind: g.kind)
     let rnd = cpuRng(seed * 2654435761 + 1), me = g.turn
     cpuCalibrate()
     func gauss() -> Double { (rnd() + rnd() + rnd() - 1.5) * 2 }
@@ -632,6 +753,14 @@ public final class CPU {
     var lines: [CPULine] = []
     for place in spots {
       for l in cpuLines(g.balls, place?[0] ?? cue.x, place?[1] ?? cue.y, targets, minCos: L.minCos, noise: L.noise) { l.place = place; lines.append(l) }
+    }
+    /* a personality's banks and combinations, from the cue ball or the two best spots in hand */
+    if L.bank != 0 || L.combo != 0 {
+      for place in spots.prefix(2) {
+        let cx = place?[0] ?? cue.x, cy = place?[1] ?? cue.y
+        if L.bank != 0 { for l in cpuBankLines(g.balls, cx, cy, targets, L) { l.place = place; lines.append(l) } }
+        if L.combo != 0 { for l in cpuComboLines(g.balls, cx, cy, targets, L) { l.place = place; lines.append(l) } }
+      }
     }
     lines = stableSorted(lines) { $0.q > $1.q }
     var special: [CPULine] = []
@@ -767,7 +896,7 @@ public final class CPU {
     if g.kind == "carom" { return "respot" }
     if o.kind == "eightBreak" || o.kind == "kitchenSpot" { return "spot" }
     if o.kind == "breakMiss" { return "break" }
-    let L = CPUProfile.level(level)
+    let L = CPUProfile.make(level, arch: arch, hill: hill)
     var t = g; t.option = nil; t.turn = o.who
     let q = cpuChance(t, o.who, L)
     return q >= L.take ? "take" : o.kind == "badBreak" ? "rebreak" : o.kind == "breakFoul" ? o.choices[1] : o.kind == "breakOff" ? "kitchen" : "pass"
@@ -821,7 +950,7 @@ public final class CPU {
     return sc - cpuDryCost(g, j, sc)
   }
   public func cpuSnookerOption(_ g: Game, level: String) -> String {
-    let o = g.option!, L = CPUProfile.level(level), who = o.who
+    let o = g.option!, L = CPUProfile.make(level, arch: arch, hill: hill), who = o.who
     var base = g; base.option = nil; base.turn = who; base.snk!.free = nil
     if o.choices.contains("free") {
       let c = g.ball(0)

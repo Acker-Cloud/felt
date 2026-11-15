@@ -21,7 +21,10 @@ import Testing
 
   @Test(arguments: 0..<CPUTests.cases.count)
   func decision(_ i: Int) {
-    let c = Self.cases[i], (cpu, g) = Self.state(c), level = c["level"] as! String, name = "game \(c["gi"]!) step \(c["k"]!) \(level)"
+    let c = Self.cases[i], (cpu, g) = Self.state(c), level = c["level"] as! String
+    /* a personality: cpuProfile({ level, arch }, { hill }) */
+    cpu.arch = c["arch"] as? String; cpu.hill = c["hill"] as? Bool ?? false
+    let name = "game \(c["gi"]!) step \(c["k"]!) \(level)" + (cpu.arch.map { " \($0)" } ?? "") + (cpu.hill ? " on the hill" : "")
     if let want = c["option"] as? String {
       #expect(cpu.cpuOption(g, level: level) == want, "\(name): option")
       return

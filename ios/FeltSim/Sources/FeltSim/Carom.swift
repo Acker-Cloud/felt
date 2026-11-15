@@ -107,7 +107,9 @@ extension RulesEngine {
 
 /* the CPU at carom (cpuCarom) */
 public struct CaromProfile: Sendable {
-  public let sims: Int, fan: Int, powers: [Double], english: [Double], refine: Int, top: Int, robust: Int, noise: Double, pnoise: Double, leave: Bool
+  public let sims: Int, fan: Int, powers: [Double], english: [Double], refine: Int, top: Int, robust: Int
+  public var noise: Double, pnoise: Double
+  public let leave: Bool
   public static func level(_ lv: String) -> CaromProfile {
     switch lv {
     case "easy": return CaromProfile(sims: 40, fan: 12, powers: [0.62], english: [0.3], refine: 12, top: 2, robust: 0, noise: 0.035, pnoise: 0.12, leave: false)
@@ -173,7 +175,9 @@ extension CPU {
     init(_ a: Double, _ p: Double, _ s: Spin) { angle = a; power = p; spin = s } }
 
   public func cpuCarom(_ g: Game, seed: Double, level: String) -> CPUShot {
-    let L = CaromProfile.level(level), rnd = cpuRng(seed * 2654435761 + 11), me = g.striker!
+    var L = CaromProfile.level(level); let P = CPUProfile.make(level, arch: arch, hill: hill)
+    if !(P.nscale == 1 && P.pscale == 1) { L.noise *= P.nscale; L.pnoise *= P.pscale }
+    let rnd = cpuRng(seed * 2654435761 + 11), me = g.striker!
     func gauss() -> Double { (rnd() + rnd() + rnd() - 1.5) * 2 }
     func play(_ r: CRec, _ intent: (String, Double)) -> CPUShot {
       let a = r.angle + gauss() * L.noise

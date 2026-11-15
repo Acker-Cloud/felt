@@ -43,7 +43,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -400,6 +400,43 @@ function build() {
     }
     /* every option state too */
     G.steps.forEach((st, k) => { if (st.out.option && st.out.winner === null) cpu.push({ gi, k, level: 'medium', option: S.cpuOption(at(k), 'medium') }); });
+  });
+  /* personalities (cpuProfile({ level, arch }, { hill })): every archetype at the three levels, on and off the hill,
+     from two positions of each game, by the page's cpuShot and cpuOption with that made profile */
+  const ARCHS = ['allround', 'potter', 'shotmaker', 'defender', 'positional', 'breaker', 'banker', 'grinder', 'clutch'];
+  games.forEach((G, gi) => {
+    setT([G.table, G.shape || null, 'regulation']);
+    const R0 = G.kind === 'carom' || G.kind === 'snooker' || G.kind === 'bumper' ? null : S.newGame(G.kind, { rules: { ruleset: G.ruleset, call: { mode: G.mode }, race: G.race === null ? undefined : G.race } }).rules;
+    const at = k => { const o = JSON.parse(JSON.stringify(k < 0 ? G.g0 : G.steps[k].out)); return R0 ? Object.assign(o, { rules: R0 }) : o; };
+    for (const k of [5, 12]) {
+      if (k >= G.steps.length) continue;
+      const g = at(k);
+      if (g.winner !== null) continue;
+      ARCHS.forEach((arch, i) => {
+        if ((gi + k + i) % 3) return;   /* a third of them: every archetype is still met in every game kind */
+        const level = ['easy', 'medium', 'hard'][(gi + i) % 3], hill = (gi + i) % 2 === 1, P = S.cpuProfile({ level, arch }, { hill });
+        if (g.option) { cpu.push({ gi, k, level, arch, hill, option: S.cpuOption(g, P) }); return; }
+        const seed = gi * 1000 + k + 31 + i, s1 = S.cpuShot(g, seed, P);
+        cpu.push({ gi, k, level, arch, hill, seed, shot: { angle: hx(s1.angle), power: hx(s1.power), spin: { x: hx(s1.spin.x), y: hx(s1.spin.y), e: hx(s1.spin.e || 0) },
+          place: s1.place ? s1.place.map(hx) : null, call: s1.call || null, intent: { type: s1.intent.type, q: hx(s1.intent.q) }, ball: s1.ball === undefined ? null : s1.ball, first: s1.first === undefined ? null : s1.first } });
+      });
+    }
+  });
+  /* banks and combinations proven where they matter: every other position of the 9-ball games (the lowest ball first,
+     so a combination is often the pot), the shotmaker (combos) and the banker (banks) at medium */
+  games.forEach((G, gi) => {
+    if (G.kind !== '9') return;
+    setT([G.table, G.shape || null, 'regulation']);
+    const R0 = S.newGame(G.kind, { rules: { ruleset: G.ruleset, call: { mode: G.mode }, race: undefined } }).rules;
+    for (let k = 1; k < Math.min(G.steps.length, 30); k += 2) {
+      const g = Object.assign(JSON.parse(JSON.stringify(G.steps[k].out)), { rules: R0 });
+      if (g.winner !== null || g.option) continue;
+      for (const arch of ['shotmaker', 'banker']) {
+        const P = S.cpuProfile({ level: 'medium', arch }), seed = gi * 1000 + k + 77, s1 = S.cpuShot(g, seed, P);
+        cpu.push({ gi, k, level: 'medium', arch, hill: false, seed, shot: { angle: hx(s1.angle), power: hx(s1.power), spin: { x: hx(s1.spin.x), y: hx(s1.spin.y), e: hx(s1.spin.e || 0) },
+          place: s1.place ? s1.place.map(hx) : null, call: s1.call || null, intent: { type: s1.intent.type, q: hx(s1.intent.q) }, ball: s1.ball === undefined ? null : s1.ball, first: s1.first === undefined ? null : s1.first } });
+      }
+    }
   });
   /* the career library (quick tournament, 6f): generated players, the match model, brackets played through. Its
      own stream. CareerData.swift is the page's constants as Swift, written from the page */

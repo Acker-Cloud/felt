@@ -133,14 +133,15 @@ final class TableModel {
 
   /* the opponent: nil for two players on one device, else the CPU's level, playing player 2 */
   let cpuLevel: String?
-  /* an exhibition (6f, 'exhibit'): both players the CPU, each at its own level */
+  /* an exhibition (6f, 'exhibit'): both players the CPU, each at its own level and with its own style (arch) */
   let exhib: [String]?
+  let exhibArch: [String]?
   /* a party (6f, 'party'): 2 to 4 people in turn on a ring ruleset; their racks won, the rack, the ruleset */
   struct Party { var names: [String], wins: [Int], rack = 0, ruleset: String }
   private(set) var party: Party?
   /* a quick tournament's match (6f, tmatch): the bracket's match, the opponent, racks won, the race in racks (a points
      race is one game, need 1), the lag's winner, and where the result goes */
-  struct TMatch { let m: Int, foe: String, level: String, need: Int, points: Bool, race: Int, lag: Int, ruleset: String; var score = [0, 0], rack = 1, done = false, counted = false }
+  struct TMatch { let m: Int, foe: String, level: String, arch: String?, need: Int, points: Bool, race: Int, lag: Int, ruleset: String; var score = [0, 0], rack = 1, done = false, counted = false }
   private(set) var tmatch: TMatch?
   @ObservationIgnored var onReport: ((Int, Int, Int, Bool) -> Void)?
   /* the handoff: the player the device is passed to (the breaker at a rack's start), until they are ready */
@@ -148,17 +149,18 @@ final class TableModel {
   @ObservationIgnored private var cpuBusy = false
   private(set) var cpuThinking = false
 
-  init(game: TableGame, cpu: String? = nil, exhib: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil) {
+  init(game: TableGame, cpu: String? = nil, exhib: [String]? = nil, exhibArch: [String]? = nil, party: (names: [String], ruleset: String)? = nil, tourney: Tourney? = nil) {
     self.game = game
     /* tourneyPlay: the player's next match, the opponent's level, the lag from the tournament's seed */
     var tm: TMatch? = nil
     if let t = tourney, let m = t.mine() {
       let foe = t.foe(m), pts = Tourney.points(t.kind)
-      tm = TMatch(m: m, foe: foe.name, level: foe.level ?? "medium", need: pts ? 1 : t.race, points: pts, race: t.race,
+      tm = TMatch(m: m, foe: foe.name, level: foe.level ?? "medium", arch: foe.arch, need: pts ? 1 : t.race, points: pts, race: t.race,
                       lag: cpuRng(Double(CareerLib.seedOf([String(t.seed), "lag", String(m)])))() < 0.5 ? 0 : 1, ruleset: t.ruleset)
     }
     cpuLevel = tm?.level ?? (exhib == nil && party == nil ? cpu : nil)
     self.exhib = exhib
+    self.exhibArch = exhibArch
     self.party = party.map { Party(names: $0.names, wins: $0.names.map { _ in 0 }, ruleset: $0.ruleset) }
     Words.cpuMode = cpuLevel != nil
     Words.names = exhib.map { $0.map { TableModel.FOES[$0] ?? "CPU" } } ?? party?.names
@@ -415,12 +417,18 @@ final class TableModel {
   var cpuTurn: Bool { (cpuLevel != nil || exhib != nil) && g != nil && g!.winner == nil && (exhib != nil || (g!.option?.who ?? g!.turn) == 1) }
   /* the level searching for the player to act now: the opponent's, or an exhibition's player's own */
   var actingLevel: String? { exhib.map { $0[min(1, g?.option?.who ?? g?.turn ?? 0)] } ?? cpuLevel }
+  /* the person searching: a tournament opponent's archetype, on the hill when either side is a rack from the match; an
+     exhibition player's own; else a bare level */
+  var actingArch: String? { exhibArch.map { $0[min(1, g?.option?.who ?? g?.turn ?? 0)] } ?? tmatch?.arch }
+  var actingHill: Bool { guard let t = tmatch, !t.points else { return false }; return t.score.contains(t.need - 1) }
   func cpuStep() {
     guard cpuTurn, !cpuBusy, rolling == nil, stroke == nil, let gm = g, let level = actingLevel else { return }
+    let arch = actingArch, hill = actingHill
     cpuBusy = true; cpuThinking = true
     let t0 = now, spec = spec, seed = Double(Int.random(in: 1...1_000_000))
     if gm.option != nil {
-      let pick = CPU(engine: engine).cpuOption(gm, level: level) ?? gm.option!.choices[0]
+      let c = CPU(engine: engine); c.arch = arch; c.hill = hill
+      let pick = c.cpuOption(gm, level: level) ?? gm.option!.choices[0]
       Task { @MainActor in
         try? await Task.sleep(for: .milliseconds(900))
         cpuBusy = false; cpuThinking = false
@@ -430,7 +438,8 @@ final class TableModel {
     }
     Task.detached(priority: .userInitiated) {
       let sim = Sim(); TableModel.setUp(sim, spec)
-      let shot = CPU(engine: RulesEngine(sim: sim)).cpuShot(gm, seed: seed, level: level)
+      let c = CPU(engine: RulesEngine(sim: sim)); c.arch = arch; c.hill = hill
+      let shot = c.cpuShot(gm, seed: seed, level: level)
       await MainActor.run { self.cpuPlay(shot, gm, t0: t0, seed: seed) }
     }
   }
@@ -455,7 +464,8 @@ final class TableModel {
     var ms = T[shot.intent.type] ?? 1300
     if shot.intent.type == "pot" || shot.intent.type == "carom" { ms += 1900 * pow(1 - min(1, max(0, shot.intent.q.isFinite ? shot.intent.q : 0.5)), 1.5) }
     if gm.inHand != nil && !gm.breakShot { ms += 500 }
-    ms *= 0.85 + 0.3 * cpuRng((seed.truncatingRemainder(dividingBy: 1e6)) * 7919 + 3)()
+    /* times the personality's pace (P.think) and a seeded jitter */
+    ms *= CPUProfile.make(actingLevel ?? "medium", arch: actingArch).think * (0.85 + 0.3 * cpuRng((seed.truncatingRemainder(dividingBy: 1e6)) * 7919 + 3)())
     return max(350, min(3500, ms.rounded()))
   }
 
