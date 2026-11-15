@@ -110,8 +110,15 @@ final class TableModel {
   var shown: [Ball] { rolling?.balls ?? balls }
   var cue: Ball? { shown.first { $0.n == cueN && $0.on } }
 
-  init(game: TableGame) {
+  /* the opponent: nil for two players on one device, else the CPU's level, playing player 2 */
+  let cpuLevel: String?
+  @ObservationIgnored private var cpuBusy = false
+  private(set) var cpuThinking = false
+
+  init(game: TableGame, cpu: String? = nil) {
     self.game = game
+    cpuLevel = ["8", "9", "10", "heyball"].contains(game.table.2) ? cpu : nil
+    Words.cpuMode = cpuLevel != nil
     sim.setTable(game.table.0, game.table.1)
     engine = RulesEngine(sim: sim)
     rerack()
@@ -163,14 +170,14 @@ final class TableModel {
   private(set) var shotAt: TimeInterval = 0
   private(set) var now: TimeInterval = 0
   func shoot() {
-    guard rolling == nil, stroke == nil, power > 0.01, g?.option == nil, g?.winner == nil else { power = 0; return }
+    guard rolling == nil, stroke == nil, power > 0.01, g?.option == nil, g?.winner == nil, !cpuTurn else { power = 0; return }
     markPower = power
     stroke = (power, nil)
   }
   private func strikeNow(_ pw: Double, _ t: TimeInterval) {
     /* a shot the rules need called: the obvious call from the guide's preview, the ball it pots and its
        pocket, else a declared safety (the page's call menu is not ported yet) */
-    if var gm = g, let need = engine.callNeed(gm) {
+    if var gm = g, !cpuTurn, let need = engine.callNeed(gm) {
       var c = ShotCall()
       if let (_, P) = guide(), let f = P.first, P.objPot >= 0 { c.ball = f; c.pocket = P.objPot; c.auto = need.auto } else { c.safety = true }
       gm.call = c; g = gm
@@ -190,6 +197,7 @@ final class TableModel {
     if let st = stroke {
       if st.t0 == nil { stroke = (st.power, now) } else if now - st.t0! >= TableModel.STROKE_MS { strikeNow(st.power, now) }
     }
+    if cpuTurn && rolling == nil && stroke == nil && !cpuBusy { cpuStep() }
     guard let tab = rolling else { lastT = nil; return }
     /* as frameBody: never backwards, at most 50 ms a frame */
     let dt = min(0.05, max(0, lastT.map { now - $0 } ?? 1.0 / 60))
@@ -289,6 +297,52 @@ final class TableModel {
     randomOrientIfRacked(gm, next)
     aimAtNearest()
   }
+  /* the CPU's turn (page 5's think): its search off the main thread on its own sim, held for the page's
+     think time (cpuThinkMs, from the search's start), then its stroke through the same cue as a player's */
+  var cpuTurn: Bool { cpuLevel != nil && g != nil && g!.winner == nil && (g!.option?.who ?? g!.turn) == 1 }
+  func cpuStep() {
+    guard cpuTurn, !cpuBusy, rolling == nil, stroke == nil, let gm = g, let level = cpuLevel else { return }
+    cpuBusy = true; cpuThinking = true
+    let t0 = now, (table, shape, _) = game.table, seed = Double(Int.random(in: 1...1_000_000))
+    if gm.option != nil {
+      let pick = CPU(engine: engine).cpuOption(gm, level: level) ?? gm.option!.choices[0]
+      Task { @MainActor in
+        try? await Task.sleep(for: .milliseconds(900))
+        cpuBusy = false; cpuThinking = false
+        if g?.option != nil { choose(pick) }
+      }
+      return
+    }
+    Task.detached(priority: .userInitiated) {
+      let sim = Sim(); sim.setTable(table, shape)
+      let shot = CPU(engine: RulesEngine(sim: sim)).cpuShot(gm, seed: seed, level: level)
+      await MainActor.run { self.cpuPlay(shot, gm, t0: t0, seed: seed) }
+    }
+  }
+  private func cpuPlay(_ shot: CPUShot, _ gm: Game, t0: TimeInterval, seed: Double) {
+    guard var g0 = g, g0.shots == gm.shots, g0.turn == gm.turn else { cpuBusy = false; cpuThinking = false; return }
+    if let p = shot.place { g0 = engine.placeCue(g0, p[0], p[1]) }
+    g0.call = shot.call; g = g0; syncBalls()
+    aim = shot.angle; spin = shot.spin
+    let think = cpuThinkMs(gm, shot, seed) / 1000, wait = max(0, think - (now - t0))
+    Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(Int(wait * 1000)))
+      cpuThinking = false
+      power = shot.power; markPower = shot.power
+      stroke = (shot.power, nil)
+      cpuBusy = false
+    }
+  }
+  /* cpuThinkMs: short on the break or an easy pot, longer on a hard one, longest on a safety or kick */
+  private func cpuThinkMs(_ gm: Game, _ shot: CPUShot, _ seed: Double) -> Double {
+    let T = ["break": 900.0, "pot": 650, "bank": 2000, "combo": 2200, "safety": 1900, "kick": 2300, "push": 1600, "blind": 1300, "kickpot": 2300, "jump": 2100, "swerve": 2100]
+    var ms = T[shot.intent.type] ?? 1300
+    if shot.intent.type == "pot" { ms += 1900 * pow(1 - min(1, max(0, shot.intent.q.isFinite ? shot.intent.q : 0.5)), 1.5) }
+    if gm.inHand != nil && !gm.breakShot { ms += 500 }
+    ms *= 0.85 + 0.3 * cpuRng((seed.truncatingRemainder(dividingBy: 1e6)) * 7919 + 3)()
+    return max(350, min(3500, ms.rounded()))
+  }
+
   private func randomOrientIfRacked(_ a: Game, _ b: Game) { if b.breakShot && !a.breakShot { randomOrient() } }
 
   private func freeSpot(_ x: Double, _ y: Double, _ others: [Ball]) -> (Double, Double) {
@@ -300,7 +354,7 @@ final class TableModel {
 
   /* ball in hand: put the cue ball at (x, y) if it fits there */
   func place(_ x: Double, _ y: Double) {
-    guard inHand, rolling == nil, let c = balls.first(where: { $0.n == cueN }) else { return }
+    guard inHand, rolling == nil, !cpuTurn, let c = balls.first(where: { $0.n == cueN }) else { return }
     if let gm = g {
       let R = sim.BALL_R, lo = R + 0.001
       let px = min(max(x, lo), sim.TL - lo), py = min(max(y, lo), sim.TW - lo)

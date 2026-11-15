@@ -12,9 +12,17 @@ struct FeltApp: App {
 
 struct Home: View {
   @State private var playing: TableGame?
+  @AppStorage("felt.opponent") private var opponent = "medium"
   var body: some View {
     NavigationStack {
       List {
+        Section {
+          Picker("Opponent", selection: $opponent) {
+            Text("2 Players").tag("two"); Text("Easy").tag("easy"); Text("Medium").tag("medium"); Text("Hard").tag("hard")
+          }
+          .pickerStyle(.segmented)
+          .accessibilityIdentifier("opponent")
+        } header: { Text("Opponent") } footer: { Text("The CPU plays 8-ball, 9-ball, 10-ball and Chinese 8-ball. Snooker and three-cushion are practice for now.") }
         Section {
           ForEach(TableGame.allCases) { g in
             Button { playing = g } label: {
@@ -26,7 +34,7 @@ struct Home: View {
             .accessibilityIdentifier("game-\(g.rawValue)")
           }
         } header: { Text("Practice") } footer: {
-          Text("The web build's physics, bit for bit. Rules, the CPU and the career come next.")
+          Text("The web build's physics, rules and CPU, bit for bit.")
         }
       }
       .navigationTitle("felt")
@@ -37,7 +45,7 @@ struct Home: View {
       let a = ProcessInfo.processInfo.arguments
       if let i = a.firstIndex(of: "-felt-game"), i + 1 < a.count { playing = TableGame(rawValue: a[i + 1]) }
     }
-    .fullScreenCover(item: $playing) { g in TableScreen(model: TableModel(game: g)) }
+    .fullScreenCover(item: $playing) { g in TableScreen(model: TableModel(game: g, cpu: opponent == "two" ? nil : opponent)) }
   }
 }
 
@@ -67,7 +75,7 @@ struct TableScreen: View {
           .accessibilityLabel("Table")
           .accessibilityIdentifier("table")
         }
-        Text(model.msg).font(.footnote).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.center)
+        Text(model.cpuThinking ? "CPU thinking" : model.msg).font(.footnote).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.center)
           .frame(maxWidth: .infinity, minHeight: 32).padding(.horizontal, 12)
           .accessibilityIdentifier("msg")
         Controls(model: model, upright: upright, back: { dismiss() })
@@ -208,11 +216,12 @@ struct Overlays: View {
       card {
         Text(Words.OPT[o.kind]?["head"] ?? o.kind).font(.headline)
         Text("\(Words.nameOf(o.who)): \(Words.OPT[o.kind]?["sub"] ?? "")").font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-        ForEach(o.choices, id: \.self) { c in
+        if model.cpuTurn { Text("CPU choosing").font(.footnote).foregroundStyle(.secondary) }
+        else { ForEach(o.choices, id: \.self) { c in
           Button { model.choose(c) } label: { Text(Words.optLabel(o.kind, c)).font(.body.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44) }
             .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2)))
             .accessibilityIdentifier("choice-\(c)")
-        }
+        } }
       }
     } else if let b = model.banner {
       VStack(spacing: 4) {

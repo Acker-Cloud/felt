@@ -2,11 +2,17 @@
    OPT_WORDS and overLine, two players on one device. */
 import FeltSim
 
+@MainActor
 enum Words {
-  static func nameOf(_ p: Int) -> String { "Player \(p + 1)" }
-  static func turnOf(_ p: Int) -> String { "\(nameOf(p)) to shoot" }
-  static func isOf(_ p: Int) -> String { "\(nameOf(p)) is" }
-  static func handWords(_ p: Int, kitchen: Bool) -> String { "\(nameOf(p)): ball in hand\(kitchen ? " behind the head string" : "")" }
+  /* against the CPU the page says "You" and "CPU" (nameOf, turnOf, isOf, handWords) */
+  static var cpuMode = false
+  static func nameOf(_ p: Int) -> String { cpuMode ? (p == 0 ? "You" : "CPU") : "Player \(p + 1)" }
+  static func turnOf(_ p: Int) -> String { cpuMode ? (p == 0 ? "Your turn" : "CPU to shoot") : "\(nameOf(p)) to shoot" }
+  static func isOf(_ p: Int) -> String { "\(nameOf(p)) \(cpuMode && p == 0 ? "are" : "is")" }
+  static func handWords(_ p: Int, kitchen: Bool) -> String {
+    let w = kitchen ? " behind the head string" : ""
+    return cpuMode ? "Ball in hand for \(p == 0 ? "you" : "the CPU")\(w)" : "\(nameOf(p)): ball in hand\(w)"
+  }
   static let handHint = ["kitchen": "Ball in hand behind the line: drag the cue ball to move it, pull the bar to shoot."]
   static func hint(_ inHand: String?) -> String { handHint[inHand ?? ""] ?? "Ball in hand: drag the cue ball to move it, pull the bar to shoot." }
 
@@ -42,13 +48,13 @@ enum Words {
 
   static func overLine(_ g: Game) -> String {
     guard let w = g.winner, let v = g.verdict, !v.why.isEmpty, v.why != "forced" else { return "Game over." }
-    let l = 1 - w, why = v.why, who = { (p: Int) in nameOf(p) }
+    let l = 1 - w, why = v.why, who = { (p: Int) in cpuMode ? (p == 0 ? "You" : "The CPU") : nameOf(p) }
     func has(_ re: String) -> Bool { why.range(of: re, options: .regularExpression) != nil }
     if has("three fouls") { return "\(who(l)) fouled three times in a row." }
     if has("\\b8\\b") {
       if has("legal") { return "\(who(w)) potted the 8 to win." }
       if has("foul") { return v.scratch ? "\(who(l)) scratched while potting the 8." : "\(who(l)) potted the 8 on a foul\(v.foul.map { " (\($0))" } ?? "")." }
-      if has("before|clear|early") { return "\(who(l)) potted the 8 before clearing their group." }
+      if has("before|clear|early") { return "\(who(l)) potted the 8 before clearing \(cpuMode && l == 0 ? "your" : "their") group." }
       if has("uncalled") { return "\(who(l)) potted the 8 in a pocket not called." }
       if has("safety") { return "\(who(l)) potted the 8 on a safety." }
     }

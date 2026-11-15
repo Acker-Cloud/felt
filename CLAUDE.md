@@ -26,7 +26,7 @@ Run these, do not guess them. Healthy output is shown so a wrong result is obvio
 | run | `npm run serve`, then http://localhost:4173 | the menu |
 | iOS physics | `cd ios/FeltSim && swift test -c release` | `Test run with 3 tests ... passed` (128 shots bit for bit) |
 | iOS goldens | `node tools/ios-golden.cjs` (after any change to sim 1a-1d) | `ios-golden: 8 tables, 128 shots, ...` |
-| iOS app | `cd ios && xcodegen generate`, then `xcodebuild test -project Felt.xcodeproj -scheme Felt -destination 'id=<sim>'` | `** TEST SUCCEEDED **` |
+| iOS app | `cd ios && xcodegen generate`, then `xcodebuild -project Felt.xcodeproj -scheme Felt -derivedDataPath /Volumes/silver/xcode/DerivedData/Felt-cli ...` (simulators in `--set /Volumes/silver/simulators`) | `** BUILD SUCCEEDED **` |
 
 ## Architecture
 
