@@ -65,15 +65,23 @@ final class TableModel {
   var rulesKind: String? { ["8": "8", "9": "9", "10": "10", "heyball": "heyball", "snooker": "snooker", "carom": "carom", "bumper": "bumper"][game.table.2] }
 
   /* the baked table (FeltRender: index.html's paintTable and vignette) for one screen size */
+  /* the table this game is played on, and one Sim set to it exactly as the model's is (the art and the CPU's
+     search build their own): a bumper table reached from the 7 ft table, as every golden reaches it */
+  let spec: (table: String, shape: String?, pockets: String)
+  nonisolated static func setUp(_ sim: Sim, _ spec: (table: String, shape: String?, pockets: String)) {
+    if spec.table == "bumper" { sim.setTable("7") }
+    sim.setPockets(spec.pockets)
+    sim.setTable(spec.table, spec.shape)
+  }
   struct Baked { let image: CGImage; let size: CGSize; let scale: CGFloat }
   private(set) var tableImage: Baked?
   @ObservationIgnored private var baking: CGSize?
   func bake(_ size: CGSize, scale: CGFloat) {
     guard size.width > 0, size.height > 0, tableImage?.size != size, baking != size else { return }
     baking = size
-    let (t, shape, look) = game.table
+    let look = game.table.2, spec = spec
     Task.detached(priority: .userInitiated) {
-      let sim = Sim(); sim.setTable(t, shape)
+      let sim = Sim(); TableModel.setUp(sim, spec)
       let m = Mapper(size: size, TL: sim.TL, TW: sim.TW)
       let p = TablePainter(sim: sim, view: m.view, dpr: Double(scale), rail: m.rail, look: TableLook.of(game: look), pageColor: "rgb(9, 9, 10)")
       let img = p.paint(width: Int((size.width * scale).rounded()), height: Int((size.height * scale).rounded())).image()
@@ -126,7 +134,14 @@ final class TableModel {
     self.game = game
     cpuLevel = cpu
     Words.cpuMode = cpuLevel != nil
-    sim.setTable(game.table.0, game.table.1)
+    /* start(): the settings' table (every pool game on its size and pockets; snooker's size; the bumper table's shape) */
+    spec = switch game {
+    case .eight, .nine, .ten: (Prefs.table, nil, Prefs.pockets)
+    case .snooker: ("snooker", Prefs.snookerTable, Prefs.pockets)
+    case .bumper: ("bumper", Prefs.bumperTable, Prefs.pockets)
+    default: (game.table.0, game.table.1, Prefs.pockets)
+    }
+    TableModel.setUp(sim, spec)
     engine = RulesEngine(sim: sim)
     rerack()
   }
@@ -141,7 +156,10 @@ final class TableModel {
   func rerack() {
     rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); potCount = 0; banner = nil
     if let k = rulesKind {
-      g = engine.newGame(k)
+      /* newGame with the settings' rules, snooker's frames and carom's race and cushions */
+      g = k == "snooker" ? engine.snookerGame(frames: Prefs.snookerFrames, first: 0)
+        : k == "carom" ? engine.caromGame(race: Prefs.caromRace, cushions: Prefs.caromCush)
+        : engine.newGame(k, rules: Prefs.rules(k))
       /* a test hook: `-felt-pots "1,9,8"` starts the rack with those balls down (the potted windows) */
       let a = ProcessInfo.processInfo.arguments
       if let i = a.firstIndex(of: "-felt-pots"), i + 1 < a.count {
@@ -180,6 +198,8 @@ final class TableModel {
   /* bumper pool: the player chose the ball to strike this turn (pickBall), so auto aim keeps it */
   @ObservationIgnored var picked = false
   func aimAtNearest() {
+    /* auto aim off: each turn keeps the aim it was left with (a new rack still aims) */
+    if !Prefs.autoAim && (g?.shots ?? 0) > 0 { return }
     /* bumper's autoAim (page 5): suggestBumper's ball unless one was picked; its line, or straight at the far cup */
     if game == .bumper, var gm = g, gm.winner == nil, let sg = CPU(engine: engine).suggestBumper(gm) {
       if !picked, let n = sg.n, n != gm.striker { gm.striker = n; g = gm; syncBalls() }
@@ -360,7 +380,7 @@ final class TableModel {
   func cpuStep() {
     guard cpuTurn, !cpuBusy, rolling == nil, stroke == nil, let gm = g, let level = cpuLevel else { return }
     cpuBusy = true; cpuThinking = true
-    let t0 = now, (table, shape, _) = game.table, seed = Double(Int.random(in: 1...1_000_000))
+    let t0 = now, spec = spec, seed = Double(Int.random(in: 1...1_000_000))
     if gm.option != nil {
       let pick = CPU(engine: engine).cpuOption(gm, level: level) ?? gm.option!.choices[0]
       Task { @MainActor in
@@ -371,7 +391,7 @@ final class TableModel {
       return
     }
     Task.detached(priority: .userInitiated) {
-      let sim = Sim(); sim.setTable(table, shape)
+      let sim = Sim(); TableModel.setUp(sim, spec)
       let shot = CPU(engine: RulesEngine(sim: sim)).cpuShot(gm, seed: seed, level: level)
       await MainActor.run { self.cpuPlay(shot, gm, t0: t0, seed: seed) }
     }
@@ -656,7 +676,7 @@ final class TableModel {
     if key == pvKey, let v = pvVal { return v }
     let dx = JSMath.cos(aim), dy = JSMath.sin(aim)
     let h = sim.aimTrace(balls, c.x, c.y, dx, dy, skip: [cueN], far: 6)
-    let P = sim.previewStart(balls, cueN: cueN, aim, pw, spin, h, game == .carom ? PV_CAROM : PV_FULL, caromNeed: game == .carom ? 3 : 0)
+    let P = sim.previewStart(balls, cueN: cueN, aim, pw, spin, h, game == .carom ? PV_CAROM : Prefs.guide == "short" ? PV_SHORT : PV_FULL, caromNeed: game == .carom ? (g?.need ?? 3) : 0)
     sim.previewRun(P)
     pvKey = key; pvVal = (h, P)
     return (h, P)

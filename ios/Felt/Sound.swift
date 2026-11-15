@@ -42,10 +42,11 @@ final class Sound {
   }
 
   func hit(_ h: Hit) {
+    guard Prefs.sound else { if h.kind == "pocket" && Prefs.haptics { haptic.impactOccurred(intensity: min(1, 0.4 + h.v / 3)) }; return }
     switch h.kind {
     case "ball": play("ball", gain: h.v / 3)
     case "rail", "jaw", "land": play("rail", gain: h.v / 3.5)
-    case "pocket": play("pocket", gain: 0.35 + h.v / 3); haptic.impactOccurred(intensity: min(1, 0.4 + h.v / 3))
+    case "pocket": play("pocket", gain: 0.35 + h.v / 3); if Prefs.haptics { haptic.impactOccurred(intensity: min(1, 0.4 + h.v / 3)) }
     case "cue": play(h.v > 6 ? "break" : "cue", gain: 0.25 + h.v / 6)
     default: break
     }

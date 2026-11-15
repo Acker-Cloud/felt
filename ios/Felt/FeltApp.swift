@@ -33,11 +33,16 @@ struct Home: View {
             }
             .accessibilityIdentifier("game-\(g.rawValue)")
           }
-        } header: { Text("Practice") } footer: {
+        } header: { Text("Games") } footer: {
           Text("The web build's physics, rules and CPU, bit for bit.")
         }
       }
       .navigationTitle("felt")
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }.accessibilityLabel("Settings").accessibilityIdentifier("settings")
+        }
+      }
       .tint(.primary)
     }
     /* a test hook, like the page's window.felt: `-felt-game "9-Ball"` opens that table */

@@ -133,6 +133,7 @@ struct TableCanvas: View {
      under-stroke so it reads on any cloth (strokeLine, guideRing). Practice has no rules: any first
      contact is legal, and only the cue ball's pot is not. */
   private func drawGuide(_ ctx: inout GraphicsContext, _ m: Mapper) {
+    if Prefs.guide == "off" { return }
     guard let c = model.cue, let (h, P) = model.guide() else { return }
     let s = model.sim, R = s.BALL_R, rp = R * m.k, dx = JSMath.cos(model.aim), dy = JSMath.sin(model.aim)
     let gx = c.x + dx * h.t, gy = c.y + dy * h.t, ov = look.ovMin
