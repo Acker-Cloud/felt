@@ -90,4 +90,20 @@ import Testing
       #expect(t.bracket.M.indices.map { CareerLib.roundName(t.fmt, t.bracket, $0) } == o["rounds"] as! [String], "\(name): round names")
     }
   }
+  /* the career engine against the page: careers created in one store (ids c1, c2, c3), the state at each checkpoint
+     the page traced, compared as JSON.stringify writes it */
+  @Test func create() {
+    let url = Bundle.module.url(forResource: "career.json", withExtension: nil, subdirectory: "Fixtures")!
+    let fx = JV.parse(try! String(contentsOf: url, encoding: .utf8))!
+    let E = CareerEngine()
+    for c in fx["careers"]!.a {
+      let r = E.create(c["profile"]!, seed: c["seed"]!.i)
+      #expect(r.ok && r.id == c["id"]!.s, "\(c["profile"]!["name"]!.s): id \(String(describing: r.id))")
+      let want = c["trace"]![0]!.s, got = E.S.stringify()
+      if got != want {
+        let w = Array(want.utf8), g = Array(got.utf8), i = (0..<Swift.min(w.count, g.count)).first { w[$0] != g[$0] } ?? Swift.min(w.count, g.count)
+        Issue.record("\(c["profile"]!["name"]!.s): first difference at \(i): ...\(String(decoding: g[Swift.max(0, i - 60)..<Swift.min(g.count, i + 60)], as: UTF8.self))... vs ...\(String(decoding: w[Swift.max(0, i - 60)..<Swift.min(w.count, i + 60)], as: UTF8.self))...")
+      }
+    }
+  }
 }

@@ -175,3 +175,51 @@ extension JV {
     return k == 1 ? digits + "e" + es : String(digits.prefix(1)) + "." + String(digits.dropFirst()) + "e" + es
   }
 }
+
+/* JS idioms for the line-for-line port: literals in insertion order, member reads that give nil for undefined, writes
+   in place (a?["k"] = v), truthiness, and the numbers and strings a JS value holds */
+extension JV: ExpressibleByDictionaryLiteral, ExpressibleByArrayLiteral, ExpressibleByIntegerLiteral, ExpressibleByFloatLiteral,
+              ExpressibleByStringLiteral, ExpressibleByBooleanLiteral, ExpressibleByNilLiteral {
+  public init(dictionaryLiteral els: (String, JV)...) { var o = JObj(); for (k, v) in els { o[k] = v }; self = .obj(o) }
+  public init(arrayLiteral els: JV...) { self = .arr(els) }
+  public init(integerLiteral v: Int) { self = .num(Double(v)) }
+  public init(floatLiteral v: Double) { self = .num(v) }
+  public init(stringLiteral v: String) { self = .str(v) }
+  public init(booleanLiteral v: Bool) { self = .bool(v) }
+  public init(nilLiteral: ()) { self = .null }
+  public static func n(_ v: Double) -> JV { .num(v) }
+  public static func n(_ v: Int) -> JV { .num(Double(v)) }
+
+  public subscript(_ k: String) -> JV? {
+    get { if case .obj(let o) = self { return o[k] }; if case .arr(let a) = self, let i = Int(k), i >= 0, i < a.count { return a[i] }; return nil }
+    set {
+      if case .obj(var o) = self { self = .null; o[k] = newValue; self = .obj(o) }
+      else if case .arr(var a) = self, let i = Int(k), i >= 0, let v = newValue { self = .null; while a.count <= i { a.append(.null) }; a[i] = v; self = .arr(a) }
+    }
+  }
+  public subscript(_ i: Int) -> JV? {
+    get { if case .arr(let a) = self { return i >= 0 && i < a.count ? a[i] : nil }; if case .obj(let o) = self { return o[String(i)] }; return nil }
+    set {
+      if case .arr(var a) = self, let v = newValue { self = .null; while a.count <= i { a.append(.null) }; a[i] = v; self = .arr(a) }
+      else if case .obj(var o) = self { self = .null; o[String(i)] = newValue; self = .obj(o) }
+    }
+  }
+  public var num: Double? { if case .num(let d) = self { return d }; return nil }
+  public var d: Double { num! }
+  public var i: Int { Int(num!) }
+  public var s: String { if case .str(let s) = self { return s }; fatalError("JV: not a string") }
+  public var str: String? { if case .str(let s) = self { return s }; return nil }
+  public var a: [JV] { if case .arr(let a) = self { return a }; fatalError("JV: not an array") }
+  public var arr: [JV]? { if case .arr(let a) = self { return a }; return nil }
+  public var o: JObj { if case .obj(let o) = self { return o }; fatalError("JV: not an object") }
+  public var isObj: Bool { if case .obj = self { return true }; return false }
+  public var isArr: Bool { if case .arr = self { return true }; return false }
+  /* JS truthiness */
+  public var truthy: Bool {
+    switch self { case .null: return false; case .bool(let b): return b; case .num(let d): return d != 0 && !d.isNaN; case .str(let s): return !s.isEmpty; default: return true }
+  }
+  /* Object.keys */
+  public var keys: [String] { if case .obj(let o) = self { return o.keys }; if case .arr(let a) = self { return a.indices.map(String.init) }; return [] }
+  public var count: Int { if case .arr(let a) = self { return a.count }; return keys.count }
+}
+public func truthy(_ v: JV?) -> Bool { v?.truthy ?? false }
