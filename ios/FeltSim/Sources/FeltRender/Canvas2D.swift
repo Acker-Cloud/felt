@@ -80,6 +80,8 @@ public final class Canvas2D {
     self.width = width; self.height = height
     cg = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
                    space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    /* a canvas starts transparent black; CG does not promise that of memory it allocates */
+    cg.clear(CGRect(x: 0, y: 0, width: width, height: height))
     /* top-left origin, y down: the canvas's device space */
     cg.translateBy(x: 0, y: CGFloat(height)); cg.scaleBy(x: 1, y: -1)
     cg.setShouldAntialias(true); cg.interpolationQuality = .high
@@ -249,6 +251,9 @@ public final class Canvas2D {
     let sigma = st.shadowBlur / 2, pad = Int(ceil(sigma * 3)) + 2
     let W = width + 2 * pad, H = height + 2 * pad
     guard let m = CGContext(data: nil, width: W, height: H, bitsPerComponent: 8, bytesPerRow: W, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.alphaOnly.rawValue) else { return }
+    /* a context made on data: nil is not promised to start clear: whatever the memory held would read as coverage
+       outside the clip (seen as a rare, load-dependent mismatch in TableImageTests) */
+    m.clear(CGRect(x: 0, y: 0, width: W, height: H))
     m.translateBy(x: CGFloat(pad), y: CGFloat(H - pad)); m.scaleBy(x: 1, y: -1)
     m.setShouldAntialias(true)
     setClip(m)

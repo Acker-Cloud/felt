@@ -35,6 +35,7 @@ public enum V3Room {
     func scaled(_ i: CGImage, _ w: Int, _ h: Int) -> CGImage {
       let c = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+      c.clear(CGRect(x: 0, y: 0, width: w, height: h))
       c.interpolationQuality = .high
       c.draw(i, in: CGRect(x: 0, y: 0, width: w, height: h))
       return c.makeImage()!
