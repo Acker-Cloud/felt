@@ -14,6 +14,15 @@ public struct CPUProfile: Sendable {
   public var minCos: Double, position: Bool, look: Bool, retry: Bool, noise: Double, pnoise: Double, brk: Double
   public var plan = 0, kickPot = 0.0, elev = 0.0, special = 0
   public var snoise = 0.0, riskBonus = 0.0, safeBonus = 0.0, posW = 1.0, take = 0.3, push = 4, bank = 0.0, kick = 0.0, combo = 0.0
+  /* cpuRecord(P, 'snooker'): the level over SNK_CPU's leaner record, and never the raised cue (a jump is a foul there) */
+  public static func record(_ lv: String, kind: String) -> CPUProfile {
+    var L = level(lv)
+    if kind == "snooker" {
+      switch L.level { case "easy": L.sims = 10; case "hard": L.sims = 90; L.lines = 10; L.safe = 14; default: L.sims = 32; L.lines = 7 }
+      L.elev = 0
+    }
+    return L
+  }
   public static func level(_ lv: String) -> CPUProfile {
     switch lv {
     case "easy": return CPUProfile(level: "easy", sims: 10, lines: 3, ladder: [1.3], spin: 0, spins: [], safe: 2, safeBar: 250, robust: 0, place: 2, minCos: 0.5,
@@ -412,6 +421,7 @@ public final class CPU {
 
   func cpuTargets(_ g: Game) -> [Int] {
     let all = E.legalTargets(g)
+    if g.kind == "snooker" { return snkNearest(g, all) }
     if g.inHand != "kitchen" { return all }
     let up = all.filter { n in g.ball(n)!.x >= s.HEAD_X }
     return up.isEmpty ? all : up
@@ -439,6 +449,7 @@ public final class CPU {
     return clamp(still ? 2 * CPU_DRY_COST * Double(dry) : M.min(CPU_DRY_MAX, CPU_DRY_COST * Double(dry)), 0, M.max(0, v + 390))
   }
   func cpuValue(_ g: Game, _ j: Game, _ L: CPUProfile) -> Double {
+    if g.kind == "snooker" { return cpuSnookerValue(g, j, L) }
     let me = g.turn, R = g.rules
     if let w = j.winner { return w == me ? 1000 : -1000 }
     var v: Double
@@ -476,6 +487,11 @@ public final class CPU {
     let R = s.BALL_R
     if g.inHand == "kitchen" {
       for x in [s.HEAD_X - 0.02, s.HEAD_X - 0.2, s.HEAD_X - 0.4] { var y = 0.12; while y < s.TW - 0.1 { add(x, y); y += 0.1 } }
+    } else if g.inHand == "D" {
+      for dx in [0.01, 0.1, 0.2] {
+        let h = M.sqrt(M.max(0, s.D_R * s.D_R - dx * dx)) - 0.005
+        for i in -4...4 { add(s.HEAD_X - dx, s.TW / 2 + h * Double(i) / 4) }
+      }
     } else {
       let cue = g.ball(0)!
       if cue.on { add(cue.x, cue.y) }
@@ -490,7 +506,7 @@ public final class CPU {
     }
     var out = Array(stableSorted(keys.map { best[$0]! }) { $0.q > $1.q }.prefix(L.place)).map { [$0.x, $0.y] }
     if !seen.isEmpty { let sp = seen.dropFirst().reduce(seen[0]) { a, b in b.D < a.D ? b : a }; out.append([sp.x, sp.y]) }
-    var x = g.inHand == "kitchen" ? s.HEAD_X - 0.02 : s.TL / 4
+    var x = g.inHand == "kitchen" || g.inHand == "D" ? s.HEAD_X - 0.02 : s.TL / 4
     while out.isEmpty && x >= R {
       var y = s.TW / 2, i = 0
       while y > R && y < s.TW - R {
@@ -544,7 +560,7 @@ public final class CPU {
 
   public func cpuShot(_ g: Game, seed: Double, level: String) -> CPUShot {
     if g.kind == "carom" { return cpuCarom(g, seed: seed, level: level) }
-    let L = CPUProfile.level(level)
+    let L = CPUProfile.record(level, kind: g.kind)
     let rnd = cpuRng(seed * 2654435761 + 1), me = g.turn
     cpuCalibrate()
     func gauss() -> Double { (rnd() + rnd() + rnd() - 1.5) * 2 }
@@ -561,7 +577,7 @@ public final class CPU {
       if spin.e != 0 { sp.e = clamp(spin.e + gauss() * M.max(0.01, 12 * L.noise), 0.05, ELEV_MAX) }
       return CPUShot(angle: a, power: p, spin: sp, place: g.inHand != nil ? place : nil, call: call, intent: intent)
     }
-    if g.breakShot {
+    if g.breakShot && g.kind != "snooker" {
       let objs = g.balls.filter { $0.on && $0.n > 0 }
       let head = (!is8(g.kind) && g.kind != "straight" ? objs.first { $0.n == 1 } : nil) ?? objs.dropFirst().reduce(objs[0]) { a, b in b.x < a.x ? b : a }
       let place = [s.HEAD_X - 0.03, s.TW / 2 + (rnd() - 0.5) * 0.3]
@@ -714,6 +730,7 @@ public final class CPU {
     if L.safe > 0 && (recs.isEmpty || pool().reduce(-Double.infinity) { M.max($0, worth($1, $1.mean)) } < L.safeBar) {
       var safes: [Safe] = [], got: [Rec] = []
       for place in spots.count > 2 ? [spots[0], spots[spots.count - 1]] : spots { safes += cpuSafeties(g, place?[0] ?? cue.x, place?[1] ?? cue.y, targets, place) }
+      if g.kind == "snooker" && g.breakShot { safes += snkBreaks(g) }
       for i in safes.indices { safes[i].call = safeCall; if L.kick != 0 && safes[i].kick { safes[i].pri += 2 * L.kick } }
       if g.pushAvail && g.rules.pushOut {
         var push = ShotCall(); push.push = true
@@ -745,6 +762,7 @@ public final class CPU {
   /* the CPU's answer to a choice pending for it */
   public func cpuOption(_ g: Game, level: String) -> String? {
     guard let o = g.option else { return nil }
+    if g.kind == "snooker" { return cpuSnookerOption(g, level: level) }
     if g.kind == "carom" { return "respot" }
     if o.kind == "eightBreak" || o.kind == "kitchenSpot" { return "spot" }
     if o.kind == "breakMiss" { return "break" }
@@ -752,5 +770,70 @@ public final class CPU {
     var t = g; t.option = nil; t.turn = o.who
     let q = cpuChance(t, o.who, L)
     return q >= L.take ? "take" : o.kind == "badBreak" ? "rebreak" : o.kind == "breakFoul" ? o.choices[1] : o.kind == "breakOff" ? "kitchen" : "pass"
+  }
+
+  // MARK: snooker (sim 1j's CPU)
+
+  static let SNK_NEAR = 7
+  func snkNearest(_ g: Game, _ all: [Int]) -> [Int] {
+    if all.count <= CPU.SNK_NEAR { return all }
+    let c = g.ball(0)!
+    let from: [[Double]] = g.inHand != nil || !c.on ? [[s.HEAD_X - 0.05, s.TW / 2 - 0.6 * s.D_R], [s.HEAD_X - 0.05, s.TW / 2 + 0.6 * s.D_R]] : [[c.x, c.y]]
+    func key(_ n: Int) -> Double {
+      let b = g.ball(n)!
+      let d = from.dropFirst().reduce(M.hypot(b.x - from[0][0], b.y - from[0][1])) { M.min($0, M.hypot(b.x - $1[0], b.y - $1[1])) }
+      return d + (from.contains { cpuClear(g.balls, $0[0], $0[1], b.x, b.y, n) } ? 0 : 10)
+    }
+    var k: [Int: Double] = [:]
+    for n in all { k[n] = key(n) }
+    return Array(stableSorted(all) { k[$0]! < k[$1]! }.prefix(CPU.SNK_NEAR))
+  }
+  func snkBreaks(_ g: Game) -> [Safe] {
+    let reds = g.balls.filter { $0.on && isRed($0.n) }, R2 = 2 * s.BALL_R
+    var out: [Safe] = []
+    if reds.isEmpty { return out }
+    for sd in [1.0, -1] {
+      let t = reds.dropFirst().reduce(reds[0]) { a, b in sd * b.y * 10 + b.x > sd * a.y * 10 + a.x ? b : a }, place = [s.HEAD_X - 0.01, s.TW / 2 + sd * 0.6 * s.D_R]
+      if !E.canPlace(g, place[0], place[1]) { continue }
+      let D = M.hypot(t.x - place[0], t.y - place[1]), base = M.atan2(t.y - place[1], t.x - place[0])
+      for (i, th) in [0.88, 0.8, 0.94].enumerated() {
+        for (j, f) in [2.3, 2, 2.6].enumerated() {
+          out.append(Safe(angle: base + sd * M.asin(th * R2 / D), power: cpuPower(cpuSpeedFor(D + f * s.TL)), place: place, pri: 10 - Double(i) - Double(j) - (sd < 0 ? 0.5 : 0)))
+        }
+      }
+    }
+    return stableSorted(out) { $0.pri > $1.pri }
+  }
+  func snkLeave(_ j: Game) -> Double {
+    guard let c = j.ball(0), c.on, j.inHand == nil else { return 0 }
+    let d = E.snookerOn(j).reduce(9.0) { m, n in let b = j.ball(n)!; return M.min(m, M.hypot(b.x - c.x, b.y - c.y)) }
+    return 40 * M.min(1, d / (s.TL / 2)) + (c.x < s.HEAD_X ? 25 * (1 - c.x / s.HEAD_X) : 0)
+  }
+  func cpuSnookerValue(_ g: Game, _ j: Game, _ L: CPUProfile) -> Double {
+    let me = g.turn, v = j.verdict!, sv = v.snk!
+    if let w = j.winner { return w == me ? 1000 : -1000 }
+    if let fo = sv.frameOver { return fo.winner == me ? 900 : -900 }
+    var sc: Double
+    if v.foul != nil { sc = -400 - 25 * Double(sv.pen) }
+    else if j.turn == me { sc = 300 + 25 * Double(sv.pts) + (L.position ? 250 * L.posW * cpuChance(j, me, L) : 0) }
+    else { sc = (L.position ? -250 * cpuChance(j, j.turn, L) : 0) + snkLeave(j) }
+    return sc - cpuDryCost(g, j, sc)
+  }
+  public func cpuSnookerOption(_ g: Game, level: String) -> String {
+    let o = g.option!, L = CPUProfile.level(level), who = o.who
+    var base = g; base.option = nil; base.turn = who; base.snk!.free = nil
+    if o.choices.contains("free") {
+      let c = g.ball(0)
+      func far(_ n: Int) -> Double { let b = g.ball(n)!; if let c, c.on, g.inHand == nil { return M.hypot(b.x - c.x, b.y - c.y) }; return 0 }
+      var best: Int? = nil, bq = -Double.infinity
+      for f in E.snkFreeBalls(base) {
+        var t = base; t.snk!.free = f
+        let q = cpuChance(t, who, L) - far(f) * 1e-3
+        if q > bq { bq = q; best = f }
+      }
+      if let best { return "free:\(best)" }
+    }
+    if o.choices.contains("replace") && cpuChance(base, who, L) < L.take { return "replace" }
+    return "play"
   }
 }

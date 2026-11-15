@@ -118,7 +118,7 @@ final class TableModel {
 
   init(game: TableGame, cpu: String? = nil) {
     self.game = game
-    cpuLevel = ["8", "9", "10", "heyball", "carom"].contains(game.table.2) ? cpu : nil
+    cpuLevel = cpu
     Words.cpuMode = cpuLevel != nil
     sim.setTable(game.table.0, game.table.1)
     engine = RulesEngine(sim: sim)

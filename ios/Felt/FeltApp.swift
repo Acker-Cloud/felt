@@ -22,7 +22,7 @@ struct Home: View {
           }
           .pickerStyle(.segmented)
           .accessibilityIdentifier("opponent")
-        } header: { Text("Opponent") } footer: { Text("The CPU plays every game but snooker, which is two players for now.") }
+        } header: { Text("Opponent") } footer: { Text("The CPU plays every game at three levels, the web build's own search.") }
         Section {
           ForEach(TableGame.allCases) { g in
             Button { playing = g } label: {
