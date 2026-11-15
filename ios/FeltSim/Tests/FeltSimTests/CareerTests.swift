@@ -128,6 +128,38 @@ import Testing
         if E.digest() != step["digest"]!.s { Issue.record("\(name) step \(k): digest \(E.digest()) vs \(step["digest"]!.s)"); break }
       }
     }
+    CareerTests.replayAPI(E, fx["api"]!.a)
+  }
+
+  /* the rest of the API, replayed on the last career as the page called it: each answer and the digest after it */
+  static func replayAPI(_ E: CareerEngine, _ steps: [JV]) {
+    let ok = { (why: String?) -> JV in why == nil ? ["ok": true] : ["ok": false, "why": .str(why!)] }
+    for _ in 0..<10 { if E.advance(week: true) == "match" { break } }
+    var k = 0
+    func rec(_ what: String, _ out: JV) {
+      guard k < steps.count else { Issue.record("api: \(what) past the page's \(steps.count) steps"); return }
+      let want = steps[k]; k += 1
+      #expect(want["what"]!.s == what, "api step \(k - 1): \(what) vs \(want["what"]!.s)")
+      #expect(out.stringify() == want["out"]!.s, "api \(what): \(out.stringify().prefix(400)) vs \(want["out"]!.s.prefix(400))")
+      #expect(E.digest() == want["digest"]!.s, "api \(what): digest")
+    }
+    rec("next", E.nextMatch())
+    E.simMatch()
+    for o in E.S["off"]!.a { let id = o["id"]!.s; rec("accept " + id, ok(E.accept(id))) }
+    let shop = CareerEngine.c("SHOP").a.map { $0["id"]!.s }
+    for id in shop { rec("buy " + id, ok(E.buy(id))) }
+    for id in shop { rec("equip " + id, ["ok": .bool(E.equip(id))]) }
+    rec("equipped", E.equipped())
+    for d in CareerEngine.c("DRILLS").a.prefix(2) { for sc in [40, 85, 100, 60] { rec("practice \(d["id"]!.s) \(sc)", E.practice(d["id"]!.s, sc)) } }
+    rec("assist", E.assist())
+    rec("options", E.setOptions(purity: false, variance: true))
+    rec("assist2", E.assist())
+    var pr = E.S["profile"]!; pr["name"] = "Siobhan Two"; pr["nick"] = "S2"
+    rec("edit", E.editProfile(pr))
+    for _ in 0..<3 { if E.advance(week: true) == "match" { E.simMatch() } }
+    for o in E.S["off"]!.a { let id = o["id"]!.s; rec("decline " + id, ["ok": .bool(E.decline(id))]) }
+    rec("retire", E.retire())
+    #expect(k == steps.count, "api: \(k) of the page's \(steps.count) steps")
   }
   /* saves against the page's: the store's every key and value at each mark, and each call's answer */
   @Test func saves() {
