@@ -389,3 +389,17 @@ extension CareerEngine {
     }
   }
 }
+
+/* Career.toDefend(weeks): circuit points of yours leaving the 52-week window within the weeks, by circuit (local, which
+   counts for the season, never) */
+extension CareerEngine {
+  public func toDefend(_ weeks: Int = 4) -> [(String, Int)] {
+    let gw = gweek(S["day"]!.i), CI = Self.c("CIRCUITS").a.map { $0.s }
+    var out: [(String, Int)] = []
+    for a in S["aw"]!.a where a[0]!.i == Self.HUMAN && a[1]!.i > 0 && a[4]!.i <= gw - 52 + weeks {
+      let k = CI[a[1]!.i]
+      if let i = out.firstIndex(where: { $0.0 == k }) { out[i].1 += a[3]!.i } else { out.append((k, a[3]!.i)) }
+    }
+    return out
+  }
+}

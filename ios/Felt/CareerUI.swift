@@ -1087,6 +1087,8 @@ struct CareerHub: View {
       CareerBracket(store: store, id: id)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-calendar") {
       if ProcessInfo.processInfo.arguments.contains("-felt-career-event"), let id = nm["event"]?.str { CareerEvent(store: store, id: id) } else { CareerCalendar(store: store) }
+    } else if ProcessInfo.processInfo.arguments.contains("-felt-career-rankings") {
+      CareerRankings(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-shop") {
       CareerShop(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-sponsors") {
@@ -1139,27 +1141,57 @@ struct CareerReview: View {
 }
 
 /* the rankings: a circuit, a game, or the season's points; the player's row in weight 700 */
+/* PAGES.rankings: Rankings over the list's name; Circuit, Season, Your Game; on Circuit, Local to World; the top 30 and
+   you after them (rank, name, nation and tier, up or down since a week ago; points); the note: your place and the
+   circuit points leaving the 52-week window in the next 4 weeks */
 struct CareerRankings: View {
   @Bindable var store: CareerStore
-  @State private var key = "local"
+  @State private var by = "circuit"
+  @State private var circ = "local"
   var body: some View {
     let _ = store.rev
-    let keys = CareerEngine.const("CIRCUITS").a.map { $0.s } + ["season"] + CareerEngine.const("DISCS").a.map { $0.s }
+    let E = store.E, pr = E.S["profile"]!, disc = pr["disc"]!.s
+    let CI = CareerStore.T("CIRCUITS").a.map { $0.s }, names = CareerStore.T("CIRC_NAMES").a.map { $0.s }
+    let c = circ
+    let key = by == "circuit" ? c : by == "season" ? "season" : disc
+    let all = E.rankings(key, top: 400).a, me = all.first { $0["human"] == true }
+    let shown = Array(all.prefix(30)) + (me.map { $0["rank"]!.i > 30 ? [$0] : [] } ?? [])
+    let def = E.toDefend(4)
     List {
-      Picker("Ranking", selection: $key) { ForEach(keys, id: \.self) { k in Text(CareerStore.game(k) != nil ? CareerStore.gameName(k) : k.capitalized).tag(k) } }
-      let rows = store.E.rankings(key, top: 50).a
-      if rows.isEmpty { Text("No points yet.").foregroundStyle(.secondary) }
-      ForEach(rows.indices, id: \.self) { i in
-        let r = rows[i], me = r["human"] == true
-        HStack {
-          Text("\(r["rank"]!.i)").monospacedDigit().frame(width: 32, alignment: .trailing).foregroundStyle(.secondary)
-          Text(r["name"]!.s).fontWeight(me ? .bold : .regular)
-          Spacer()
-          Text(JV.numberString(r["pts"]!.d)).monospacedDigit().fontWeight(me ? .bold : .regular)
+      CareerTitle(kick: "Rankings", title: by == "circuit" ? names[CI.firstIndex(of: c) ?? 0] : by == "season" ? "This Season" : CareerStore.gameName(disc))
+      Section {
+        VStack(spacing: 8) {
+          Picker("Rankings", selection: $by) { Text("Circuit").tag("circuit"); Text("Season").tag("season"); Text("Your Game").tag("disc") }.pickerStyle(.segmented)
+          if by == "circuit" {
+            /* five choices: a pop-up, as the page's cvSeg makes one past four */
+            ModePop(selection: $circ, items: Array(zip(CI, ["Local", "Region", "Nation", "Pro", "World"])))
+          }
         }
+        .labelsHidden()
       }
+      .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+      Section {
+        if shown.isEmpty { Text("No points yet on this list.").font(.system(size: 15)).foregroundStyle(.secondary) }
+        ForEach(Array(shown.enumerated()), id: \.offset) { _, x in
+          let mv = x["move"]?.i ?? 0, isMe = x["human"] == true
+          HStack(spacing: 12) {
+            Text("\(x["rank"]!.i)").font(.system(size: 15, weight: .bold)).monospacedDigit().frame(width: 32)
+            VStack(alignment: .leading, spacing: 1) {
+              Text(x["name"]!.s).font(.system(size: 17, weight: isMe ? .bold : .regular))
+              Text("\(CareerWords.natName(x["nat"]!.s)), tier \(x["tier"]!.i)" + (mv != 0 ? ", \(mv > 0 ? "up" : "down") \(abs(mv))" : "")).font(.system(size: 15)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("\(x["pts"]!.i) pts").font(.system(size: 15)).foregroundStyle(.secondary).monospacedDigit()
+          }
+        }
+      } footer: {
+        Text((me.map { "You: number \($0["rank"]!.i) of \(all.count). " } ?? "You are not on this list yet. ")
+             + (def.isEmpty ? "Circuit points count for 52 weeks; local points for the season." : "Points leaving the 52-week window in the next 4 weeks: \(def.map { "\($0.1) (\($0.0))" }.joined(separator: ", ")).")).font(.system(size: 13))
+      }
+      .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
     }
-    .navigationTitle("Rankings")
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
   }
 }
 
