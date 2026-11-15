@@ -46,6 +46,23 @@ struct Home: View {
         }.frame(minHeight: 44, alignment: .leading)
       }
       .accessibilityIdentifier("solo-tricks")
+      /* #dailyBtn: the day's number on a calendar, today's shot, the streak (or Done today) */
+      let day = Rec.today(), st = DailyStore.streak(day), done = DailyStore.done(day), dt = dailyTrick(day)
+      Button { tricking = PracticeGo(layout: "daily") } label: {
+        HStack(spacing: 12) {
+          Text("\(Int(day.suffix(2)) ?? 1)").font(.system(size: 13, weight: .bold)).monospacedDigit().frame(width: 30, height: 30)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color(white: 0.24))).foregroundStyle(.white).accessibilityHidden(true)
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Daily Shot").font(.body.weight(.semibold)).foregroundStyle(.primary)
+            Text(dt.title).font(.footnote).foregroundStyle(.secondary)
+          }
+          Spacer()
+          if done { Label("Done today", systemImage: "checkmark").labelStyle(.titleAndIcon).font(.footnote.weight(.semibold)).foregroundStyle(.secondary) }
+          else if st > 0 { Label("\(st)", systemImage: "flame.fill").font(.footnote.weight(.semibold)).foregroundStyle(.secondary) }
+        }.frame(minHeight: 44)
+      }
+      .accessibilityLabel("Daily Shot, \(DrillStore.dayWords(day)): \(dt.title). " + (done ? "Played today, day streak \(st)." : st > 0 ? "Day streak \(st): play today to keep it." : "A new shot every day."))
+      .accessibilityIdentifier("solo-daily")
       NavigationLink { DrillsList { drilling = PracticeGo(layout: $0) } } label: {
         VStack(alignment: .leading, spacing: 2) {
           Text("Drills").font(.body.weight(.semibold))
@@ -1482,7 +1499,7 @@ struct TrickResult: View {
               .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2))).accessibilityIdentifier("trickShow")
           }
         }
-        Button { model.startTrick(TRICKS[(res.i + 1) % TRICKS.count].id) } label: { Text(res.i == TRICKS.count - 1 ? "First" : "Next").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+        Button { if res.daily { back() } else { model.startTrick(TRICKS[(res.i + 1) % TRICKS.count].id) } } label: { Text(res.daily ? "Home" : res.i == TRICKS.count - 1 ? "First" : "Next").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("trickNext")
         Button("Back to Trick Shots", action: back).frame(maxWidth: .infinity, minHeight: 44).foregroundStyle(.primary)
       }

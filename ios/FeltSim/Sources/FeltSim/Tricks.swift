@@ -259,3 +259,13 @@ extension RulesEngine {
     return Sim.Shot(angle: s[0], power: s[1], spin: s.count > 4 && s[4] != 0 ? Spin(x: s[2], y: s[3], e: s[4] * Double.pi / 180) : Spin(x: s[2], y: s[3]))
   }
 }
+
+/* the daily shot (page 5s): the day's number since the epoch (dayNum: a yyyy-mm-dd day as UTC midnight, in days) and its
+   shot, five classics on from the day before, so every one comes round and none twice running */
+public func dayNum(_ s: String) -> Int {
+  let p = s.split(separator: "-").map { Int($0)! }
+  var c = DateComponents(); c.year = p[0]; c.month = p[1]; c.day = p[2]
+  var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+  return Int((cal.date(from: c)!.timeIntervalSince1970 * 1000 / 864e5).rounded())
+}
+public func dailyTrick(_ day: String) -> Trick { let L = DAILY_TRICKS.count; return DAILY_TRICKS[(((dayNum(day) * 5) % L) + L) % L] }

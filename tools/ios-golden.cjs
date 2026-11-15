@@ -784,7 +784,17 @@ ${D.NAT.map(n => `    (${q(n.id)}, ${q(n.name)}, ${q(n.first)}, ${q(n.last)}, ${
       drills.sets.push({ table: t, pockets: pk, rows });
     }
   }
-  return { math, career, careerData, jv, drills: JSON.stringify(drills), tricks: JSON.stringify(tricks), practice: JSON.stringify(practice), hero: JSON.stringify({ heroes }), v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
+  /* 5s, the daily shot: the page's own dayNum and dailyTrick (cut from section 5) over 800 days, across year ends,
+     leap days and before 1970 */
+  const daily = { days: [] };
+  {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8'), cut = re => { const m = src.match(re); if (!m) throw new Error('daily: ' + re); return m[0]; };
+    const fn = new Function('TRICKS', cut(/const dayNum = [^\n]*/) + '\nconst DAILY_TRICKS = TRICKS.filter(c => !c.group);\n' + cut(/const dailyTrick = [^\n]*/).replace('(day = today())', '(day)') + '\nreturn { dayNum, dailyTrick };')(S.TRICKS);
+    const pad = n => String(n).padStart(2, '0'), at = t => { const d = new Date(t); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`; };
+    const starts = [Date.UTC(2026, 0, 1), Date.UTC(1999, 11, 20), Date.UTC(2028, 1, 20), Date.UTC(1969, 11, 25), Date.UTC(2038, 0, 10)];
+    for (const t0 of starts) for (let i = 0; i < 160; i++) { const day = at(t0 + i * 864e5); daily.days.push([day, fn.dayNum(day), fn.dailyTrick(day).id]); }
+  }
+  return { math, career, careerData, jv, daily: JSON.stringify(daily), drills: JSON.stringify(drills), tricks: JSON.stringify(tricks), practice: JSON.stringify(practice), hero: JSON.stringify({ heroes }), v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
 }
 /* tests/ios-check.cjs rebuilds both in memory and requires the committed files to match */
 module.exports = { build, OUT, loadFd };
@@ -802,6 +812,7 @@ if (require.main === module) {
   fs.writeFileSync(path.join(OUT, 'practice.json'), b.practice);
   fs.writeFileSync(path.join(OUT, 'tricks.json'), b.tricks);
   fs.writeFileSync(path.join(OUT, 'drills.json'), b.drills);
+  fs.writeFileSync(path.join(OUT, 'daily.json'), b.daily);
   fs.writeFileSync(path.join(__dirname, '..', 'ios', 'FeltSim', 'Sources', 'FeltSim', 'CareerData.swift'), b.careerData);
   const steps = b.cases.reduce((a, c) => a + c.result.steps, 0);
   console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${b.games.length} games (${b.games.reduce((a, g) => a + g.steps.length, 0)} judgements), ${b.cpuCases.length} CPU decisions, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);

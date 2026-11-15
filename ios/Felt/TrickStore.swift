@@ -5,6 +5,26 @@
 import Foundation
 import FeltSim
 
+/* felt.daily.v1: the day last scored, the streak, the best streak, whether that day's try was made (loadDaily: cleaned) */
+struct DailyRec { var last: String? = nil, streak = 0, best = 0, made = false }
+enum DailyStore {
+  static let KEY = "felt.daily.v1"
+  static var rec: DailyRec {
+    get {
+      var d = DailyRec()
+      guard let o = TrickStore.json(KEY) as? [String: Any] else { return d }
+      if let l = o["last"] as? String, DrillStore.realDay(l) { d.last = l }
+      if let s = TrickStore.int(o["streak"]), s > 0, d.last != nil { d.streak = s }
+      if let b = TrickStore.int(o["best"]), b > 0 { d.best = b }
+      d.best = max(d.best, d.streak); d.made = (o["made"] as? Bool) == true
+      return d
+    }
+    set { TrickStore.put(KEY, ["last": newValue.last as Any? ?? NSNull(), "streak": newValue.streak, "best": newValue.best, "made": newValue.made]) }
+  }
+  /* the streak as it stands on day: one whose last day is before yesterday has lapsed (a last day after today is none) */
+  static func streak(_ day: String = Rec.today()) -> Int { let r = rec; guard let l = r.last else { return 0 }; let g = dayNum(day) - dayNum(l); return g == 0 || g == 1 ? r.streak : 0 }
+  static func done(_ day: String = Rec.today()) -> Bool { rec.last == day }
+}
 enum TrickStore {
   static let TRICKS_KEY = "felt.tricks", TRIES_KEY = "felt.trickTries.v1", SCORE_KEY = "felt.trickScore.v2"
   static func json(_ k: String) -> Any? { UserDefaults.standard.string(forKey: k).flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } }

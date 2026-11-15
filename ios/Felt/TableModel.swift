@@ -174,8 +174,10 @@ final class TableModel {
         T.stars = trickStars(T.attempts)
         var best = TrickStore.best; if T.stars > (best[c.id] ?? 0) { best[c.id] = T.stars; TrickStore.best = best }
       }
-      let val = trickVal(c.id)
+      let val = T.daily == nil ? trickVal(c.id) : 0
       T.got = 0; T.runOver = false; T.runTry = 0
+      /* a make on the day's counted try is remembered */
+      if let d = T.daily, d.live, j.ok { var R = DailyStore.rec; if !R.made { R.made = true; DailyStore.rec = R } }
       if val > 0 {
         var sc = TrickStore.score
         let n = (sc.run[c.id] ?? 0) + 1; T.runTry = n
@@ -187,7 +189,7 @@ final class TableModel {
     }
     trick = T
     /* showTrickRes: the head, the words (a run's attempt and points, or the stars by try), the score now */
-    let i = TRICKS.firstIndex { $0.id == c.id } ?? 0, val = trickVal(c.id), n = T.runTry, a = T.attempts
+    let i = TRICKS.firstIndex { $0.id == c.id } ?? 0, val = T.daily == nil ? trickVal(c.id) : 0, n = T.runTry, a = T.attempts
     let why: String
     if T.demo { why = j.ok ? "One way to make it. Your turn." : j.why }
     else if val > 0 {
@@ -198,8 +200,15 @@ final class TableModel {
       let best = TrickStore.best[c.id] ?? 0
       why = j.ok ? "\(a == 1 ? "First try" : "On try \(a)"): \(T.stars) star\(T.stars == 1 ? "" : "s")." + (best > T.stars ? " Best: \(best)." : "") : "\(j.why) Tries: \(a)."
     }
+    /* the daily shot says what the try did for the streak: the first counts, the rest are practice */
+    var dayWords = ""
+    if let d = T.daily, !T.demo {
+      let R = DailyStore.rec
+      dayWords = d.live ? " Day streak: \(R.streak)\(R.streak == R.best && R.best > 1 ? ", your best" : "")." : " Practice: today's try is in."
+    }
     let pts = val > 0 ? (j.ok && !T.demo && T.got > 0 ? "\(T.got) of \(val)" : "") : (j.ok && !T.demo ? String(repeating: "★", count: T.stars) + String(repeating: "☆", count: 3 - T.stars) : "")
-    trickRes = TrickRes(ok: j.ok, why: why, head: T.demo ? (j.ok ? "Like that" : "Close") : j.ok ? "Made it" : "Not quite", kind: "Trick shot \(i + 1) of \(TRICKS.count): \(c.title)", pts: pts, demo: T.demo, i: i)
+    trickRes = TrickRes(ok: j.ok, why: why + dayWords, head: T.demo ? (j.ok ? "Like that" : "Close") : j.ok ? "Made it" : "Not quite",
+                        kind: T.daily.map { "Daily shot, \(DrillStore.dayWords($0.day)): \(c.title)" } ?? "Trick shot \(i + 1) of \(TRICKS.count): \(c.title)", pts: pts, demo: T.demo, i: i, daily: T.daily != nil)
     msg = why
     sound.cue(j.ok ? "win" : "foul")
   }
@@ -241,8 +250,34 @@ final class TableModel {
   /* startTrick again (Try Again), or another (Next) */
   func startTrick(_ id: String) {
     guard let c = trickById(id) else { return }
+    let daily = trick?.id == c.id ? trick?.daily : nil
     trick = TrickSession(id: c.id, attempts: trick?.id == c.id ? trick!.attempts : (TrickStore.tries[c.id] ?? 0))
+    if let d = daily { trick!.daily = (d.day, !DailyStore.done(d.day), false, false) }
     rerack()
+    if let d = trick?.daily, let c = trickById(trick!.id) { flashDue = ("Daily shot: \(c.title)", d.scored ? c.goal : "\(c.goal) Practice: today's try is in.", 2.4) }
+  }
+  /* startDaily: today's shot, its first try scored for the streak */
+  func startDaily() {
+    let day = Rec.today(), c = dailyTrick(day)
+    trick = TrickSession(id: c.id, attempts: TrickStore.tries[c.id] ?? 0)
+    trick!.daily = (day, !DailyStore.done(day), false, false)
+    rerack()
+    flashDue = ("Daily shot: \(c.title)", trick!.daily!.scored ? c.goal : "\(c.goal) Practice: today's try is in.", 2.4)
+  }
+  /* scoreDaily: the day's scored try counts as it is struck (quitting mid-roll cannot throw it away); the streak moves
+     once a day, a clock gone back starts a new one */
+  private func scoreDaily() {
+    guard var T = trick, var d = T.daily, d.scored, !T.demo else { return }
+    let was = d.counted
+    d.scored = false
+    var R = DailyStore.rec
+    let gap = R.last.map { dayNum(d.day) - dayNum($0) } ?? Int.max
+    if gap != 0 {
+      R.streak = gap == 1 ? R.streak + 1 : 1; R.best = max(R.best, R.streak); R.last = d.day; R.made = false
+      d.counted = true; DailyStore.rec = R
+    }
+    d.live = !was && d.counted
+    T.daily = d; trick = T
   }
   /* showMe: the layout again and the stored solution played as a shot (not an attempt) */
   func showMe() {
@@ -366,8 +401,11 @@ final class TableModel {
 
   /* a trick shot session (startTrick): the challenge, attempts this run of the list, a Show me in play, and the last
      attempt's result for the sheet (showTrickRes) */
-  struct TrickRes { var ok: Bool, why: String, head: String, kind: String, pts: String, demo: Bool, i: Int }
-  struct TrickSession { var id: String, attempts: Int, demo = false, stars = 0, got = 0, runOver = false, runTry = 0 }
+  struct TrickRes { var ok: Bool, why: String, head: String, kind: String, pts: String, demo: Bool, i: Int, daily = false }
+  struct TrickSession { var id: String, attempts: Int, demo = false, stars = 0, got = 0, runOver = false, runTry = 0
+    /* the daily shot: its day, whether this session's next try is the day's scored one, whether it was counted, and
+       whether the try now rolling is it */
+    var daily: (day: String, scored: Bool, counted: Bool, live: Bool)? = nil }
   var trick: TrickSession? = nil
   var trickRes: TrickRes? = nil
   /* a drill session (startDrill): the shot, its layout, each shot's judgement, the beat after a shot; the result */
@@ -398,6 +436,7 @@ final class TableModel {
     /* startPractice: a fresh seed, editing on for the empty table */
     if let id = drill, drillById(id) != nil { self.drill = DrillSession(id: id) }
     if let id = trick, trickById(id) != nil { self.trick = TrickSession(id: id, attempts: TrickStore.tries[id] ?? 0) }
+    if trick == "daily" { let day = Rec.today(), c = dailyTrick(day); var T = TrickSession(id: c.id, attempts: TrickStore.tries[c.id] ?? 0); T.daily = (day, !DailyStore.done(day), false, false); self.trick = T }
     if let l = practice {
       var P = Practice(layout: l, seed: UInt32.random(in: 0...0x7fffffff), edit: l == "empty")
       /* test hooks: `-felt-seed n` the scatter's seed, `-felt-tools` the tools strip open */
@@ -443,6 +482,7 @@ final class TableModel {
     if trick != nil && ProcessInfo.processInfo.arguments.contains("-felt-showme") {
       Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(1.5)); self?.showMe() }
     }
+    if let d = self.trick?.daily, let c = trickById(self.trick!.id) { flashDue = ("Daily shot: \(c.title)", d.scored ? c.goal : "\(c.goal) Practice: today's try is in.", 2.4) }
     /* a test hook: `-felt-paused` opens the table with the pause menu up */
     if ProcessInfo.processInfo.arguments.contains("-felt-paused") { paused = true }
     /* a test hook: `-felt-loupe` holds the fine-aim wheel's loupe open */
@@ -560,6 +600,7 @@ final class TableModel {
     stroke = (power, nil)
   }
   private func strikeNow(_ pw: Double, _ t: TimeInterval) {
+    if g?.mode == "trick" { scoreDaily() }
     /* shoot(): the declaration the player built (humanCall) goes on the game; judge takes it from there */
     if var gm = g, !cpuTurn { gm.call = humanCall(); g = gm }
     let tab = sim.newTable(balls, cue: cueN)
