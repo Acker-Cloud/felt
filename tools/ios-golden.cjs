@@ -511,7 +511,23 @@ ${D.NAT.map(n => `    (${q(n.id)}, ${q(n.name)}, ${q(n.first)}, ${q(n.last)}, ${
   public static let AV_COLS: [String] = ${q(D.AV_COLS)}
 }
 `;
-  return { math, career, careerData, golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
+  /* JV (the career's save in Swift) against V8: Number#toString by bit pattern over the whole range, strings with
+     every escape, and random nested objects (integer-like and plain keys, repeated keys), each as JSON.stringify writes it */
+  let jseed = 99;
+  const jrnd = () => { jseed = (Math.imul(jseed, 1103515245) + 12345) >>> 0; return jseed / 4294967296; };
+  const nums = [0, -0, 1, -1, 0.1, 0.5, 1 / 3, 2 / 3, 100, 1e21, 1e20, 123456789012345680000, 1e-6, 1e-7, 1.5e-7, 5e-324, Number.MAX_VALUE, Number.MIN_VALUE,
+    0.000001234, 1234.5678, 2 ** 53, 2 ** 53 + 2, 4294967295, 1e300, 1.7976931348623157e308, 9.999999999999999e20, 99.99, 0.30000000000000004];
+  for (let i = 0; i < 3000; i++) { const e = Math.floor(jrnd() * 60) - 30, m = jrnd() * 10; nums.push((jrnd() < 0.5 ? -1 : 1) * m * 10 ** e); nums.push(Math.round(jrnd() * 1e6) / [1, 10, 100, 1000][i % 4]); }
+  const dv2 = new DataView(new ArrayBuffer(8)), bits = v => { dv2.setFloat64(0, v); return dv2.getBigUint64(0).toString(16).padStart(16, '0'); };
+  const strs = ['', 'plain', 'quote " and \\ back', 'tab\t nl\n cr\r ff\f bs\b', '\u0001\u001f ctrl', 'é ñ 中文 🎱', 'Zhao|9|p', "O'Brien de Vries"];
+  const key = () => { const r = jrnd(); return r < 0.3 ? String(Math.floor(jrnd() * 300)) : r < 0.4 ? '0' + Math.floor(jrnd() * 9) : ['a', 'b', 'name', 'x', 'y', 'm', 'pop', 'seed', '-1', '1.5', 'é'][Math.floor(jrnd() * 11)]; };
+  const val = d => { const r = jrnd(); if (d > 3 || r < 0.35) return [null, true, false, jrnd() * 1000, Math.round(jrnd() * 100), strs[Math.floor(jrnd() * strs.length)]][Math.floor(jrnd() * 6)];
+    if (r < 0.65) { const o = {}; for (let i = Math.floor(jrnd() * 6); i > 0; i--) o[key()] = val(d + 1); return o; } return [...Array(Math.floor(jrnd() * 5))].map(() => val(d + 1)); };
+  const objs = [...Array(200)].map(() => { const o = {}; for (let i = 0; i < 8; i++) o[key()] = val(0); return JSON.stringify(o); });
+  /* a repeated key in the text: the first place, the last value */
+  objs.push('{"b":1,"a":2,"b":3,"10":4,"2":5}');
+  const jv = JSON.stringify({ nums: nums.map(v => [bits(v), String(v)]), strs: strs.map(s => [s, JSON.stringify(s)]), objs: objs.map(t => [t, JSON.stringify(JSON.parse(t))]) });
+  return { math, career, careerData, jv, golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
 }
 /* tests/ios-check.cjs rebuilds both in memory and requires the committed files to match */
 module.exports = { build, OUT, loadFd };
@@ -523,6 +539,7 @@ if (require.main === module) {
   fs.writeFileSync(path.join(OUT, 'rules.json'), b.rules);
   fs.writeFileSync(path.join(OUT, 'cpu.json'), b.cpu);
   fs.writeFileSync(path.join(OUT, 'career.json'), b.career);
+  fs.writeFileSync(path.join(OUT, 'jv.json'), b.jv);
   fs.writeFileSync(path.join(__dirname, '..', 'ios', 'FeltSim', 'Sources', 'FeltSim', 'CareerData.swift'), b.careerData);
   const steps = b.cases.reduce((a, c) => a + c.result.steps, 0);
   console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${b.games.length} games (${b.games.reduce((a, g) => a + g.steps.length, 0)} judgements), ${b.cpuCases.length} CPU decisions, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);
