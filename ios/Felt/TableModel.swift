@@ -786,7 +786,7 @@ final class TableModel {
 
   func rerack() {
     abandonCpuGame()
-    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], [], [], []]; potCount = 0; banner = nil
+    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); pottedBy = [[], [], [], []]; stats = GStats(); potCount = 0; banner = nil
     if tut != nil { tutBegin(0); return }
     if lesson != nil { g = lessonGame(); syncBalls(); randomOrient(); lessonAim(); return }
     if let D = drill, let d = drillById(D.id) {
@@ -998,6 +998,13 @@ final class TableModel {
     let vis: (p: Int, pots: Int, fromBreak: Bool) = visit.flatMap { $0.p == shooter ? $0 : nil } ?? (shooter, 0, before.breakShot)
     let mo = engine.shotMoments(before, r, next, run: (vis.pots, vis.fromBreak))
     visit = next.winner == nil && next.turn == shooter && next.verdict?.foul == nil ? (shooter, vis.pots + mo.legal, vis.fromBreak) : nil
+    if shooter < 4 {
+      stats.shots[shooter] += 1; stats.pots[shooter] += mo.legal; stats.best[shooter] = max(stats.best[shooter], vis.pots + mo.legal)
+      if next.verdict?.foul != nil { stats.fouls[shooter] += 1 }
+      if before.breakShot { stats.brk = (shooter, (next.verdict?.potted ?? []).filter { $0 != 0 }.count, next.verdict?.foul != nil) }
+      for k in mo.keys { stats.notes[shooter][k, default: 0] += 1 }
+      stats.last = mo.keys; stats.lastP = shooter
+    }
     if let k = mo.keys.first, next.winner == nil, before.kind != "carom" { callout = (momentWord(k, before.kind), now); sound.cue("moment") }
     /* markBegun: the player's first shot of a CPU game */
     if !begun, cpuLevel != nil, exhib == nil, tmatch == nil, before.mode == nil, shooter == 0 { begun = true; Rec.markBegun(before.kind, cpuLevel!) }
@@ -1283,6 +1290,11 @@ final class TableModel {
 
   /* stats.potted: each player's pots (the verdict's potted, their own), for the pause menu's cards */
   @ObservationIgnored private(set) var pottedBy: [[Int]] = [[], [], [], []]
+  /* newStats: the game's numbers for the game-over sheet: shots, fouls, legal pots, the best visit, each player's moments,
+     the break, and the last shot's moments and shooter */
+  struct GStats { var shots = [0, 0, 0, 0], fouls = [0, 0, 0, 0], pots = [0, 0, 0, 0], best = [0, 0, 0, 0], notes: [[String: Int]] = [[:], [:], [:], [:]]
+    var brk: (p: Int, down: Int, foul: Bool)? = nil, last: [String] = [], lastP: Int? = nil }
+  @ObservationIgnored private(set) var stats = GStats()
   @ObservationIgnored private var gBefore: Game? = nil
 
   /* cardOf (page 6b): a player's card in the pause menu, the second line in words and its balls */

@@ -1224,7 +1224,7 @@ struct Overlays: View {
       }
     } else if let g = model.g, g.winner != nil, model.rolling == nil, model.tut == nil {
       card {
-        Text(Words.overLine(g)).font(.headline).multilineTextAlignment(.center)
+        OverHead(model: model, g: g)
         if let t = model.tmatch {
           /* a tournament match: the racks, then the next rack or back to the bracket */
           Text("You \(t.score[0]), \(t.foe) \(t.score[1]), race to \(t.need)").font(.subheadline).foregroundStyle(.secondary)
@@ -1881,5 +1881,65 @@ struct ReplayPill: View {
         .accessibilityIdentifier("replayBtn")
       }
     }
+  }
+}
+
+/* #over (showOver): the kicker ("8-ball vs Regular, 34 shots"), who won, the closing line, the winning shot's moments as
+   chips (the best in the accent), and the table of numbers: snooker's score, high breaks and frames; carom's points,
+   innings, average and high run; else the balls potted, the best run, accuracy, fouls and shots of note */
+struct OverHead: View {
+  let model: TableModel
+  let g: Game
+  static let NOTE_WORDS = ["bank": "Bank", "kick": "Kick", "combo": "Combo", "long": "Long pot", "double": "Double", "triple": "Triple", "cleanBreak": "Clean break", "point": "Point",
+    "golden": "Golden break", "runOut": "Run out", "breakRun": "Break and run"]
+  var body: some View {
+    let st = model.stats, w = g.winner ?? 0, n = st.shots.reduce(0, +), np = model.party?.names.count ?? 2, P = Array(0..<np)
+    let kind = g.kind == "bumper" ? "Bumper pool" : g.kind == "snooker" ? "Snooker" : g.kind == "carom" ? (g.need == 1 ? "One-cushion" : "Three-cushion") : StatWords.NAME[g.kind] ?? g.kind
+    let foe = model.cpuLevel.flatMap { Rec.FOES[$0] }
+    let top = st.lastP == w && g.verdict?.why != "forced" ? st.last : []
+    VStack(alignment: .leading, spacing: 10) {
+      Text(kind + (foe.map { " vs \($0)" } ?? (model.exhib != nil ? ", exhibition" : "")) + ", \(n) shot\(n == 1 ? "" : "s")").font(.footnote).foregroundStyle(.secondary)
+      Text(model.cpuLevel != nil ? (w == 0 ? "You win" : "The CPU wins") : "\(Words.nameOf(w)) wins").font(.title2.bold())
+      Text(Words.overLine(g)).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      if !top.isEmpty {
+        HStack(spacing: 6) {
+          ForEach(Array(top.enumerated()), id: \.offset) { i, k in
+            Text(momentWord(k, g.kind)).font(.footnote.weight(.semibold)).padding(.horizontal, 10).padding(.vertical, 4)
+              .background(Capsule().fill(i == 0 ? Color(rgb: 0x3d, 0xdc, 0x84).opacity(0.22) : Color(white: 0.2)))
+              .overlay(Capsule().strokeBorder(i == 0 ? Color(rgb: 0x3d, 0xdc, 0x84).opacity(0.7) : .clear, lineWidth: 1))
+          }
+        }
+        .accessibilityElement(children: .combine).accessibilityLabel("Shots of the game: " + top.map { momentWord($0, g.kind) }.joined(separator: ", "))
+      }
+      Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+        GridRow { Text(""); ForEach(P, id: \.self) { p in Text(Words.nameOf(p)).font(.footnote.weight(p == w ? .bold : .semibold)).foregroundStyle(p == w ? .primary : .secondary) } }
+        ForEach(rows(st, P), id: \.0) { r in
+          GridRow { Text(r.0).font(.footnote).foregroundStyle(.secondary); ForEach(P, id: \.self) { p in Text(r.1[p]).font(.footnote).monospacedDigit().fixedSize(horizontal: false, vertical: true) } }
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+  func rows(_ st: TableModel.GStats, _ P: [Int]) -> [(String, [String])] {
+    if g.kind == "carom", let sc = g.score, let inn = g.innings, let hi = g.high {
+      return [("Points", sc.map(String.init)), ("Innings", inn.map(String.init)), ("Average", P.map { String(format: "%.2f", Double(sc[$0]) / Double(max(1, inn[$0]))) }), ("High run", hi.map(String.init))]
+    }
+    let acc = P.map { st.shots[$0] > 0 ? "\(Int((100 * min(1, Double(st.pots[$0]) / Double(st.shots[$0]))).rounded()))%" : "0%" }
+    let fouls = ("Fouls", P.map { String(st.fouls[$0]) }), accuracy = ("Accuracy", acc)
+    var notes: [String] = []
+    for p in P {
+      var items = MOMENTS.filter { st.notes[p][$0] != nil }.map { k in ((g.kind == "snooker" ? SNOOKER_WORDS[k] : nil) ?? OverHead.NOTE_WORDS[k] ?? k) + (st.notes[p][k]! > 1 ? " \u{00d7}\(st.notes[p][k]!)" : "") }
+      if let b = st.brk, b.p == p, !b.foul, b.down == 1, st.notes[p]["golden"] == nil { items.append("1 on the break") }
+      notes.append(items.isEmpty ? "None" : items.joined(separator: ", "))
+    }
+    if g.kind == "snooker" {
+      let sc = g.verdict?.snk?.frameOver?.score ?? g.score ?? [0, 0]
+      return [("Score", sc.map(String.init)), ("High break", (g.high ?? [0, 0]).map(String.init))] + ((g.snk?.frames ?? 1) > 1 ? [("Frames", (g.snk?.won ?? [0, 0]).map(String.init))] : []) + [accuracy, fouls] + (P.count > 2 ? [] : [("Shots of note", notes)])
+    }
+    let down = P.map { p -> String in
+      let l = g.kind == "bumper" ? g.balls.filter { !$0.on && bOwner($0.n) == p }.map(\.n).sorted() : model.pottedBy[p]
+      return l.isEmpty ? "None" : l.map(String.init).joined(separator: " ")
+    }
+    return [("Potted", down), ("Best run", P.map { String(st.best[$0]) })] + (model.party.map { pt in [("Racks won", pt.wins.map(String.init))] } ?? []) + [accuracy, fouls] + (P.count > 2 ? [] : [("Shots of note", notes)])
   }
 }
