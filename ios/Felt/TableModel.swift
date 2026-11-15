@@ -1041,6 +1041,7 @@ final class TableModel {
     self.now = now
     stepAutoAim()
     stepPlaceBack()
+    liftStep(now)
     if lesson != nil { lessonCheck() }
     if let o = offer, now > o.until || rolling != nil || stroke != nil { offer = nil }
     if rp != nil { if let f = flashDue { banner = (f.0, f.1, now + f.2); flashDue = nil }; pots.removeAll { now - $0.t >= potMs }; replayStep(now); return }
@@ -1286,6 +1287,31 @@ final class TableModel {
      rebuilt the whole screen at the touch rate. An illegal let-go slides the ghost back to the last legal spot over
      PLACE_BACK_MS (at once with Reduce Motion); a ball that moved gets auto aim again (endMove). */
   static let PLACE_BACK_MS = 0.120
+  /* 4f's ball in hand lift, visual only: while carried on legal and illegal spots alike (placeAt, a human turn) it rises
+     over BIH_UP_MS (bihH 0..1: the shadow grows, softens and falls further from the lamp, the ball LIFT_GROW bigger);
+     let go on the table it settles over SETTLE_MS (down, one tiny bounce, still: settleH). Reduce Motion: up and down
+     at once, no bounce. Never the spot, the input or the view */
+  static let BIH_UP_MS = 0.090, SETTLE_MS = 0.150, LIFT_GROW = 0.06
+  @ObservationIgnored private(set) var bihH = 0.0
+  @ObservationIgnored private var bih: (t: TimeInterval?, on: Bool, settle: (t0: TimeInterval, h0: Double)?) = (nil, false, nil)
+  func liftStep(_ now: TimeInterval) {
+    let carrying = placeAt != nil && placeBack == nil && !cpuTurn && rolling == nil
+    let dt = bih.t.map { min(0.1, max(0, now - $0)) } ?? 0.016, rm = (carrying || bih.on || bih.settle != nil) && reduceMotion
+    bih.t = now
+    if carrying { bih.settle = nil; bihH = rm ? 1 : min(1, bihH + dt / TableModel.BIH_UP_MS) }
+    else {
+      if bih.on && bihH > 0 && !rm, let c = cue, c.on, rolling == nil { bih.settle = (now, bihH) }
+      bihH = 0
+    }
+    bih.on = carrying
+    if let st = bih.settle, rm || rolling != nil || now - st.t0 >= TableModel.SETTLE_MS || now < st.t0 { bih.settle = nil }
+  }
+  /* the settling cue ball's height (0..1): down in the first third, a bounce a tenth as high, still */
+  func settleH(_ now: TimeInterval) -> Double {
+    guard let st = bih.settle else { return 0 }
+    let u = min(1, max(0, (now - st.t0) / TableModel.SETTLE_MS))
+    return st.h0 * abs(cos(1.5 * Double.pi * u)) * pow(1 - u, 2)
+  }
   @ObservationIgnored var placeAt: (Double, Double)? = nil
   @ObservationIgnored private var held: (moved: Bool, last: (Double, Double))? = nil
   @ObservationIgnored private var placeBack: (from: (Double, Double), to: (Double, Double), t0: TimeInterval)? = nil

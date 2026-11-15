@@ -144,11 +144,14 @@ struct TableCanvas: View {
       }
       /* drawCast's shadows, then the balls (4b), each composited from its own image at device px */
       let sc = Double(scale), bp = model.ballPainter(upright: m.upright, scale: scale), rb = s.BALL_R * m.k * sc
-      let list = model.shown.filter { $0.on }
+      /* the cue ball in hand: the ghost (drawPlace, lifted) stands in for it on a legal spot; over an illegal one the ball
+         stays drawn on its last legal spot. A ball let go settles (settleH) */
+      let ghostOk = model.rp == nil && model.placeAt.map { at in model.g.map { model.engine.canPlace($0, at.0, at.1) } ?? true } ?? false
+      let list = model.shown.filter { $0.on && !(ghostOk && $0.n == model.cueN) }, sh = model.rp == nil ? model.settleH(model.now) : 0
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       for b in list {
         let p = m.pt(b.x, b.y)
-        for (img, rect, a) in bp.castParts(b.x, b.y, Double(p.x) * sc, Double(p.y) * sc, rb, tl: s.TL, tw: s.TW, ballR: s.BALL_R, z: b.z ?? 0) {
+        for (img, rect, a) in bp.castParts(b.x, b.y, Double(p.x) * sc, Double(p.y) * sc, rb, tl: s.TL, tw: s.TW, ballR: s.BALL_R, lift: b.n == model.cueN ? sh : 0, z: b.z ?? 0) {
           var c = ctx; c.opacity = a; c.draw(Image(decorative: img, scale: 1), in: rect)
         }
       }
@@ -161,8 +164,8 @@ struct TableCanvas: View {
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       drawPots(&ctx, m, bp, rb, sc)
       for b in list {
-        let p = m.pt(b.x, b.y), z = b.z ?? 0, air = z > 0 ? 0.6 / (0.6 - min(z, 0.3)) : 1
-        let (img, x, y) = model.ballImage(bp, b.n, Double(p.x) * sc, Double(p.y) * sc, rb * air)
+        let p = m.pt(b.x, b.y), z = b.z ?? 0, air = z > 0 ? 0.6 / (0.6 - min(z, 0.3)) : 1, grow = b.n == model.cueN && sh > 0 ? 1 + TableModel.LIFT_GROW * sh : 1
+        let (img, x, y) = model.ballImage(bp, b.n, Double(p.x) * sc, Double(p.y) * sc, rb * air * grow)
         ctx.draw(Image(decorative: img, scale: 1), in: CGRect(x: x, y: y, width: Double(img.width), height: Double(img.height)))
       }
       ctx.scaleBy(x: sc, y: sc)
@@ -303,10 +306,16 @@ struct TableCanvas: View {
     guard handOn, let c = model.cue else { return }
     let s = model.sim, placing = model.placeAt != nil, at = model.placeAt ?? (c.x, c.y)
     let ok = !placing || model.g.map { model.engine.canPlace($0, at.0, at.1) } ?? true, p = m.pt(at.0, at.1), rp = s.BALL_R * m.k
-    if placing && !ok {
-      /* the ghost over an illegal spot, faint: the ball itself stays on its last legal spot */
-      var g = ctx; g.opacity = 0.5; g.scaleBy(x: 1 / sc, y: 1 / sc)
-      let (img, x, y) = bp.ballImage(0, Double(p.x) * sc, Double(p.y) * sc, rp * sc, bp.axesOf(model.orient[0] ?? IDENT))
+    if placing {
+      /* the ghost, lifted (bihH): its shadow, then the ball a touch bigger; faint over an illegal spot, where the ball
+         itself stays on its last legal spot */
+      var g = ctx; g.scaleBy(x: 1 / sc, y: 1 / sc)
+      let h = model.bihH
+      for (img, rect, a) in bp.castParts(at.0, at.1, Double(p.x) * sc, Double(p.y) * sc, rp * sc, tl: s.TL, tw: s.TW, ballR: s.BALL_R, lift: h, alpha: ok ? 1 : 0.4) {
+        var c2 = g; c2.opacity = a; c2.draw(Image(decorative: img, scale: 1), in: rect)
+      }
+      g.opacity = ok ? 0.96 : 0.5
+      let (img, x, y) = bp.ballImage(model.cueN, Double(p.x) * sc, Double(p.y) * sc, rp * sc * (1 + TableModel.LIFT_GROW * h), bp.axesOf(model.orient[model.cueN] ?? IDENT))
       g.draw(Image(decorative: img, scale: 1), in: CGRect(x: x, y: y, width: Double(img.width), height: Double(img.height)))
     }
     if placing {
