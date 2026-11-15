@@ -49,6 +49,11 @@ struct Home: View {
     .onAppear {
       let a = ProcessInfo.processInfo.arguments
       if let i = a.firstIndex(of: "-felt-game"), i + 1 < a.count { playing = TableGame(rawValue: a[i + 1]) }
+      /* `-felt-landscape left|right`: the interface turned on its side (the simulator cannot be turned from a script) */
+      if let i = a.firstIndex(of: "-felt-landscape"), i + 1 < a.count,
+         let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: a[i + 1] == "left" ? .landscapeLeft : .landscapeRight))
+      }
     }
     .fullScreenCover(item: $playing) { g in TableScreen(model: TableModel(game: g, cpu: opponent == "two" ? nil : opponent)) }
   }
@@ -61,44 +66,69 @@ struct TableScreen: View {
   @State private var placing = false
   @State private var picking = false
   @Environment(\.displayScale) private var scale
+  /* the window's interface orientation, read as the size changes (a turn) */
+  private var interface: UIInterfaceOrientation { (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.effectiveGeometry.interfaceOrientation ?? .portrait }
 
   var body: some View {
     GeometryReader { geo in
       let ins = geo.safeAreaInsets, W = geo.size.width + ins.leading + ins.trailing, H = geo.size.height + ins.top + ins.bottom
-      let upright = H > W
-      /* #ui: padding max(2, the insets), max(4) at the foot; upright the stage over one 56 pt strip (#ctl), 4 apart,
-         the strip stood in from the sides by 0.35 of the foot's inset (the display's rounded corners) */
-      let layout = upright ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 8))
-      layout {
-        GeometryReader { tg in
-          TimelineView(.animation(paused: model.paused)) { tl in
-            TableCanvas(model: model, look: Look.of(model.game))
-              .onChange(of: tl.date) { _, d in model.tick(d.timeIntervalSinceReferenceDate) }
-          }
-          .overlay { FlashBanner(model: model, size: tg.size) }
-          .onAppear { model.bake(tg.size, scale: scale) }
-          .onChange(of: tg.size) { _, s in model.bake(s, scale: scale) }
-          .contentShape(Rectangle())
-          .gesture(DragGesture(minimumDistance: 0).onChanged { v in touch(v, tg.size, began: v.translation == .zero) }
-            .onEnded { _ in placing = false; picking = false })
-          .accessibilityElement()
-          .accessibilityLabel("Table")
-          .accessibilityIdentifier("table")
-        }
-        Controls(model: model, upright: upright)
-          .frame(width: upright ? nil : 64, height: upright ? 56 : nil)
-          .padding(.horizontal, upright ? ins.bottom * 0.35 : 0)
+      /* sideRot (6b): a phone on its side (under 600 pt tall) shows the upright layout turned a quarter, so the table
+         keeps the same footprint either way. The column stands on the side away from the island (the larger side
+         inset): anticlockwise with the island on the left (the strip's foot to the right), clockwise with it on the
+         right. The upright insets are modelled from the side ones: the island's inset is the upright top, the foot
+         HOME_UP (34 pt) with a home indicator, else 4. A tablet or desktop on its side keeps the column. */
+      let side = W > H && H < 600
+      if side {
+        /* islandSide(): unequal insets, the larger; equal (as iOS gives them), the interface's orientation: landscape
+           right has the island on the left (anticlockwise, the column right), landscape left on the right */
+        let ccw = ins.leading != ins.trailing ? ins.leading > ins.trailing : interface != .landscapeLeft
+        /* upright a phone has no side insets: the sides' padding is the upright one's (2 pt) */
+        let up = EdgeInsets(top: max(ins.leading, ins.trailing), leading: 0, bottom: ins.bottom > 0 ? 34 : 4, trailing: 0)
+        screen(W: H, H: W, ins: up, upright: true)
+          .frame(width: H, height: W)
+          .rotationEffect(.degrees(ccw ? -90 : 90))
+          .frame(width: W, height: H)
+          .offset(x: -ins.leading, y: -ins.top)
+      } else {
+        screen(W: W, H: H, ins: ins, upright: H > W)
+          .frame(width: W, height: H)
+          .offset(x: -ins.leading, y: -ins.top)
       }
-      .padding(.top, max(2, ins.top)).padding(.bottom, max(upright ? 4 : 8, ins.bottom))
-      .padding(.leading, max(upright ? 2 : 8, ins.leading)).padding(.trailing, max(upright ? 2 : 8, ins.trailing))
-      .frame(width: W, height: H)
-      .offset(x: -ins.leading, y: -ins.top)
     }
     .background(Color(rgb: 9, 9, 10).ignoresSafeArea())
     .overlay { Overlays(model: model, back: { dismiss() }) }
     .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
     .tint(.primary)
     .statusBarHidden()
+  }
+
+  /* #ui: padding max(2, the insets), max(4) at the foot; upright the stage over one 56 pt strip (#ctl), 4 apart, the
+     strip stood in from the sides by 0.35 of the foot's inset (the display's rounded corners); else a column */
+  @ViewBuilder private func screen(W: CGFloat, H: CGFloat, ins: EdgeInsets, upright: Bool) -> some View {
+    let layout = upright ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 8))
+    layout {
+      GeometryReader { tg in
+        TimelineView(.animation(paused: model.paused)) { tl in
+          TableCanvas(model: model, look: Look.of(model.game))
+            .onChange(of: tl.date) { _, d in model.tick(d.timeIntervalSinceReferenceDate) }
+        }
+        .overlay { FlashBanner(model: model, size: tg.size) }
+        .onAppear { model.bake(tg.size, scale: scale) }
+        .onChange(of: tg.size) { _, s in model.bake(s, scale: scale) }
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 0).onChanged { v in touch(v, tg.size, began: v.translation == .zero) }
+          .onEnded { _ in placing = false; picking = false })
+        .accessibilityElement()
+        .accessibilityLabel("Table")
+        .accessibilityIdentifier("table")
+      }
+      Controls(model: model, upright: upright)
+        .frame(width: upright ? nil : 64, height: upright ? 56 : nil)
+        .padding(.horizontal, upright ? ins.bottom * 0.35 : 0)
+    }
+    .padding(.top, max(2, ins.top)).padding(.bottom, max(upright ? 4 : 8, ins.bottom))
+    .padding(.leading, max(upright ? 2 : 8, ins.leading)).padding(.trailing, max(upright ? 2 : 8, ins.trailing))
+    .frame(width: W, height: H)
   }
 
   private func touch(_ v: DragGesture.Value, _ size: CGSize, began: Bool) {
