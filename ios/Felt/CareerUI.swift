@@ -27,6 +27,8 @@ import SwiftUI
         if let ev = E.S["cal"]!.a.first(where: { $0["start"]!.i > day && E.eligibility($0).isEmpty }) { E.enter(ev["id"]!.s) }
         if E.advance(week: true) == "match" { break }
       }
+      /* `-felt-career-retire`: retired at once (after any steps on: see below) */
+      defer { if ProcessInfo.processInfo.arguments.contains("-felt-career-retire") { E.retire() } }
       /* `-felt-career-rivals`: 40 steps on (a due match simulated, else an eligible event entered and a week) */
       if ProcessInfo.processInfo.arguments.contains("-felt-career-rivals") {
         for _ in 0..<40 {
@@ -718,9 +720,97 @@ struct CareerRecords: View {
   }
 }
 
+/* PAGES.recap: Retired over the name; the card (Seasons, Matches, Titles; Peak Tier, Prize Money, Legacy); the Hall of
+   Fame note; Titles; Best Rankings; Your Careers */
+struct CareerRecap: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let _ = store.rev
+    let r = store.E.S["recap"] ?? .null, ins = EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)
+    List {
+      CareerTitle(kick: "Retired", title: r == .null ? "Recap" : r["name"]!.s)
+      if r == .null { Section { Text("This career has not ended.").foregroundStyle(.secondary) } }
+      else {
+        Section {
+          VStack(spacing: 12) {
+            HStack(alignment: .top) { fact("Seasons", "\(r["seasons"]!.i)"); fact("Matches", "\(r["won"]!.i)-\(r["lost"]!.i)"); fact("Titles", "\(r["titles"]!.a.count)") }
+            HStack(alignment: .top) { fact("Peak Tier", "\(r["peakTier"]!.i)"); fact("Prize Money", CareerWords.crWords(r["prize"]!.d)); fact("Legacy", "\(r["legacy"]!.i)") }
+          }
+          .padding(.vertical, 6)
+        }
+        if truthy(r["hallOfFame"]) { Section { Text("Inducted into the Hall of Fame.").font(.system(size: 13)).foregroundStyle(.secondary).listRowBackground(Color.clear) } }
+        Section {
+          let t = r["titles"]!.a
+          if t.isEmpty { Text("No titles.").font(.system(size: 13)).foregroundStyle(.secondary).listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)) }
+          ForEach(Array(t.enumerated()), id: \.offset) { _, x in
+            VStack(alignment: .leading, spacing: 1) {
+              Text(x["name"]!.s).font(.system(size: 17))
+              Text("Season \(x["season"]!.i), tier \(x["tier"]!.i)").font(.system(size: 15)).foregroundStyle(.secondary)
+            }
+          }
+        } header: { CareerPageHead(t: "Titles") }
+        .listRowInsets(ins)
+        let br = r["bestRanks"]!.keys
+        if !br.isEmpty {
+          Section {
+            ForEach(br, id: \.self) { k in
+              HStack { Text(k.prefix(1).uppercased() + k.dropFirst()).font(.system(size: 17)); Spacer(); Text("number \(r["bestRanks"]![k]!.i)").font(.system(size: 15)).foregroundStyle(.secondary) }
+            }
+          } header: { CareerPageHead(t: "Best Rankings") }
+          .listRowInsets(ins)
+        }
+        Section {
+          Button { store.E.save(); store.E.S = .null; store.touch() } label: {
+            Text("Your Careers").font(.system(size: 17, weight: .semibold)).frame(maxWidth: .infinity, minHeight: 50).foregroundStyle(.white)
+              .background(Capsule().fill(Color(rgb: 0x2c, 0x2c, 0x30)))
+          }
+          .buttonStyle(.plain).accessibilityIdentifier("cvToSlots")
+        }
+        .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+      }
+    }
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+  }
+  private func fact(_ k: String, _ v: String) -> some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(k).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
+      Text(v).font(.system(size: 17, weight: .bold)).monospacedDigit()
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+/* the hub of a retired career: the Retired group (Career Recap, Stats and Records, News, Switch Career) and its note */
+struct CareerRetired: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let hof = truthy(store.E.S["me"]?["hof"])
+    Section {
+      NavigationLink { CareerRecap(store: store) } label: { two("Career Recap", hof ? "Hall of Fame" : "Your career in numbers") }
+      NavigationLink { CareerStats(store: store) } label: { two("Stats and Records", nil) }
+      NavigationLink { CareerNews(store: store) } label: { two("News", nil) }
+      Button { store.E.save(); store.E.S = .null; store.touch() } label: { HStack { two("Switch Career", nil); Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(uiColor: .tertiaryLabel)) } }.tint(.primary)
+    } header: { CareerPageHead(t: "Retired") } footer: {
+      Text("A retired career is read only. Start a new one from Switch career.").font(.system(size: 13))
+    }
+    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+  }
+  private func two(_ t: String, _ sub: String?) -> some View {
+    HStack {
+      VStack(alignment: .leading, spacing: 1) {
+        Text(t).font(.system(size: 17)).foregroundStyle(.primary)
+        if let sub { Text(sub).font(.system(size: 15)).foregroundStyle(.secondary) }
+      }
+      Spacer()
+    }
+    .frame(minHeight: 44)
+  }
+}
+
 struct CareerHubGroups: View {
   @Bindable var store: CareerStore
   var onPractice: () -> Void
+  var onRetire: () -> Void = {}
   @State private var retiring = false
   var body: some View {
     let _ = store.rev
@@ -755,7 +845,7 @@ struct CareerHubGroups: View {
       NavigationLink { CareerOptions(store: store) } label: { row("Options", truthy(me["opt"]?["purity"]) ? "Simulation purity on" : "Skills shape your play") }
       Button { store.E.save(); store.E.S = .null; store.touch() } label: { row("Switch Career", "Your careers, a new one", chevron: true) }.tint(.primary)
       Button {
-        if retiring { retiring = false; store.E.retire(); store.touch() } else { retiring = true; Task { try? await Task.sleep(for: .seconds(4)); retiring = false } }
+        if retiring { retiring = false; store.E.retire(); store.touch(); onRetire() } else { retiring = true; Task { try? await Task.sleep(for: .seconds(4)); retiring = false } }
       } label: { row(retiring ? "Tap again to retire" : "Retire", "End this career, see the recap", warn: true, chevron: true) }
     } header: { head("Career") }
     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
@@ -955,6 +1045,8 @@ struct CareerHub: View {
   @Bindable var store: CareerStore
   let play: () -> Void
   var onPractice: () -> Void = {}
+  /* Retire pushes the recap (cv.stack = hub, recap) */
+  @State private var recap = false
   var body: some View {
     let _ = store.rev
     let E = store.E, S = E.S, me = S["me"]!, tier = me["tier"]!.i, day = S["day"]!.i
@@ -964,6 +1056,8 @@ struct CareerHub: View {
       CareerBracket(store: store, id: id)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-calendar") {
       if ProcessInfo.processInfo.arguments.contains("-felt-career-event"), let id = nm["event"]?.str { CareerEvent(store: store, id: id) } else { CareerCalendar(store: store) }
+    } else if ProcessInfo.processInfo.arguments.contains("-felt-career-recap") {
+      CareerRecap(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-stats") {
       CareerStats(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-records") {
@@ -980,6 +1074,9 @@ struct CareerHub: View {
           CareerHubTop(store: store, play: play).padding(.top, 6).listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
         }
       }
+      if truthy(me["ret"]) {
+        CareerRetired(store: store)
+      } else {
       if !store.msg.isEmpty { Section { Text(store.msg).font(.subheadline) } }
       if E.reviewDue { CareerReview(store: store) }
       if nm == .null {
@@ -987,8 +1084,10 @@ struct CareerHub: View {
           Button("Next Week") { let r = E.advance(week: true); store.msg = r == "match" ? "A match is due." : ""; store.touch() }.bold().foregroundStyle(.white).accessibilityIdentifier("career-week")
         }
       }
-      CareerHubGroups(store: store, onPractice: onPractice)
+      CareerHubGroups(store: store, onPractice: onPractice, onRetire: { recap = true })
+      }
     }
+    .navigationDestination(isPresented: $recap) { CareerRecap(store: store) }
     }
   }
   func row(_ k: String, _ v: String) -> some View { HStack { Text(k); Spacer(); Text(v).foregroundStyle(.secondary) } }
