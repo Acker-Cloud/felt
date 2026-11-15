@@ -11,6 +11,24 @@ import FeltSim
 
 public enum V3Room {
   public static let R = 9.0, TOP = 5.5, FLOOR = 0.76, FLOOR_R = 7.2
+  /* ROOMS: where each game is played. wall: [height, colour] stops, high to low; seats: [z0, z1, gap deg, colours];
+     backdrop: [d0, d1, top, colour]; rig: overhead lights; strips; pine; floor: carpet or boards; near: neighbours */
+  public struct Def: Sendable {
+    public var near = false, wall: [(Double, String)] = [], seats: (Double, Double, Double, [String])? = nil, backdrop: (Double, Double, Double, String)? = nil
+    public var rig = 0, rigCol = "", strips = false, pine = false, blur = 2, floorBase = "#2a1c14", carpet = false, board: [Double] = [78, 52, 36], plank = 0.12
+  }
+  public static let ROOMS: [String: Def] = [
+    "hall": Def(near: true),
+    "arena": Def(wall: [(5.5, "#010102"), (2.8, "#040507"), (0.3, "#06070a"), (-0.76, "#020203")], seats: (0.35, 3.1, 0, ["120,140,175", "90,100,120", "160,165,180", "70,80,100"]),
+                 rig: 26, rigCol: "205,225,255", blur: 2, floorBase: "#0b0c10", carpet: true),
+    "crucible": Def(wall: [(5.5, "#000000"), (3.2, "#030202"), (0.2, "#070504"), (-0.76, "#020101")], seats: (0.22, 2.7, 34, ["150,120,92", "110,90,74", "170,150,128", "84,70,62"]),
+                    blur: 2, floorBase: "#100a08", carpet: true),
+    "joy": Def(wall: [(5.5, "#030303"), (3.0, "#0a0908"), (0.3, "#100d0b"), (-0.76, "#040303")], seats: (0.3, 2.4, 42, ["170,150,130", "120,105,95", "190,170,150"]),
+               backdrop: (-40, 40, 3.0, "120,92,70"), rig: 18, rigCol: "255,226,190", blur: 2, floorBase: "#14110f", carpet: true),
+    "carom": Def(near: true, wall: [(5.5, "#3a3730"), (3.2, "#6f685a"), (1.2, "#857d6c"), (0.3, "#4a4438"), (-0.76, "#1a1712")], strips: true, blur: 2,
+                 floorBase: "#2a2823", board: [108, 102, 88], plank: 0.3),
+    "rec": Def(wall: [(5.5, "#030201"), (2.4, "#0a0603"), (-0.76, "#0c0704")], pine: true, blur: 1, floorBase: "#231b12", board: [104, 76, 46], plank: 0.09),
+  ]
 
   /* v3Blur: halved `levels` times, then doubled back up, smoothed each step */
   static func blur(_ img: CGImage, _ levels: Int) -> CGImage {
@@ -38,14 +56,17 @@ public enum V3Room {
   static func js(_ v: Double) -> Int { Int((v + 0.5).rounded(.down)) }
 
   /* the floor: boards along the table, R each way from the middle; sharp near, blurred far, lit by the lamp */
-  public static func paintFloor(_ S: Int) -> CGImage {
-    let Sd = Double(S), K = Sd / (2 * R), g = Canvas2D(width: S, height: S), rnd = cpuRng(11), pw = 0.12 * K
-    g.fillStyle("#2a1c14"); g.fillRect(0, 0, Sd, Sd)
-    var y = 0.0
+  public static func paintFloor(_ S: Int, _ id: String = "hall") -> CGImage {
+    let RF = ROOMS[id] ?? ROOMS["hall"]!, dressed = id != "hall"
+    let Sd = Double(S), K = Sd / (2 * R), g = Canvas2D(width: S, height: S), rnd = cpuRng(11), pw = (dressed ? RF.plank : 0.12) * K
+    g.fillStyle(dressed ? RF.floorBase : "#2a1c14"); g.fillRect(0, 0, Sd, Sd)
+    /* carpet: a flat speck; or boards in the room's own colour */
+    if RF.carpet { for _ in 0..<9000 { let w = rnd() < 0.5; g.fillStyle("rgba(\(w ? "255,255,255" : "0,0,0"),\(0.02 + rnd() * 0.05))"); let x = rnd() * Sd, yy = rnd() * Sd; g.fillRect(x, yy, 1.6, 1.6) } }
+    var y = RF.carpet ? Sd : 0.0
     while y < Sd {
       var x = -rnd() * 2 * K
       while x < Sd {
-        let L = (1.1 + rnd() * 1.6) * K, l = 0.8 + rnd() * 0.3, w = rnd(), fc = [78.0, 52, 36]
+        let L = (1.1 + rnd() * 1.6) * K, l = 0.8 + rnd() * 0.3, w = rnd(), fc = dressed ? RF.board : [78.0, 52, 36]
         g.fillStyle("rgb(\(js(fc[0] * l + w * 8)),\(js(fc[1] * l + w * 4)),\(js(fc[2] * l)))")
         g.fillRect(x, y, L, pw)
         g.globalAlpha = 0.22; g.strokeStyle("#1c120b"); g.lineWidth = 0.7
@@ -82,7 +103,8 @@ public enum V3Room {
   }
 
   /* the walls: a band W x H round the room, angle 0 (left) the table's +x, top TOP, bottom the floor */
-  public static func paintWall(_ W: Int, _ H: Int) -> CGImage {
+  public static func paintWall(_ W: Int, _ H: Int, _ id: String = "hall") -> CGImage {
+    if id != "hall", let RD = ROOMS[id] { return paintDressedWall(W, H, RD) }
     let pad = js(Double(W) / 12), Wd = Double(W), Hd = Double(H), g = Canvas2D(width: W + 2 * pad, height: H), rnd = cpuRng(23), cw = Double(W + 2 * pad)
     let Y = { (z: Double) in (TOP - z) / (TOP + FLOOR) * Hd }, X = { (deg: Double) in Double(pad) + deg / 360 * Wd }, mPer = Wd / (2 * Double.pi * R)
     func rep(_ f: () -> Void) { for o in [-Wd, 0, Wd] { g.save(); g.translate(o, 0); f(); g.restore() } }
@@ -155,6 +177,68 @@ public enum V3Room {
     return out.cropping(to: CGRect(x: pad, y: 0, width: W, height: H))!
   }
 
+  /* the other rooms' walls, by the same pipeline (all judgment, no real hall copied) */
+  static func paintDressedWall(_ W: Int, _ H: Int, _ RD: Def) -> CGImage {
+    let pad = js(Double(W) / 12), Wd = Double(W), Hd = Double(H), g = Canvas2D(width: W + 2 * pad, height: H), rnd = cpuRng(41), cw = Double(W + 2 * pad)
+    let Y = { (z: Double) in (TOP - z) / (TOP + FLOOR) * Hd }, X = { (deg: Double) in Double(pad) + deg / 360 * Wd }, mPer = Wd / (2 * Double.pi * R)
+    func rep(_ f: () -> Void) { for o in [-Wd, 0, Wd] { g.save(); g.translate(o, 0); f(); g.restore() } }
+    let bg = g.createLinearGradient(0, 0, 0, Hd)
+    for (z, c) in RD.wall { bg.addColorStop(Swift.min(1, Swift.max(0, Y(z) / Hd)), c) }
+    g.fillStyle = .gradient(bg); g.fillRect(0, 0, cw, Hd)
+    if let (z0, z1, gap, cols) = RD.seats {
+      /* banked seating: rows of dim heads, a dark gap where the room has none (gap, degrees either side of angle 0) */
+      var z = z0
+      while z < z1 {
+        var d = 0.0
+        while d < 360 {
+          if !(d < gap || d > 360 - gap) {
+            let c = cols[Int((rnd() * Double(cols.count)).rounded(.down))], a = (0.25 + rnd() * 0.5) * (1 - 0.55 * (z - z0) / (z1 - z0))
+            rep { g.fillStyle("rgba(\(c),\(a))"); g.fillRect(X(d + (rnd() - 0.5) * 0.6), Y(z) - 1, 1.6, 2) }
+          }
+          d += 1.15
+        }
+        z += 0.34
+      }
+      g.fillStyle("rgba(0,0,0,0.75)"); rep { g.fillRect(0, Y(z0 - 0.04), cw, Y(-0.76) - Y(z0 - 0.04)) }
+    }
+    if let (d0, d1, top, col) = RD.backdrop {
+      /* a plain lit backdrop behind the stage, washed from below */
+      rep {
+        let gr = g.createLinearGradient(0, Y(top), 0, Y(-0.2)); gr.addColorStop(0, "rgba(0,0,0,0)"); gr.addColorStop(0.35, "rgba(\(col),0.55)"); gr.addColorStop(1, "rgba(\(col),0.9)")
+        g.fillStyle = .gradient(gr); g.fillRect(X(d0), Y(top), X(d1) - X(d0), Y(-0.2) - Y(top))
+      }
+    }
+    if RD.strips {
+      /* rows of strip lights along a pale hall's ceiling */
+      var d = 0.0
+      while d < 360 { let dd = d; rep { g.fillStyle("rgba(255,250,235,0.85)"); g.fillRect(X(dd), Y(3.05), 12, 3); g.fillStyle("rgba(255,245,225,0.5)"); g.fillRect(X(dd + 9), Y(2.6), 10, 2) }; d += 18 }
+      d = 0
+      while d < 360 { let dd = d; rep { g.fillStyle("rgba(0,0,0,0.14)"); g.fillRect(X(dd), Y(2.2), 1.5, Y(-0.7) - Y(2.2)) }; d += 12 }
+    }
+    if RD.pine {
+      /* knotty pine: boards with a dark seam and the odd knot, up to a low ceiling */
+      var d = 0.0, i = 0
+      while d < 360 {
+        let l = 0.82 + rnd() * 0.32, c = [js(146 * l), js(96 * l), js(52 * l)], dd = d
+        rep { g.fillStyle("rgb(\(c[0]),\(c[1]),\(c[2]))"); g.fillRect(X(dd), Y(2.4), mPer * 0.26, Y(-0.76) - Y(2.4)); g.fillStyle("rgba(30,16,8,0.7)"); g.fillRect(X(dd), Y(2.4), 1, Y(-0.76) - Y(2.4)) }
+        if i % 2 == 0 { let kz = 0.1 + rnd() * 2.1, ox = rnd() * 2; rep { g.fillStyle("rgba(46,24,10,0.75)"); g.beginPath(); g.arc(X(dd) + ox, Y(kz), 1.2, 0, 7); g.fill() } }
+        d += 1.6; i += 1
+      }
+      g.fillStyle("rgba(0,0,0,0.62)"); rep { g.fillRect(0, 0, cw, Y(2.4)) }
+      let dim = g.createLinearGradient(0, Y(2.4), 0, Hd); dim.addColorStop(0, "rgba(10,6,3,0.72)"); dim.addColorStop(0.5, "rgba(10,6,3,0.42)"); dim.addColorStop(1, "rgba(10,6,3,0.82)")
+      g.fillStyle = .gradient(dim); g.fillRect(0, Y(2.4), cw, Hd - Y(2.4))
+    }
+    let o = Canvas2D(width: W + 2 * pad, height: H)
+    o.drawImage(blur(g.image(), RD.blur), 0, 0, cw, Hd)
+    o.cg.setBlendMode(.plusLighter)
+    for _ in 0..<RD.rig {
+      /* the rig: cool lights far overhead */
+      let d = rnd() * 360, z = 3.4 + rnd() * 1.4, r = (0.1 + rnd() * 0.12) * mPer * 2.4, a = 0.18 + rnd() * 0.16
+      for k in [-Wd, 0, Wd] { bokeh(o, X(d) + k, Y(z), r, RD.rigCol, a) }
+    }
+    o.cg.setBlendMode(.normal)
+    return blur(o.image(), 1).cropping(to: CGRect(x: pad, y: 0, width: W, height: H))!
+  }
   /* v3PaintShadow: the table's soft shadow on the floor */
   static func paintShadow() -> CGImage {
     let g = Canvas2D(width: 128, height: 64)
@@ -167,7 +251,7 @@ public enum V3Room {
   }
   /* v3RoomGeo: the wall (a cylinder) and the floor (a polar grid from under the rails' edge out to the wall) as
      [x, y, z, u, v] in the render frame, this table's lamp as mesh vertices, the neighbours' places, the shadow's size */
-  public static func geo(_ s: Sim, outline: [[Double]], lampH: Double) -> Geo {
+  public static func geo(_ s: Sim, outline: [[Double]], lampH: Double, room: String = "hall") -> Geo {
     let TL = s.TL, TW = s.TW, cx = TL / 2, cy = TW / 2, N = 64
     func inner(_ a: Double) -> [Double] {
       let dx = cos(a), dy = sin(a)
@@ -223,7 +307,7 @@ public enum V3Room {
     var hx = 0.0, hy = 0.0
     for q in outline { hx = Swift.max(hx, abs(q[0] - cx)); hy = Swift.max(hy, abs(q[1] - cy)) }
     let ox = Swift.max(4.4, hx + 1.25 + 1.6), oy = Swift.max(3.3, hy + 0.7 + 1.5)
-    let near = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]].map { [cx + Double($0[0]) * ox, cy + Double($0[1]) * oy] }
+    let near = (ROOMS[room]?.near ?? true) ? [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]].map { [cx + Double($0[0]) * ox, cy + Double($0[1]) * oy] } : []
     return Geo(wall: wall, nWall: wall.count / 5, floor: floor, nFloor: floor.count / 5, lamp: lamp, nLamp: lamp.count / 10, lampZ: zb,
                lampBox: [cx - lw, cy - ld, zb, cx + lw, cy + ld, TOP], near: near, foot: [hx, hy])
   }

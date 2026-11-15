@@ -250,11 +250,11 @@ struct BallU {
   func roomFor(_ G: (key: String, tex: MTLTexture, planes: MTLBuffer, nBed: Int, nTop: Int, mesh: MTLBuffer, nFaces: Int, nPosts: Int, bounce: [Double], outline: [[Double]])) {
     if room?.key == G.key || roomBusy { return }
     roomBusy = true
-    let outline = G.outline, key = G.key, spec = model.spec
+    let outline = G.outline, key = G.key, spec = model.spec, rid = model.dress.room
     Task.detached(priority: .userInitiated) {
       let sim = Sim(); TableModel.setUp(sim, spec)
-      let geo = V3Room.geo(sim, outline: outline, lampH: BallPainter.LAMP_H)
-      let wall = V3Room.paintWall(1024, 224), floor = V3Room.floorTex(V3Room.paintFloor(1024), sim, geo)
+      let geo = V3Room.geo(sim, outline: outline, lampH: BallPainter.LAMP_H, room: rid)
+      let wall = V3Room.paintWall(1024, 224, rid), floor = V3Room.floorTex(V3Room.paintFloor(1024, rid), sim, geo)
       /* the wall is all blur: kept small (11 cm a texel at the wall, always magnified on screen) */
       let small = Canvas2D(width: 512, height: 112); small.drawImage(wall, 0, 0, 512, 112)
       let smallImg = small.image()
