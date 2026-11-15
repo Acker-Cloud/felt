@@ -33,6 +33,8 @@ import SwiftUI
       if ProcessInfo.processInfo.arguments.contains("-felt-career-forfeit1") { E.reportMatch(CareerEngine.MatchReport(forfeit: true)) }
       /* `-felt-career-accept1`: the first offer accepted after any play-on (a test hook) */
       defer { if ProcessInfo.processInfo.arguments.contains("-felt-career-accept1"), let id = E.S["off"]?.a.first?["id"]?.str { E.accept(id) } }
+      /* `-felt-career-slots`: the careers list after the demo is made (a test hook) */
+      defer { if ProcessInfo.processInfo.arguments.contains("-felt-career-slots") { E.save(); E.S = .null } }
       /* `-felt-career-retire`: retired at once (after any steps on: see below) */
       defer { if ProcessInfo.processInfo.arguments.contains("-felt-career-retire") { E.retire() } }
       /* `-felt-career-rivals`: 40 steps on (a due match simulated, else an eligible event entered and a week) */
@@ -122,6 +124,7 @@ struct CareerView: View {
   var body: some View {
     Group {
       if store.loaded { CareerHub(store: store, play: { if let m = store.match() { playing = PlayTerms(game: m.game, tm: m.tm) } }, onPractice: { page = "practice" }) }
+      else if ProcessInfo.processInfo.arguments.contains("-felt-career-new") { CareerCreate(store: store) }
       else { CareerSlots(store: store) }
     }
     /* the hub carries its own header (the season over the name); the slots keep the bar's title */
@@ -147,62 +150,133 @@ struct CareerView: View {
 }
 
 /* the slots: each career's row (season, week, tier), continue or delete; a new career's profile */
+/* PAGES.slots: Career over Your Careers; "Careers, n of 6" (each the avatar, name and nickname, the tier, season and
+   week, Retired or damaged; Open or Load, Delete with a confirm); New Career (or six already); the saves note */
 struct CareerSlots: View {
   @Bindable var store: CareerStore
-  @State private var name = ""
-  @State private var disc = "9"
-  @State private var style = "allround"
-  @State private var difficulty = "medium"
-  @State private var start = "amateur"
-  @State private var confirmDelete: String? = nil
+  @State private var create = false
+  @State private var confirmDelete: JV? = nil
   var body: some View {
     let _ = store.rev
+    let E = store.E, slots = E.listSlots(), full = slots.count >= 6, ins = EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)
     List {
-      let slots = store.E.listSlots()
-      if !slots.isEmpty {
-        Section("Your Careers") {
-          ForEach(slots.indices, id: \.self) { i in
-            let s = slots[i], id = s["id"]!.s
-            HStack {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(s["name"]!.s).font(.body)
-                Text("Season \(s["season"]!.i), week \(s["week"]!.i), \(s["tierName"]!.s)\(s["status"]?.str == "ok" ? "" : ", \(s["status"]!.s)")").font(.footnote).foregroundStyle(.secondary)
-              }
-              Spacer()
-              Button(confirmDelete == id ? "Confirm" : "Delete", role: .destructive) {
-                if confirmDelete == id { store.E.deleteSlot(id); confirmDelete = nil; store.touch() } else { confirmDelete = id }
-              }.buttonStyle(.borderless)
-              Button("Continue") { store.E.load(id); store.touch() }.buttonStyle(.borderless).foregroundStyle(.white).bold()
-                .disabled(s["status"]?.str == "corrupt")
-            }
-          }
-        }
-      }
-      Section("New Career") {
-        TextField("Name", text: $name).textInputAutocapitalization(.words)
-        Picker("Best Game", selection: $disc) { ForEach(CareerStore.T("DISCS").a.map { $0.s }, id: \.self) { Text(titleCase(CareerStore.gameName($0))).tag($0) } }
-        Picker("Style", selection: $style) { ForEach(CareerStore.T("STYLES").keys, id: \.self) { Text(titleCase(CareerStore.T("STYLES")[$0]?["name"]?.str ?? $0)).tag($0) } }
-        Picker("Difficulty", selection: $difficulty) { ForEach(CareerStore.T("DIFFS").keys, id: \.self) { Text($0.capitalized).tag($0) } }
-        Picker("Start As", selection: $start) { ForEach(CareerStore.T("STARTS").keys, id: \.self) { Text($0.capitalized).tag($0) } }
-      }
+      CareerTitle(kick: "Career", title: "Your Careers")
+      if !store.msg.isEmpty { Section { Text(store.msg).font(.system(size: 15)) } }
       Section {
-        Button("Start Career") {
-          let pr: JV = ["name": .str(name.trimmingCharacters(in: .whitespaces).isEmpty ? "Player" : name), "nat": "US", "disc": .str(disc), "style": .str(style), "difficulty": .str(difficulty), "start": .str(start), "age": 25]
-          let r = store.E.create(pr)
-          store.msg = r.ok ? "" : "No free slot: delete a career first."
-          store.touch()
+        ForEach(Array(slots.enumerated()), id: \.offset) { _, sl in
+          let id = sl["id"]!.s, bad = sl["status"]?.str == "corrupt"
+          let sub = bad ? "Damaged: cannot be loaded" : (sl["status"]?.str == "recoverable" ? "Damaged: opens from its backup. " : "")
+            + (truthy(sl["retired"]) ? (truthy(sl["hof"]) ? "Retired, Hall of Fame" : "Retired") : "\(sl["tierName"]?.str ?? ""), season \(sl["season"]?.i ?? 1), week \(sl["week"]?.i ?? 1)")
+          HStack(spacing: 12) {
+            CareerWords.avatar(sl["name"]!.s, nil, 40)
+            VStack(alignment: .leading, spacing: 1) {
+              Text(sl["name"]!.s + (sl["nick"]?.str.flatMap { $0.isEmpty ? nil : " \"\($0)\"" } ?? "")).font(.system(size: 17))
+              Text(sub).font(.system(size: 15)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            mini("Load", go: !bad) { if E.load(id).ok { store.msg = "" }; store.touch() }.disabled(bad).accessibilityLabel("Open \(sl["name"]!.s)")
+            mini("Delete", go: false, warn: true) { confirmDelete = sl }.accessibilityLabel("Delete \(sl["name"]!.s)")
+          }
+          .accessibilityIdentifier("slot-" + id)
         }
-        .font(.headline).frame(maxWidth: .infinity, minHeight: 50).background(Capsule().fill(.white)).foregroundStyle(.black).listRowBackground(Color.clear)
-        .accessibilityIdentifier("career-start")
-        if !store.msg.isEmpty { Text(store.msg).font(.footnote).foregroundStyle(.secondary) }
+      } header: { CareerPageHead(t: slots.isEmpty ? "No career yet" : "Careers, \(slots.count) of 6") }
+      .listRowInsets(ins)
+      Section {
+        Button { create = true } label: {
+          HStack {
+            VStack(alignment: .leading, spacing: 1) {
+              Text("New Career").font(.system(size: 17)).foregroundStyle(full ? Color.secondary : Color.primary)
+              Text(full ? "Six careers already: delete one first" : "Create your player and start out").font(.system(size: 15)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold)).foregroundStyle(Color(uiColor: .tertiaryLabel))
+          }
+          .frame(minHeight: 44)
+        }
+        .tint(.primary).disabled(full).accessibilityIdentifier("cvNew")
+      } footer: { Text("A career saves itself after every match, event and season, and keeps the last good save as a backup. Up to six careers.").font(.system(size: 13)) }
+      .listRowInsets(ins)
+    }
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+    .navigationDestination(isPresented: $create) { CareerCreate(store: store) }
+    .confirmationDialog(confirmDelete.map { "Delete \($0["name"]!.s)?" } ?? "", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }), titleVisibility: .visible) {
+      Button("Delete Career", role: .destructive) {
+        if let sl = confirmDelete { E.deleteSlot(sl["id"]!.s); store.msg = "\(sl["name"]!.s) deleted."; store.touch() }
+        confirmDelete = nil
       }
+      Button("Cancel", role: .cancel) { confirmDelete = nil }
+    } message: { Text("Its save and its backup are removed from this device. This cannot be undone.") }
+  }
+  private func mini(_ t: String, go: Bool, warn: Bool = false, _ act: @escaping () -> Void) -> some View {
+    Button(action: act) {
+      Text(t).font(.system(size: 15, weight: .semibold)).padding(.horizontal, 12).frame(minHeight: 36)
+        .foregroundStyle(go ? Color.black : warn ? Color(rgb: 0xff, 0x8a, 0x7a) : Color.white.opacity(0.35))
+        .background(Capsule().fill(go ? Color.white : Color(rgb: 0x2c, 0x2c, 0x30)))
+    }
+    .buttonStyle(.borderless)
+  }
+}
+
+/* PAGES.create: New career over Your player; Profile (Name, Nickname, Nationality, Hometown, Age, Best Game, Style);
+   Plays; Difficulty and its note; Start As; Start Career pinned ("Your player needs a name.", or six already) */
+struct CareerCreate: View {
+  @Bindable var store: CareerStore
+  @State private var name = ""
+  @State private var nick = ""
+  @State private var nat = "US"
+  @State private var town = ""
+  @State private var age = 20
+  @State private var disc = "8"
+  @State private var style = "allround"
+  @State private var hand = "right"
+  @State private var difficulty = "medium"
+  @State private var start = "amateur"
+  @State private var why = ""
+  var body: some View {
+    let ins = EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)
+    List {
+      CareerTitle(kick: "New career", title: "Your player")
+      Section {
+        field("Name") { TextField("Your name", text: $name).textInputAutocapitalization(.words).onChange(of: name) { _, v in if v.count > 24 { name = String(v.prefix(24)) } }.accessibilityIdentifier("cvf-name") }
+        field("Nickname") { TextField("Optional", text: $nick).onChange(of: nick) { _, v in if v.count > 20 { nick = String(v.prefix(20)) } } }
+        field("Nationality") { ModePop(selection: $nat, items: CareerData.NAT.map { ($0.id, $0.name) }) }
+        field("Hometown") { TextField("A city", text: $town).textInputAutocapitalization(.words).onChange(of: town) { _, v in if v.count > 24 { town = String(v.prefix(24)) } } }
+        field("Age") { Stepper("\(age)", value: $age, in: 14...70) }
+        field("Best Game") { ModePop(selection: $disc, items: CareerStore.T("DISCS").a.map { ($0.s, titleCaseWords(CareerStore.gameName($0.s))) }) }
+        field("Style") { ModePop(selection: $style, items: CareerStore.T("STYLES").keys.map { ($0, CareerStore.T("STYLES")[$0]!["name"]!.s) }) }
+      } header: { CareerPageHead(t: "Profile") }
+      .listRowInsets(ins)
+      seg("Plays", $hand, [("right", "Right-Handed"), ("left", "Left-Handed")])
+      seg("Difficulty", $difficulty, [("easy", "Easy"), ("medium", "Medium"), ("hard", "Hard"), ("pro", "Pro")],
+          note: "Hard and Pro turn on simulation purity: your skills are a record only and never touch your shots. On Easy and Medium they cap the guide and auto aim and add a little execution jitter, shown under Options.")
+      seg("Start As", $start, [("novice", "Novice"), ("amateur", "Amateur"), ("skilled", "Skilled"), ("pro", "Pro")])
+      if !why.isEmpty { Section { Text(why).font(.system(size: 15)) } }
+    }
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+    .safeAreaInset(edge: .bottom) {
+      Button {
+        if name.trimmingCharacters(in: .whitespaces).isEmpty { why = "Your player needs a name."; return }
+        let pr: JV = ["name": .str(name), "nick": .str(nick), "nat": .str(nat), "town": .str(town), "hand": .str(hand), "disc": .str(disc), "style": .str(style),
+                      "difficulty": .str(difficulty), "start": .str(start), "age": .n(age)]
+        let r = store.E.create(pr)
+        if !r.ok { why = "Six careers already: delete one first."; return }
+        store.msg = "Welcome to the circuit, \(store.E.S["profile"]!["name"]!.s)."
+        store.touch()
+      } label: { Text("Start Career").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+        .background(Capsule().fill(.white)).foregroundStyle(.black).padding(.horizontal, 16).padding(.bottom, 8)
+        .background(.ultraThinMaterial).accessibilityIdentifier("career-start")
     }
   }
-  /* Title Case, the page's titleCase: each word's first letter, after a space or a hyphen ("9-Ball") */
-  func titleCase(_ s: String) -> String {
-    var out = "", up = true
-    for ch in s { out += up ? ch.uppercased() : String(ch); up = ch == " " || ch == "-" }
-    return out
+  private func field<C: View>(_ k: String, @ViewBuilder _ c: () -> C) -> some View {
+    HStack { Text(k).font(.system(size: 17)); Spacer(minLength: 16); c().multilineTextAlignment(.trailing).foregroundStyle(.secondary) }
+  }
+  private func seg(_ head: String, _ b: Binding<String>, _ items: [(String, String)], note: String? = nil) -> some View {
+    Section {
+      Picker(head, selection: b) { ForEach(items, id: \.0) { Text($0.1).tag($0.0) } }.pickerStyle(.segmented).labelsHidden()
+    } header: { CareerPageHead(t: head) } footer: { if let note { Text(note).font(.system(size: 13)) } }
+    .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
   }
 }
 
@@ -1495,24 +1569,31 @@ struct CareerPractice: View {
   var body: some View {
     let done = store.practiceToday, mas = store.E.S["me"]?["mas"], names = CareerStore.T("SKILL_NAMES")
     List {
+      CareerTitle(kick: "\(done) of 3 sessions today", title: "Practice")
       Section {} footer: { Text("Each drill is played on the table and scored from your shots; the score is recorded here when it ends. Three sessions a day; practice never moves the clock. Mastery is a record; skills grow a little.") }
       Section {
         ForEach(Array(CareerStore.T("DRILLS").a.enumerated()), id: \.offset) { _, d in
           let id = d["id"]!.s, m = mas?[id], best = m?["best"]?.i ?? 0, lv = m?["lv"]?.i ?? 0, lib = drillById(id)
           HStack {
             VStack(alignment: .leading, spacing: 2) {
-              Text(d["name"]!.s).font(.body.weight(.semibold))
-              Text("\(names[d["skill"]!.s]?.str ?? ""). \(lib.map { "\($0.shots) shots. " } ?? "")Best \(best)" + (lv > 0 ? ", \(["bronze", "silver", "gold"][lv - 1])" : "")).font(.footnote).foregroundStyle(.secondary)
+              Text(d["name"]!.s).font(.system(size: 17))
+              Text("\(names[d["skill"]!.s]?.str ?? ""). \(lib.map { "\($0.shots) shots. " } ?? "")Best \(best)" + (lv > 0 ? ", \(["bronze", "silver", "gold"][lv - 1])" : "")).font(.system(size: 15)).foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Play") { play(id) }.buttonStyle(.borderless).bold().foregroundStyle(.white).disabled(done >= 3 || lib == nil)
+            let can = done < 3 && lib != nil
+            Button { play(id) } label: {
+              Text("Play").font(.system(size: 17, weight: .semibold)).padding(.horizontal, 16).frame(minHeight: 40)
+                .foregroundStyle(can ? Color.black : Color.white.opacity(0.35)).background(Capsule().fill(can ? Color.white : Color(rgb: 0x2c, 0x2c, 0x30)))
+            }
+            .buttonStyle(.borderless).disabled(!can)
               .accessibilityLabel("Play \(d["name"]!.s)").accessibilityIdentifier("drill-" + id)
           }
           .frame(minHeight: 44)
         }
       }
     }
-    .navigationTitle("Practice")
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
     .onAppear { store.touch() }
   }
 }
