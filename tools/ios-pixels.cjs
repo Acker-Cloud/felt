@@ -12,7 +12,7 @@ const { spawn } = require('child_process');
 const OUT = path.join(__dirname, '..', 'ios', 'FeltSim', 'Tests', 'FeltRenderTests', 'Fixtures');
 const PORT = 4187;
 /* [game, table, shape]: the table each game is dressed for (GAME_LOOK) */
-const GAMES = [['8', '7'], ['9', '9'], ['heyball', 'heyball'], ['snooker', 'snooker', 'compact'], ['carom', 'carom']];
+const GAMES = [['8', '7'], ['9', '9'], ['heyball', 'heyball'], ['snooker', 'snooker', 'compact'], ['carom', 'carom'], ['bumper', 'bumper', 'octagon'], ['bumper', 'bumper', 'rect']];
 /* views: a phone upright (portrait, the table turned) and on its side, in CSS px at dpr; every game
    upright, 8-ball on its side too (the nap is noise and does not compress: about 2 MB an image) */
 const VIEWS = [{ name: 'up', w: 390, h: 760, dpr: 2, portrait: true }, { name: 'side', w: 760, h: 390, dpr: 2, portrait: false }];
@@ -39,13 +39,13 @@ async function main() {
           const c = lookIn(game, () => { const c = paintTable(V.w * V.dpr, V.h * V.dpr); paintVignette(c.getContext('2d')); return c; });
           return { png: c.toDataURL('image/png'), view, RAIL, dpr, page: pageColor(), look: lookIn(game, () => look()), room: lookIn(game, () => roomId()) };
         }, { game, table, shape, V });
-        const file = `table-${game}-${V.name}.png`;
+        const file = `table-${game}${game === 'bumper' ? '-' + shape : ''}-${V.name}.png`;
         fs.writeFileSync(path.join(OUT, file), Buffer.from(r.png.split(',')[1], 'base64'));
         index.push({ file, game, table, shape: shape || null, w: V.w * V.dpr, h: V.h * V.dpr, dpr: r.dpr, RAIL: r.RAIL, view: r.view, page: r.page, look: r.look, room: r.room });
       }
     }
     /* balls: each look's set in a grid, at a phone's size and large, on the cloth, with their shadows */
-    for (const [game, table, shape] of GAMES) {
+    for (const [game, table, shape] of GAMES.filter(g => g[0] !== 'bumper')) {
       const r = await page.evaluate(({ game, table, shape }) => {
         setPockets('regulation'); setTable(table, shape);
         const W = 960, H = 400, nums = table === 'snooker' ? [0, 41, 42, 57, 58, 59, 60, 61, 62] : table === 'carom' ? [70, 71, 72] : [...Array(16).keys()];

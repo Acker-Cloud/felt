@@ -119,6 +119,9 @@ public final class Canvas2D {
   }
   public func translate(_ x: Double, _ y: Double) { st.ctm = CGAffineTransform(translationX: x, y: y).concatenating(st.ctm) }
   public func scale(_ x: Double, _ y: Double) { st.ctm = CGAffineTransform(scaleX: x, y: y).concatenating(st.ctm) }
+  public func transform(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ e: Double, _ f: Double) {
+    st.ctm = CGAffineTransform(a: a, b: b, c: c, d: d, tx: e, ty: f).concatenating(st.ctm)
+  }
   public func rotate(_ a: Double) { st.ctm = CGAffineTransform(rotationAngle: a).concatenating(st.ctm) }
   public var transform: CGAffineTransform { st.ctm }
 

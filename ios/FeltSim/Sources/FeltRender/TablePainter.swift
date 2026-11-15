@@ -36,6 +36,7 @@ public struct TableLook: Sendable {
     case "heyball": return TableLook(cloth: CLOTH["joy"]!, rail: RAILS["arena"]!, room: ROOM["joy"]!)
     case "snooker": return TableLook(cloth: CLOTH["baize"]!, rail: RAILS["baulk"]!, room: ROOM["crucible"]!)
     case "carom": return TableLook(cloth: CLOTH["blue"]!, rail: RAILS["carom"]!, room: ROOM["carom"]!)
+    case "bumper": return TableLook(cloth: CLOTH["olive"]!, rail: RAILS["veneer"]!, room: ROOM["rec"]!)
     default: return TableLook(cloth: CLOTH["green"]!, rail: RAILS["walnut"]!, room: ROOM["hall"]!)
     }
   }
@@ -46,6 +47,7 @@ public struct TableLook: Sendable {
     "electric": ClothLook(base: "#1566b8", cushion: "#186fc4", lamp: "235,242,255", worsted: true),
     "baize": ClothLook(base: "#1f6b3a", cushion: "#22733f", lamp: "255,248,220", worsted: false),
     "joy": ClothLook(base: "#1e6340", cushion: "#206a45", lamp: "255,250,230", worsted: false),
+    "olive": ClothLook(base: "#4f6030", cushion: "#586a35", lamp: "255,244,210", worsted: false),
   ]
   public static let RAILS: [String: RailLook] = [
     "walnut": RailLook(base: "#4f2714", dark: [44, 19, 9], lite: [140, 78, 40], mat: nil, metal: nil, sight: nil),
@@ -54,11 +56,12 @@ public struct TableLook: Sendable {
     "baulk": RailLook(base: "#7c5228", dark: [86, 52, 22], lite: [190, 142, 86], mat: nil, metal: "brass", sight: nil),
     "arena": RailLook(base: "#2a1a12", dark: [16, 9, 6], lite: [92, 62, 42], mat: nil, metal: "leather", sight: nil),
     "carom": RailLook(base: "#33201a", dark: [20, 11, 8], lite: [104, 70, 54], mat: nil, metal: nil, sight: "dot"),
+    "veneer": RailLook(base: "#5c3a1e", dark: [58, 34, 16], lite: [148, 104, 62], mat: nil, metal: nil, sight: nil),
   ]
   public static let ROOM: [String: RoomLook] = [
     "hall": RoomLook(glow: "255,240,215", glowA: 0.07), "arena": RoomLook(glow: "205,222,255", glowA: 0.06),
     "crucible": RoomLook(glow: "255,226,180", glowA: 0.05), "joy": RoomLook(glow: "255,232,200", glowA: 0.07),
-    "carom": RoomLook(glow: "245,245,235", glowA: 0.09),
+    "carom": RoomLook(glow: "245,245,235", glowA: 0.09), "rec": RoomLook(glow: "255,210,150", glowA: 0.1),
   ]
 }
 
@@ -203,7 +206,8 @@ public final class TablePainter {
     g.shadow("rgba(0,0,0,0.65)", blur: 0.07 * K, x: -LIGHT[0] * 0.025 * K, y: -LIGHT[1] * 0.025 * K)
     g.fillStyle("#2a140a"); railOutline(g, co); g.fill()
     g.restore()
-    paintRails(g, co, L, px, rnd)
+    if s.BED_LINES != nil { paintOctaRails(g, co, L, px, rnd) } else { paintRails(g, co, L, px, rnd) }
+    if !s.BUMPERS.isEmpty { paintBumperTable(g, co, L, px, K, rnd); return g }
     if s.TABLE != "snooker" { paintSights(g, co, L, px) }
     g.fillStyle(look.cloth.base); g.fillRect(-co, -co, TL + 2 * co, TW + 2 * co)
     paintPocketCaps(g, co, L, px)
@@ -229,6 +233,15 @@ public final class TablePainter {
 
   func railOutline(_ g: Canvas2D, _ co: Double) { g.beginPath(); railPath(g, co) }
   func railPath(_ g: Canvas2D, _ co: Double) {
+    if s.BED_LINES != nil {   /* the octagonal bumper table: the rail's eight sides, corners eased */
+      let P = s.octagon(RAIL), r = 0.012, n = P.count
+      func mid(_ a: [Double], _ b: [Double]) -> [Double] { [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] }
+      let st = mid(P[n - 1], P[0])
+      g.moveTo(st[0], st[1])
+      for i in 0..<n { let q = mid(P[i], P[(i + 1) % n]); g.arcTo(P[i][0], P[i][1], q[0], q[1], r) }
+      g.closePath()
+      return
+    }
     let r = s.MOUTHS.isEmpty ? min(0.045, RAIL) : min(pocketShape(0, co).rc + capGap(co), RAIL + co)
     let x0 = -RAIL, y0 = -RAIL, x1 = TL + RAIL, y1 = TW + RAIL
     g.moveTo(x0 + r, y0); g.arcTo(x1, y0, x1, y1, r); g.arcTo(x1, y1, x0, y1, r); g.arcTo(x0, y1, x0, y0, r); g.arcTo(x0, y0, x1, y0, r); g.closePath()
@@ -574,6 +587,213 @@ public final class TablePainter {
     for q in [[s.FOOT[0], s.FOOT[1], 0.42], [TL / 2, TW / 2, 0.3], [s.HEAD_X, TW / 2, 0.42], [s.HEAD_X, TW / 2 - 0.1524, 0.3], [s.HEAD_X, TW / 2 + 0.1524, 0.3]] {
       g.fillStyle = .color(RGBA(1, 1, 1, q[2])); circle(g, q[0], q[1], r); g.fill()
       g.strokeStyle("rgba(0,0,0,0.18)"); g.lineWidth = px; circle(g, q[0], q[1], r + px / 2); g.stroke()
+    }
+  }
+
+  // MARK: 4a, the bumper pool table (paintBumperTable and its parts, line for line)
+
+  func paintBumperTable(_ g: Canvas2D, _ co: Double, _ L: [Double], _ px: Double, _ K: Double, _ rnd: () -> Double) {
+    g.save()
+    if s.BED_LINES != nil { g.beginPath(); polyPath(g, s.octagon(co)); g.clip() }
+    g.fillStyle(look.cloth.base); g.fillRect(-co, -co, TL + 2 * co, TW + 2 * co)
+    for (k, P) in s.POCKETS.enumerated() {
+      let r = s.POCKET_R[k], fx = P[0] + L[0] * r * 0.35, fy = P[1] + L[1] * r * 0.35
+      g.fillStyle("#040303"); circle(g, P[0], P[1], r + 0.0005); g.fill()
+      let gr = g.createRadialGradient(fx, fy, 0, fx, fy, r * 1.35)
+      gr.addColorStop(0, "rgba(40,30,22,0)"); gr.addColorStop(0.6, "rgba(40,30,22,0)")
+      gr.addColorStop(0.86, "rgba(48,37,28,0.5)"); gr.addColorStop(1, "rgba(74,57,42,0.85)")
+      g.save(); circle(g, P[0], P[1], r); g.clip()
+      g.fillStyle = .gradient(gr); g.fillRect(P[0] - r, P[1] - r, 2 * r, 2 * r)
+      g.restore()
+    }
+    paintCushions(g, co, K)
+    paintClothLight(g, co, rnd)
+    paintBumperBevels(g, co, L, px)
+    /* the cups' turn-under, liner and rim */
+    g.save(); clipBed(g, co)
+    for (k, P) in s.POCKETS.enumerated() {
+      let r = s.POCKET_R[k], d = 0.016, o = 0.003, fx = P[0] + L[0] * o, fy = P[1] + L[1] * o
+      let gr = g.createRadialGradient(fx, fy, r, fx, fy, r + d)
+      gr.addColorStop(0, "rgba(0,0,0,0.55)"); gr.addColorStop(0.35, "rgba(0,0,0,0.24)"); gr.addColorStop(1, "rgba(0,0,0,0)")
+      g.fillStyle = .gradient(gr); g.fillRect(P[0] - r - d, P[1] - r - d, 2 * (r + d), 2 * (r + d))
+    }
+    g.restore()
+    g.restore()
+    if s.BED_LINES != nil { octaSeam(g, co, px) }
+    for (k, P) in s.POCKETS.enumerated() {
+      let r = s.POCKET_R[k], lw = max(1.5 * px, 0.0042), rim = max(px, 0.0013)
+      g.strokeStyle("#17120f"); g.lineWidth = lw; circle(g, P[0], P[1], r + lw / 2); g.stroke()
+      let metal = g.createLinearGradient(P[0] + L[0] * r, P[1] + L[1] * r, P[0] - L[0] * r, P[1] - L[1] * r)
+      metal.addColorStop(0, "#d8d5cd"); metal.addColorStop(0.5, "#7b7872"); metal.addColorStop(1, "#3a3834")
+      g.strokeStyle = .gradient(metal); g.lineWidth = rim; circle(g, P[0], P[1], r + lw + rim / 2); g.stroke()
+      /* the liner's lip catches a little light on the far side, inside the hole */
+      let sh = g.createLinearGradient(P[0] + L[0] * r, P[1] + L[1] * r, P[0] - L[0] * r, P[1] - L[1] * r)
+      sh.addColorStop(0, "rgba(255,240,220,0)"); sh.addColorStop(0.6, "rgba(255,240,220,0)"); sh.addColorStop(1, "rgba(255,240,220,0.18)")
+      g.strokeStyle = .gradient(sh); g.lineWidth = max(px, 0.0012); circle(g, P[0], P[1], r - g.lineWidth / 2); g.stroke()
+    }
+    if s.BED_LINES != nil { paintMushrooms(g, L, px) } else { paintPosts(g, L, px) }
+  }
+  /* the rubbers' lit noses: shaded by how squarely each faces the lamp, a crease, the bed line, the mitres, the seam */
+  func paintBumperBevels(_ g: Canvas2D, _ co: Double, _ L: [Double], _ px: Double) {
+    let bw = 0.0105, f = bw / CUSH_W
+    func shade(_ v: Double) -> RGBA { v > 0 ? RGBA(1, 1, 240.0 / 255, 0.03 + 0.11 * v) : RGBA(0, 0, 0, 0.06 - 0.22 * v) }
+    g.save()
+    g.beginPath(); for q in s.CUSHION_POLYS { polyPath(g, q) }; g.clip()
+    for q in s.CUSHION_POLYS {
+      let ea = q[0], pa = q[1], pb = q[2], eb = q[3]
+      let dx = pb[0] - pa[0], dy = pb[1] - pa[1], l = JSMath.hypot(dx, dy)
+      var nx = -dy / l, ny = dx / l
+      if (TL / 2 - pa[0]) * nx + (TW / 2 - pa[1]) * ny < 0 { nx = -nx; ny = -ny }
+      let fN = nx * L[0] + ny * L[1], ia = [pa[0] + (ea[0] - pa[0]) * f, pa[1] + (ea[1] - pa[1]) * f], ib = [pb[0] + (eb[0] - pb[0]) * f, pb[1] + (eb[1] - pb[1]) * f]
+      g.fillStyle = .color(shade(fN)); g.beginPath(); polyPath(g, [pa, pb, ib, ia]); g.fill()
+      let gr = g.createLinearGradient(ia[0], ia[1], ia[0] - nx * (co - bw), ia[1] - ny * (co - bw))
+      gr.addColorStop(0, "rgba(255,255,255,0.035)"); gr.addColorStop(1, "rgba(0,0,0,0.14)")
+      g.fillStyle = .gradient(gr); g.beginPath(); polyPath(g, [ia, ib, eb, ea]); g.fill()
+      g.strokeStyle = .color(RGBA(1, 1, 245.0 / 255, 0.07 + 0.16 * max(0, fN))); g.lineWidth = 1.1 * px
+      g.beginPath(); g.moveTo(ia[0], ia[1]); g.lineTo(ib[0], ib[1]); g.stroke()
+      g.strokeStyle("rgba(0,0,0,0.38)"); g.lineWidth = 1.4 * px
+      g.beginPath(); g.moveTo(pa[0], pa[1]); g.lineTo(pb[0], pb[1]); g.stroke()
+      g.strokeStyle("rgba(0,0,0,0.3)"); g.lineWidth = px
+      g.beginPath(); g.moveTo(pa[0], pa[1]); g.lineTo(ea[0], ea[1]); g.stroke()
+    }
+    g.restore()
+    if s.BED_LINES != nil { return }   /* the octagon's seam is drawn by octaSeam */
+    g.strokeStyle("rgba(0,0,0,0.55)"); g.lineWidth = 1.6 * px
+    g.strokeRect(-co, -co, TL + 2 * co, TW + 2 * co)
+    g.strokeStyle("rgba(255,215,170,0.08)"); g.lineWidth = px
+    g.strokeRect(-co - 1.5 * px, -co - 1.5 * px, TL + 2 * co + 3 * px, TW + 2 * co + 3 * px)
+  }
+  func octaSeam(_ g: Canvas2D, _ co: Double, _ px: Double) {
+    g.strokeStyle("rgba(0,0,0,0.55)"); g.lineWidth = 1.6 * px
+    g.beginPath(); polyPath(g, s.octagon(co)); g.stroke()
+    g.strokeStyle("rgba(255,215,170,0.08)"); g.lineWidth = px
+    g.beginPath(); polyPath(g, s.octagon(co + 1.5 * px)); g.stroke()
+  }
+  /* the octagon's studs: each corner and each side's middle, halfway across the wood */
+  func octaStuds(_ co: Double) -> [[Double]] {
+    let M = s.octagon((co + RAIL) / 2)
+    var at: [[Double]] = []
+    for i in 0..<8 { let a = M[i], b = M[(i + 1) % 8]; at.append(a); at.append([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]) }
+    return at
+  }
+  /* the octagon's wood: eight boards mitred at the corners, grain along each, lit by how squarely it faces the lamp,
+     the bullnose's inner shadows, the mitre joints and the nickel studs */
+  func paintOctaRails(_ g: Canvas2D, _ co: Double, _ L: [Double], _ px: Double, _ rnd: () -> Double) {
+    let I = s.octagon(co), O = s.octagon(RAIL + 0.02), E = s.octagon(RAIL), w = RAIL - co, BL = s.BED_LINES!
+    let RW = look.rail, DARK = RW.dark, LITE = RW.lite
+    for i in 0..<8 {
+      let a = I[i], b = I[(i + 1) % 8], len = JSMath.hypot(b[0] - a[0], b[1] - a[1])
+      let ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len, nx = -BL[i][0], ny = -BL[i][1]
+      g.save()
+      railOutline(g, co); g.clip()
+      g.beginPath(); polyPath(g, [O[i], O[(i + 1) % 8], b, a]); g.clip()
+      /* the board's own frame: x along it from its inner corner, y out across the wood */
+      g.transform(ux, uy, nx, ny, a[0], a[1])
+      g.fillStyle(RW.base); g.fillRect(-0.4, -0.01, len + 0.8, w + 0.05)
+      let lines = Int(ceil(w / (1.4 * px)))
+      for k in 0..<(lines + 6) {
+        let broad = k < 6, t = rnd(), base = broad ? w * rnd() : w * (Double(k - 6) + rnd()) / Double(lines)
+        let f1 = 2 * Double.pi / (0.5 + rnd() * 1.2), f2 = 2 * Double.pi / (0.09 + rnd() * 0.12), p1 = rnd() * 7, p2 = rnd() * 7
+        let A1 = w * (broad ? 0.25 : 0.06 + rnd() * 0.08), A2 = w * 0.01
+        let col = (0..<3).map { j in (DARK[j] + (LITE[j] - DARK[j]) * t).rounded(.toNearestOrAwayFromZero) }
+        let alpha = broad ? 0.16 : 0.16 + rnd() * 0.3
+        g.strokeStyle = .color(RGBA(col[0] / 255, col[1] / 255, col[2] / 255, alpha))
+        g.lineWidth = broad ? w * (0.15 + rnd() * 0.2) : px * (0.7 + rnd() * 1.8)
+        g.beginPath()
+        var u = -0.35
+        while u <= len + 0.37 {
+          let y = base + A1 * JSMath.sin(u * f1 + p1) + A2 * JSMath.sin(u * f2 + p2)
+          u == -0.35 ? g.moveTo(u, y) : g.lineTo(u, y)
+          u += 0.02
+        }
+        g.stroke()
+      }
+      let f = max(0, nx * L[0] + ny * L[1]), gr = g.createLinearGradient(0, 0, 0, w)
+      gr.addColorStop(0, "rgba(0,0,0,0.18)"); gr.addColorStop(0.1, "rgba(255,225,190,0.03)")
+      gr.addColorStop(0.55, RGBA(1, 225.0 / 255, 190.0 / 255, 0.04 + 0.08 * f)); gr.addColorStop(1, RGBA(1, 225.0 / 255, 190.0 / 255, 0.04 + 0.08 * f))
+      g.fillStyle = .gradient(gr); g.fillRect(-0.4, -0.01, len + 0.8, w + 0.05)
+      g.restore()
+    }
+    let K = 1 / px
+    let edge = { (color: String, blur: Double, off: Double) in
+      g.shadow(color, blur: blur * K, x: LIGHT[0] * off * K, y: LIGHT[1] * off * K)
+      g.beginPath(); g.rect(-self.RAIL - 1, -self.RAIL - 1, self.TL + 2 * self.RAIL + 2, self.TW + 2 * self.RAIL + 2); self.railPath(g, co)
+      g.fill(.evenodd)
+    }
+    g.save()
+    railOutline(g, co); g.clip()
+    g.fillStyle("#000")
+    edge("rgba(255,232,205,0.3)", 0.014, -0.008)
+    edge("rgba(0,0,0,0.32)", 0.012, 0.007)
+    edge("rgba(0,0,0,0.7)", 0.005, 0)
+    g.restore()
+    g.save()
+    railOutline(g, co); g.clip()
+    g.strokeStyle("rgba(0,0,0,0.45)"); g.lineWidth = px
+    for i in 0..<8 { g.beginPath(); g.moveTo(E[i][0], E[i][1]); g.lineTo(I[i][0], I[i][1]); g.stroke() }
+    g.restore()
+    let r = min(0.0048, 0.2 * w)
+    for q in octaStuds(co) {
+      let x = q[0], y = q[1]
+      g.fillStyle("rgba(20,8,2,0.55)"); circle(g, x - L[0] * r * 0.3, y - L[1] * r * 0.3, r * 1.25); g.fill()
+      let gr = g.createRadialGradient(x + L[0] * r * 0.4, y + L[1] * r * 0.4, 0, x, y, r)
+      gr.addColorStop(0, "#ffffff"); gr.addColorStop(0.3, "#e2ded4"); gr.addColorStop(0.75, "#8d887d"); gr.addColorStop(1, "#4d4942")
+      g.fillStyle = .gradient(gr); circle(g, x, y, r); g.fill()
+      g.strokeStyle("rgba(25,10,4,0.6)"); g.lineWidth = max(0.8 * px, r * 0.12); g.stroke()
+    }
+  }
+  /* a post's colour on the octagon: red on red's half, white on white's; the middle pair split by y */
+  func postSide(_ q: [Double]) -> Int { abs(q[0] - TL / 2) > 1e-6 ? (q[0] < TL / 2 ? 0 : 1) : (q[1] < TW / 2 ? 0 : 1) }
+  /* the octagon's mushroom bumpers (MUSHROOM): shadow, rubber ring, the stem's neck, the domed cap, its rim, knob and hot spot */
+  func paintMushrooms(_ g: Canvas2D, _ L: [Double], _ px: Double) {
+    struct Mush { let ring: [Double], ringOnRed: [Double]?, cap: [Double], hi: [Double], rim: String }
+    let MUSH = [Mush(ring: [150, 22, 30], ringOnRed: [232, 222, 206], cap: [214, 40, 46], hi: [255, 190, 180], rim: "rgba(255,220,210,0.55)"),
+                Mush(ring: [196, 190, 176], ringOnRed: nil, cap: [246, 243, 234], hi: [255, 255, 255], rim: "rgba(255,255,255,0.6)")]
+    let R = BUMPER_R, rc = R * 0.74, sx = -L[0] * 0.011, sy = -L[1] * 0.011, onRed = look.cloth.base == "#9a1f26"
+    func c(_ v: [Double], _ k: Double = 1) -> RGBA { let q = v.map { min(255, $0 * k).rounded(.toNearestOrAwayFromZero) / 255 }; return RGBA(q[0], q[1], q[2], 1) }
+    for q in s.BUMPERS {
+      let x = q[0], y = q[1], M = MUSH[postSide(q)], ring = onRed && M.ringOnRed != nil ? M.ringOnRed! : M.ring
+      var gr = g.createRadialGradient(x + sx, y + sy, R * 0.5, x + sx, y + sy, R * 1.6)
+      gr.addColorStop(0, "rgba(0,0,0,0.55)"); gr.addColorStop(0.6, "rgba(0,0,0,0.25)"); gr.addColorStop(1, "rgba(0,0,0,0)")
+      g.fillStyle = .gradient(gr); circle(g, x + sx, y + sy, R * 1.6); g.fill()
+      gr = g.createRadialGradient(x + L[0] * R * 0.35, y + L[1] * R * 0.35, R * 0.3, x, y, R)
+      gr.addColorStop(0, c(ring, 1.12)); gr.addColorStop(0.75, c(ring)); gr.addColorStop(1, c(ring, 0.8))
+      g.fillStyle = .gradient(gr); circle(g, x, y, R); g.fill()
+      let sh = g.createLinearGradient(x + L[0] * R, y + L[1] * R, x - L[0] * R, y - L[1] * R)
+      sh.addColorStop(0, "rgba(255,255,255,0.35)"); sh.addColorStop(0.5, "rgba(255,255,255,0)"); sh.addColorStop(1, "rgba(0,0,0,0.35)")
+      g.strokeStyle = .gradient(sh); g.lineWidth = max(px, R * 0.1); circle(g, x, y, R - g.lineWidth / 2); g.stroke()
+      g.fillStyle("rgba(0,0,0,0.45)"); circle(g, x - L[0] * R * 0.08, y - L[1] * R * 0.08, rc + R * 0.07); g.fill()
+      gr = g.createRadialGradient(x + L[0] * rc * 0.4, y + L[1] * rc * 0.4, 0, x, y, rc)
+      gr.addColorStop(0, c(M.hi)); gr.addColorStop(0.3, c(M.cap, 1.04)); gr.addColorStop(0.8, c(M.cap, 0.86)); gr.addColorStop(1, c(M.cap, 0.62))
+      g.fillStyle = .gradient(gr); circle(g, x, y, rc); g.fill()
+      g.strokeStyle(M.rim); g.lineWidth = max(0.8 * px, rc * 0.06)
+      let la = JSMath.atan2(L[1], L[0])
+      g.beginPath(); g.arc(x, y, rc - g.lineWidth / 2, la - 1.2, la + 1.2); g.stroke()
+      g.strokeStyle("rgba(0,0,0,0.28)"); g.lineWidth = max(0.8 * px, rc * 0.07); circle(g, x, y, rc * 0.36); g.stroke()
+      g.fillStyle("rgba(255,255,255,0.8)"); circle(g, x + L[0] * rc * 0.45, y + L[1] * rc * 0.45, rc * 0.13); g.fill()
+    }
+  }
+  /* the rectangle's posts: a shadow, the black rubber ring with its sheen, the nickel cap, its groove, screw and hot spot */
+  func paintPosts(_ g: Canvas2D, _ L: [Double], _ px: Double) {
+    let R = BUMPER_R, rc = R * 0.6, sx = -L[0] * 0.007, sy = -L[1] * 0.007
+    for q in s.BUMPERS {
+      let x = q[0], y = q[1]
+      var gr = g.createRadialGradient(x + sx, y + sy, R * 0.6, x + sx, y + sy, R * 1.45)
+      gr.addColorStop(0, "rgba(0,0,0,0.5)"); gr.addColorStop(1, "rgba(0,0,0,0)")
+      g.fillStyle = .gradient(gr); circle(g, x + sx, y + sy, R * 1.45); g.fill()
+      gr = g.createRadialGradient(x + L[0] * R * 0.3, y + L[1] * R * 0.3, R * 0.2, x, y, R)
+      gr.addColorStop(0, "#3a3633"); gr.addColorStop(0.7, "#1b1918"); gr.addColorStop(1, "#0a0909")
+      g.fillStyle = .gradient(gr); circle(g, x, y, R); g.fill()
+      let rim = g.createLinearGradient(x + L[0] * R, y + L[1] * R, x - L[0] * R, y - L[1] * R)
+      rim.addColorStop(0, "rgba(255,255,255,0.32)"); rim.addColorStop(0.45, "rgba(255,255,255,0.04)"); rim.addColorStop(1, "rgba(0,0,0,0.4)")
+      g.strokeStyle = .gradient(rim); g.lineWidth = max(1.2 * px, R * 0.12); circle(g, x, y, R - g.lineWidth / 2); g.stroke()
+      g.fillStyle("rgba(0,0,0,0.55)"); circle(g, x - L[0] * R * 0.06, y - L[1] * R * 0.06, rc + R * 0.08); g.fill()
+      gr = g.createRadialGradient(x + L[0] * rc * 0.45, y + L[1] * rc * 0.45, 0, x, y, rc)
+      gr.addColorStop(0, "#fbfaf6"); gr.addColorStop(0.35, "#cfccc4"); gr.addColorStop(0.8, "#7d7a73"); gr.addColorStop(1, "#4a4843")
+      g.fillStyle = .gradient(gr); circle(g, x, y, rc); g.fill()
+      g.strokeStyle("rgba(0,0,0,0.45)"); g.lineWidth = max(px, rc * 0.08); circle(g, x, y, rc * 0.82); g.stroke()
+      g.fillStyle("#5d5a54"); circle(g, x, y, rc * 0.2); g.fill()
+      g.fillStyle("rgba(255,255,255,0.85)"); circle(g, x + L[0] * rc * 0.45, y + L[1] * rc * 0.45, rc * 0.14); g.fill()
     }
   }
 }

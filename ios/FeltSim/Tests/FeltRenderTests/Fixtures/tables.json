@@ -160,5 +160,59 @@
    "ring": null
   },
   "room": "carom"
+ },
+ {
+  "file": "table-bumper-octagon-up.png",
+  "game": "bumper",
+  "table": "bumper",
+  "shape": "octagon",
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 320.7236842105263,
+   "portrait": true,
+   "ox": 32.07236842105263,
+   "oy": 217.07236842105263,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "olive",
+   "cue": "plain",
+   "chalk": "blue",
+   "rail": "veneer",
+   "balls": "classic",
+   "ring": null
+  },
+  "room": "rec"
+ },
+ {
+  "file": "table-bumper-rect-up.png",
+  "game": "bumper",
+  "table": "bumper",
+  "shape": "rect",
+  "w": 780,
+  "h": 1520,
+  "dpr": 2,
+  "RAIL": 0.1,
+  "view": {
+   "k": 375.7225433526011,
+   "portrait": true,
+   "ox": 37.57225433526011,
+   "oy": 150.9971098265896,
+   "tray": null
+  },
+  "page": "rgb(15, 15, 16)",
+  "look": {
+   "cloth": "olive",
+   "cue": "plain",
+   "chalk": "blue",
+   "rail": "veneer",
+   "balls": "classic",
+   "ring": null
+  },
+  "room": "rec"
  }
 ]
