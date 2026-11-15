@@ -273,6 +273,7 @@ final class TableModel {
     if let c = cue { lastCue = (c.x, c.y, aim) }
     sim.strike(tab, aim, pw, spin)
     rolling = tab; heard = 0; carry = 0; lastT = t; inHand = false; power = 0; stroke = nil; shotAt = t
+    fps.prev = nil   /* the -felt-fps hook counts a roll's own frames: the time between rolls is no stall */
   }
 
   static let fpsOn = ProcessInfo.processInfo.arguments.contains("-felt-fps")
