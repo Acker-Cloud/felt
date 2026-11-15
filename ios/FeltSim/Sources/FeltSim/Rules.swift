@@ -106,7 +106,11 @@ public struct Verdict: Equatable, Sendable {
   public var snk: SnkVerdict? = nil
   /* carom's (sim 1k): the point, the count, the balls back on their spots */
   public var carom: CaromVerdict? = nil
+  /* bumper pool's (sim 1g) */
+  public var bumper: BumperVerdict? = nil
 }
+/* the opponent's balls that went down for them, the balls returned, the foul's penalty ball, the opening shot played */
+public struct BumperVerdict: Equatable, Sendable { public var gave: [Int], back: [Int], dropped: Int?, opening: Int }
 public struct CaromCount: Equatable, Sendable {
   public var first: Int?, balls: [Int], cushions: Int, point: Bool
   public init(first: Int?, balls: [Int], cushions: Int, point: Bool) { self.first = first; self.balls = balls; self.cushions = cushions; self.point = point }
@@ -157,6 +161,8 @@ public struct Game: Sendable {
   public var snk: SnkState? = nil
   /* carom's (sim 1k): the shooter's cue ball, the cushions a point needs, innings per player */
   public var striker: Int? = nil, need: Int? = nil, innings: [Int]? = nil
+  /* bumper pool's (sim 1g): 1 while red plays the opening shot, 2 while white does, then 0; who potted their marked ball on it */
+  public var opening: Int? = nil, openPot: [Bool]? = nil
   func ball(_ n: Int) -> GBall? { balls.first { $0.n == n } }
 }
 
@@ -168,6 +174,7 @@ public final class RulesEngine {
   public func newGame(_ kind: String, rules: RuleSet? = nil) -> Game {
     if kind == "snooker" { return snookerGame() }
     if kind == "carom" { return caromGame() }
+    if kind == "bumper" { return bumperGame() }
     let R = rules.flatMap { $0.made && $0.game == kind ? $0 : nil } ?? makeRules(kind)
     let np = R.players
     let balls = sim.rack(kind).map { b -> GBall in GBall(n: b.n, x: b.x, y: b.y) }
@@ -228,6 +235,7 @@ public final class RulesEngine {
   public func legalTargets(_ g: Game) -> [Int] {
     if g.kind == "snooker" { return snookerOn(g) }
     if g.kind == "carom" { return caromTargets(g) }
+    if g.kind == "bumper" { return onTable(g) }   /* any ball may be touched first */
     let on = onTable(g)
     if g.mode != nil || g.kind == "straight" { return on }
     if !is8(g.kind) { return Array(on.prefix(1)) }
@@ -253,6 +261,8 @@ public final class RulesEngine {
   /* on the cloth, clear of every cushion surface and of the pocket mouths, touching no ball, and behind
      the head string when the hand is the kitchen (the pocket games' canPlace) */
   public func canPlace(_ g: Game, _ x: Double, _ y: Double) -> Bool {
+    if g.kind == "bumper" { return bumperFree(g.balls, x, y, -1) }
+    if g.kind == "carom" { return caromFree(g.balls, x, y, -1) }
     let R = sim.BALL_R
     if !(x >= R && x <= sim.TL - R && y >= R && y <= sim.TW - R) { return false }
     if g.inHand == "kitchen" && x > sim.HEAD_X { return false }
@@ -354,6 +364,7 @@ public final class RulesEngine {
     switch g.kind {
     case "snooker": return judgeSnooker(g, r)
     case "carom": return judgeCarom(g, r)
+    case "bumper": return judgeBumper(g, r)
     case "9", "10": return judgeLowest(g, r)
     case "rotation": return judgeRotation(g, r)
     case "straight": return judgeStraight(g, r)

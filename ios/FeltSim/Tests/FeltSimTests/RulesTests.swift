@@ -39,6 +39,9 @@ func decodeGame(_ o: [String: Any], rules: RuleSet) -> Game {
   if let h = o["high"] as? [NSNumber] { g.high = h.map { $0.intValue } }
   if let r = o["run"] { g.run = int(r) }
   if let v = o["verdict"] as? [String: Any] { g.verdict = decodeVerdict(v) }
+  if g.kind == "bumper" {
+    g.striker = int(o["striker"]); g.opening = int(o["opening"]); g.openPot = (o["openPot"] as! [NSNumber]).map { $0.boolValue }
+  }
   if g.kind == "carom" {
     g.striker = int(o["striker"]); g.need = int(o["need"]); g.innings = (o["innings"] as! [NSNumber]).map { $0.intValue }
   }
@@ -55,6 +58,15 @@ func decodeGame(_ o: [String: Any], rules: RuleSet) -> Game {
   return g
 }
 func decodeVerdict(_ v: [String: Any]) -> Verdict {
+  if v["gave"] != nil {
+    var o = Verdict(foul: str(v["foul"]), keep: v["keep"] as! Bool, win: int(v["win"]), why: v["why"] as! String, potted: (v["potted"] as! [NSNumber]).map { $0.intValue },
+                    scratch: false, grouped: false, twoFouls: false,
+                    call: CallOut(ball: nil, pocket: nil, auto: false, need: false, made: nil, safety: false, push: false, missing: nil, extra: [], why: ""),
+                    push: false, option: nil, scored: 0, rerack: nil, threeFouls: false, illegalBreak: false)
+    let ints = { (a: Any?) in (a as! [NSNumber]).map { $0.intValue } }
+    o.bumper = BumperVerdict(gave: ints(v["gave"]), back: ints(v["back"]), dropped: int(v["dropped"]), opening: int(v["opening"])!)
+    return o
+  }
   if let c = v["count"] as? [String: Any] {
     var o = Verdict(foul: str(v["foul"]), keep: v["keep"] as! Bool, win: int(v["win"]), why: v["why"] as! String, potted: [], scratch: false, grouped: false, twoFouls: false,
                     call: CallOut(ball: nil, pocket: nil, auto: false, need: false, made: nil, safety: false, push: false, missing: nil, extra: [], why: ""),
@@ -164,7 +176,20 @@ func encodeCarom(_ g: Game) -> [String: Any] {
   }
   return o
 }
+/* bumper pool's game as the page writes it (bumperGame's fields, judgeBumper's verdict) */
+func encodeBumper(_ g: Game) -> [String: Any] {
+  func opt(_ a: Any?) -> Any { a ?? NSNull() }
+  var o: [String: Any] = ["kind": g.kind, "balls": g.balls.map(encodeBall), "turn": g.turn, "groups": [NSNull(), NSNull()], "open": g.open, "breakShot": g.breakShot,
+    "inHand": opt(g.inHand), "fouls": g.fouls, "winner": opt(g.winner), "shots": g.shots, "dry": g.dry, "verdict": NSNull(),
+    "opening": g.opening!, "openPot": g.openPot!, "striker": opt(g.striker)]
+  if let v = g.verdict, let b = v.bumper {
+    o["verdict"] = ["foul": opt(v.foul), "keep": v.keep, "win": opt(v.win), "why": v.why, "potted": v.potted, "gave": b.gave, "back": b.back, "dropped": opt(b.dropped),
+      "scratch": v.scratch, "grouped": v.grouped, "twoFouls": v.twoFouls, "opening": b.opening] as [String: Any]
+  }
+  return o
+}
 func encode(_ g: Game) -> [String: Any] {
+  if g.kind == "bumper" { return encodeBumper(g) }
   if g.kind == "snooker" { return encodeSnooker(g) }
   if g.kind == "carom" { return encodeCarom(g) }
   func ball(_ b: GBall) -> [String: Any] { encodeBall(b) }

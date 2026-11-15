@@ -33,7 +33,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -339,10 +339,41 @@ function build() {
     games.push({ name: `carom ${gi % 3 === 2 ? 'one' : 'three'}-cushion ${gi}`, kind: 'carom', ruleset: 'carom', mode: 'official', race: 5, need: gi % 3 === 2 ? 1 : 3, side: gi % 2 ? -1 : 1,
       table: 'carom', shape: null, g0, steps });
   }
+  /* bumper pool: whole games by the page's judgeBumper on both shapes, half the shots the page's own CPU (so balls
+     drop and games end), the rest at the far cup with noise or anywhere, now and then with the wrong ball (a foul).
+     Its own stream, so the other fixtures' draws are as they were. */
+  let gseed = 4242;
+  const grnd = () => { gseed = (Math.imul(gseed, 1103515245) + 12345) >>> 0; return gseed / 4294967296; };
+  for (let gi = 0; gi < 6; gi++) {
+    const shape = gi % 2 ? 'rect' : 'octagon';
+    setT(['bumper', shape, 'regulation']);
+    let g = S.newGame('bumper');
+    const steps = [], bare = x => JSON.parse(JSON.stringify(x)), g0 = bare(g);
+    for (let k = 0; k < 200 && g.winner === null; k++) {
+      const step = {};
+      let shotIn;
+      if (grnd() < 0.5) { const cs = S.cpuShot(g, gi * 1000 + k, ['easy', 'medium'][gi % 2]); shotIn = { angle: cs.angle, power: cs.power, spin: S.spinOf(cs.spin), ball: cs.ball }; }
+      else {
+        const own = S.bumperStrikers(g), all = g.balls.filter(b => b.on).map(b => b.n);
+        const ball = grnd() < 0.06 ? all[Math.floor(grnd() * all.length)] : own[Math.floor(grnd() * own.length)], c = g.balls.find(b => b.n === ball), T = S.POCKETS[1 - g.turn];
+        const ang = grnd() < 0.7 ? Math.atan2(T[1] - c.y, T[0] - c.x) + (grnd() - 0.5) * 0.5 : grnd() * 2 * Math.PI;
+        shotIn = { angle: ang, power: 0.15 + grnd() * 0.75, spin: S.spinOf(grnd() < 0.5 ? 0 : { x: grnd() - 0.5, y: grnd() - 0.5 }), ball };
+      }
+      step.shot = { ball: shotIn.ball, angle: hx(shotIn.angle), power: hx(shotIn.power), spin: { x: hx(shotIn.spin.x), y: hx(shotIn.spin.y) } };
+      const res = S.simulateShot(g.balls, shotIn);
+      step.r = JSON.parse(JSON.stringify({ balls: res.balls, cue: res.cue, first: res.first, railAfter: res.railAfter, crossed: res.crossed, potted: res.potted, pocketOf: res.pocketOf, rails: res.rails, kick: res.kick }));
+      const out = S.judge(g, res);
+      step.out = bare(out);
+      steps.push(step);
+      g = out;
+    }
+    games.push({ name: `bumper/${shape} game ${gi}`, kind: 'bumper', ruleset: 'bumper', mode: 'official', race: null, table: 'bumper', shape, g0, steps });
+  }
   /* the CPU: from positions of those games, the page's cpuShot at each level (fixed seeds) and its
      cpuOption wherever a choice is pending; the state is game gi after step k (k -1: its opening) */
   const cpu = [];
   games.forEach((G, gi) => {
+    if (G.kind === 'bumper') return;   /* bumper's CPU: not yet in the fixtures */
     setT([G.table, G.shape || null, 'regulation']);
     const R0 = G.kind === 'carom' || G.kind === 'snooker' ? null : S.newGame(G.kind, { rules: { ruleset: G.ruleset, call: { mode: G.mode }, race: G.race === null ? undefined : G.race } }).rules;
     const at = k => { const o = JSON.parse(JSON.stringify(k < 0 ? G.g0 : G.steps[k].out)); return R0 ? Object.assign(o, { rules: R0 }) : o; };
