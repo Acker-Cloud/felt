@@ -106,6 +106,7 @@ import Testing
         Issue.record("\(c["profile"]!["name"]!.s) checkpoint \(k): first difference at \(i): ...\(String(decoding: g[Swift.max(0, i - 60)..<Swift.min(g.count, i + 60)], as: UTF8.self))... vs ...\(String(decoding: w[Swift.max(0, i - 60)..<Swift.min(w.count, i + 60)], as: UTF8.self))...")
       }
       }
+      #expect(E.digest() == c["digest"]!.s, "\(c["profile"]!["name"]!.s): Career.digest() \(E.digest()) vs \(c["digest"]!.s)")
       E.trace = []
     }
   }

@@ -165,6 +165,11 @@ public final class CareerEngine {
     trace.append(S.stringify())
     S["cal"] = genCalendar(1)
     trace.append(S.stringify())
+    weekly()
+    sponsorOffers("season")
+    upgrade()
+    news("\(pr["name"]!.s) starts out as a \(Self.c("TIERS")[S["me"]!["tier"]!.i]!["name"]!.s).")
+    trace.append(S.stringify())
     return (true, id)
   }
   /* the states at the page's checkpoints in create (the golden's __trace), for the tests */
@@ -344,6 +349,222 @@ public final class CareerEngine {
       if dt != 0 { return dt < 0 }
       return a["id"]!.s < b["id"]!.s
     }
+  }
+
+  // MARK: the player: money, news, stats
+  func news(_ text: String) {
+    var n = S["news"]!.a
+    n.append([.n(S["day"]!.d), .str(text)])
+    if n.count > 60 { n.removeFirst() }
+    S["news"] = .arr(n)
+  }
+  /* every credit in or out: the ledger keeps the last 40, the totals keep all */
+  func pay(_ amount: Double, _ kind: String, _ note: String) {
+    if amount == 0 || amount.isNaN { return }
+    let money = S["me"]!["money"]!.d + amount, tot = (S["tot"]![kind]?.num ?? 0) + abs(amount)
+    S["me"]?["money"] = .n(money)
+    S["tot"]?[kind] = .n(tot)
+    var l = S["led"]!.a
+    l.append([.n(S["day"]!.d), .n(amount), .str(kind), .str(note)])
+    if l.count > 40 { l.removeFirst() }
+    S["led"] = .arr(l)
+  }
+  func statD(_ d: String) -> JV {
+    if S["st"]?["d"]?[d] == nil { S["st"]?["d"]?[d] = Self.blankStat() }
+    return S["st"]!["d"]![d]!
+  }
+  func activeAI(_ id: Int) -> Bool { guard let m = S["pop"]?["m"]?[String(id)] else { return false }; return m["x"] == nil }
+  func weekOf(_ day: Int) -> Int { Int((Double(day % Self.YEAR) / 7).rounded(.down)) + 1 }
+  func gweek(_ day: Int) -> Int { Int((Double(day) / 7).rounded(.down)) }
+
+  // MARK: rankings
+  /* S.aw: [id, circuit, discipline index, points, global week, season]. key: a circuit index (0 local: this season only;
+     1-4: the last 52 weeks), "d:<disc>" (52 weeks, every circuit) or "season" */
+  public enum RankKey { case circ(Int), disc(String), season }
+  func points(_ key: RankKey, _ gw0: Int? = nil) -> [(Int, Double)] {
+    let gw = gw0 ?? gweek(S["day"]!.i), sNow = Int((Double(gw) / 52).rounded(.down)) + 1
+    var order: [Int] = [], m: [Int: Double] = [:]
+    let discs = Self.c("DISCS").a.map { $0.s }
+    for a in S["aw"]!.a {
+      if a[4]!.i > gw { continue }
+      let ok: Bool
+      switch key {
+      case .season: ok = a[5]!.i == sNow
+      case .circ(0): ok = a[1]!.i == 0 && a[5]!.i == sNow
+      case .disc(let d): ok = a[2]!.i == (discs.firstIndex(of: d) ?? -1) && a[4]!.i > gw - 52
+      case .circ(let c): ok = a[1]!.i == c && a[4]!.i > gw - 52
+      }
+      if ok { let id = a[0]!.i; if m[id] == nil { order.append(id) }; m[id] = (m[id] ?? 0) + a[3]!.d }
+    }
+    return order.map { ($0, m[$0]!) }
+  }
+  func rankList(_ key: RankKey, _ gw: Int? = nil) -> [(Int, Double)] {
+    points(key, gw).filter { $0.1 > 0 }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }
+  }
+  func rankOf(_ id: Int, _ key: RankKey, _ gw: Int? = nil) -> Int? { rankList(key, gw).firstIndex { $0.0 == id }.map { $0 + 1 } }
+
+  // MARK: rivals
+  /* a rivalry: how much of it there is, times how close it is */
+  func rivalScore(_ h: JV) -> Double {
+    let v = { (i: Int) in h[i]!.d }, n = v(0) + v(1), c = n != 0 ? 1 - abs(v(0) - v(1)) / n : 1
+    return (n + 3 * (v(2) + v(3)) + 2 * (v(4) + v(5)) + v(6) + abs(v(7))) * (0.2 + 0.8 * c)
+  }
+  func rivalLive(_ id: Int) -> Bool { activeAI(id) && abs((S["pop"]!["m"]![String(id)]?["t"]?.num ?? 0) - S["me"]!["tier"]!.d) <= Self.c("RIVAL_GAP").d }
+  func rivalList(_ n: Int = 10) -> [Int] {
+    let ids: [Int] = S["h2h"]!.keys.map { Int($0)! }.filter { rivalLive($0) }
+    var sc: [(Int, Double)] = []
+    for id in ids { let v = rivalScore(S["h2h"]![String(id)]!); if v >= 3 { sc.append((id, v)) } }
+    sc.sort { a, b in a.1 != b.1 ? a.1 > b.1 : a.0 < b.0 }
+    return sc.prefix(n).map { $0.0 }
+  }
+
+  // MARK: offers: sponsors, challenges, exhibitions
+  func nextId() -> String { let n = S["nx"]!.i + 1; S["nx"] = .n(n); return "o\(n)" }
+  func sponsorOffers(_ why: String) {
+    let open = S["off"]!.a.filter { $0["type"] == "sponsor" }.count
+    if open >= 3 || (S["me"]!["tier"]!.i < 2 && S["me"]!["rep"]!.d < 10) { return }
+    let r = Self.R([String(S["seed"]!.i), "spo", String(S["day"]!.i), why, String(S["nx"]!.i)]), t = Swift.min(11, S["me"]!["tier"]!.i), rep = S["me"]!["rep"]!.d
+    let k = Swift.min(3 - open, why == "season" ? 2 : 1)
+    for _ in 0..<Swift.max(0, k) {
+      let cat = Self.pick(r, Self.c("SPONSOR_CATS").a.map { $0.s }), weeks = r() < 0.5 ? 26 : 52, circ = Self.c("TIERS")[t]!["circ"]!.i
+      let sd = S["st"]!["d"]!
+      let disc = sd.keys.sorted { a, b in let d = sd[b]!["w"]!.d - sd[a]!["w"]!.d; return d != 0 ? d < 0 : a < b }.first ?? S["profile"]!["disc"]!.s
+      let tt = Double(t * t), w = Double(weeks)
+      var pool: [JV] = [
+        ["k": "wins", "n": .n(CareerLib.round((w / 26) * Double(6 + t))), "pay": .n(15 * tt)],
+        ["k": "titles", "n": .n(weeks == 52 ? 2 : 1), "pay": .n(60 * tt)],
+        ["k": "finals", "n": .n(weeks == 52 ? 3 : 2), "pay": .n(30 * tt)],
+        ["k": "rank", "c": .n(circ), "n": .n(t >= 8 ? 16 : 8), "pay": .n(40 * tt)],
+        ["k": "disc", "d": .str(disc), "n": .n(CareerLib.round((w / 26) * 4)), "pay": .n(20 * tt)],
+        ["k": "events", "n": .n(CareerLib.round(w / 4)), "pay": .n(10 * tt)],
+      ]
+      var obj: [JV] = []
+      while obj.count < 2 + (weeks == 52 ? 1 : 0) { obj.append(pool.remove(at: Int((r() * Double(pool.count)).rounded(.down)))) }
+      let brand = "\(Self.pick(r, Self.c("BRANDS").a.map { $0.s })) \(cat)"
+      let ret = CareerLib.round(3 * M.pow(Double(t), 1.7) * (1 + Swift.min(rep, 300) / 150) * formF(t))
+      var off = S["off"]!.a
+      let id = nextId()
+      off.append(["id": .str(id), "type": "sponsor", "brand": .str(brand), "cat": .str(cat), "weeks": .n(weeks), "ret": .n(ret), "obj": .arr(obj), "bonus": .n(25 * tt), "exp": .n(S["day"]!.i + 28)])
+      S["off"] = .arr(off)
+    }
+  }
+  /* what the last 26 weeks are worth to a sponsor: 0.5 (cold) to 1.25 */
+  func formF(_ t: Int) -> Double {
+    let gw = gweek(S["day"]!.i)
+    let pts = S["aw"]!.a.reduce(0.0) { $0 + ($1[0]!.i == Self.HUMAN && $1[4]!.i > gw - 26 ? $1[3]!.d : 0) }
+    return 0.5 + 0.75 * Self.cl(pts / (Self.c("BP")[t]!.d * 2), 0, 1)
+  }
+  func objText(_ o: JV) -> String {
+    let k = o["k"]!.s, n = o["n"]!.i
+    switch k {
+    case "wins": return "Win \(n) matches"
+    case "titles": return "Win \(n) title\(n > 1 ? "s" : "")"
+    case "finals": return "Reach \(n) finals"
+    case "rank": return "Reach the top \(n) of the \(Self.c("CIRC_NAMES")[o["c"]!.i]!.s) rankings"
+    case "disc": return "Win \(n) \(Self.c("SHORT")[o["d"]!.s]!.s) matches"
+    default: return "Play \(n) events"
+    }
+  }
+  func objNow(_ o: JV) -> Double {
+    let a = S["st"]!["all"]!
+    switch o["k"]!.s { case "wins": return a["w"]!.d; case "titles": return a["ti"]!.d; case "finals": return a["fi"]!.d; case "disc": return statD(o["d"]!.s)["w"]!.d; case "events": return a["ev"]!.d; default: return 0 }
+  }
+  /* a contract half met or better is offered again: the same brand, new objectives, more if all were met */
+  func renewal(_ c: JV, _ met: Int) {
+    let objN = c["obj"]!.count
+    if met * 2 < objN || S["off"]!.a.contains(where: { $0["brand"] == c["brand"] }) || S["off"]!.a.filter({ $0["type"] == "sponsor" }).count >= 3 { return }
+    let t = Swift.min(11, S["me"]!["tier"]!.i), weeks = CareerLib.round((c["to"]!.d - c["from"]!.d) / 7) == 52 ? 52 : 26
+    let r = Self.R([String(S["seed"]!.i), "renew", String(S["day"]!.i), String(S["nx"]!.i)]), tt = Double(t * t), w = Double(weeks)
+    var pool: [JV] = [["k": "wins", "n": .n(CareerLib.round((w / 26) * Double(6 + t))), "pay": .n(15 * tt)], ["k": "finals", "n": .n(weeks == 52 ? 3 : 2), "pay": .n(30 * tt)],
+                      ["k": "events", "n": .n(CareerLib.round(w / 4)), "pay": .n(10 * tt)], ["k": "titles", "n": .n(weeks == 52 ? 2 : 1), "pay": .n(60 * tt)]], obj: [JV] = []
+    while obj.count < 2 { obj.append(pool.remove(at: Int((r() * Double(pool.count)).rounded(.down)))) }
+    var off = S["off"]!.a
+    let id = nextId()
+    off.append(["id": .str(id), "type": "sponsor", "renew": true, "brand": c["brand"]!, "cat": c["cat"]!, "weeks": .n(weeks),
+                "ret": .n(CareerLib.round(c["ret"]!.d * (met == objN ? 1.15 : 1))), "obj": .arr(obj), "bonus": c["bonus"]!, "exp": .n(S["day"]!.i + 28)])
+    S["off"] = .arr(off)
+    news("\(c["brand"]!.s) offers to renew.")
+  }
+  func checkSponsors() {
+    var sp = S["spons"]!.a
+    for ci in sp.indices {
+      if truthy(sp[ci]["end"]) { continue }
+      var obj = sp[ci]["obj"]!.a
+      for oi in obj.indices {
+        if truthy(obj[oi]["done"]) { continue }
+        let o = obj[oi]
+        let ok = o["k"] == "rank" ? Double(rankOf(Self.HUMAN, .circ(o["c"]!.i)) ?? 1_000_000_000) <= o["n"]!.d : objNow(o) - o["base"]!.d >= o["n"]!.d
+        if ok {
+          let day = S["day"]!.d
+          obj[oi]["done"] = .n(day)
+          sp[ci]["obj"] = .arr(obj); S["spons"] = .arr(sp)
+          pay(o["pay"]!.d, "spons", "\(sp[ci]["brand"]!.s): \(objText(o))"); news("\(sp[ci]["brand"]!.s) objective met: \(objText(o)).")
+        }
+      }
+      sp[ci]["obj"] = .arr(obj)
+    }
+    S["spons"] = .arr(sp)
+  }
+  func closeContract(_ ci: Int) {
+    let day = S["day"]!.d
+    S["spons"]?[ci]?["end"] = .n(day)
+    let c = S["spons"]![ci]!, met = c["obj"]!.a.filter { truthy($0["done"]) }.count, n = c["obj"]!.count
+    if met == n { pay(c["bonus"]!.d, "spons", "\(c["brand"]!.s): every objective met") }
+    news("\(c["brand"]!.s) contract ended: \(met) of \(n) objectives met.")
+    var h = S["sph"]!.a
+    h.append([c["brand"]!, c["from"]!, c["to"]!, .n(met), .n(n)])
+    if h.count > 20 { h.removeFirst() }
+    S["sph"] = .arr(h)
+    renewal(c, met)
+  }
+  /* a rival's challenge or an exhibition: a two-player event of its own, best of legs */
+  func matchOffer(_ type: String, _ opp: Int, _ r: () -> Double) {
+    let sea = season, t = Swift.min(11, S["me"]!["tier"]!.i), start = S["day"]!.i + 14 + Int((r() * 10).rounded(.down))
+    if seasonOf(start + 3) != sea || weekOf(start) > 49 { return }
+    let disc = S["profile"]!["disc"]!.s
+    let race = Self.isPool(disc) && disc != "straight" ? Self.c("RACE")[t]!.i : 3
+    var off = S["off"]!.a
+    let id = nextId()
+    off.append(["id": .str(id), "type": .str(type), "opp": .n(opp), "start": .n(start), "end": .n(start + (type == "exhibition" ? 1 : 0)), "legs": .n(type == "exhibition" ? 3 : 1),
+                "disc": .str(["8", "9"].contains(disc) ? disc : "9"), "race": .n(race), "tier": .n(t), "purse": .n(Double((type == "exhibition" ? 60 : 30) * t * t)), "exp": .n(S["day"]!.i + 10)])
+    S["off"] = .arr(off)
+  }
+  func weekly() {
+    let day = S["day"]!.i
+    for ci in S["spons"]!.a.indices {
+      let c = S["spons"]![ci]!
+      if truthy(c["end"]) { continue }
+      if Double(day) >= c["to"]!.d { closeContract(ci) } else { pay(c["ret"]!.d, "spons", "\(c["brand"]!.s) retainer") }
+    }
+    S["spons"] = .arr(S["spons"]!.a.filter { !truthy($0["end"]) })
+    S["off"] = .arr(S["off"]!.a.filter { $0["exp"]!.d > Double(day) })
+    checkSponsors()
+    let circ = Self.c("TIERS")[S["me"]!["tier"]!.i]!["circ"]!.i
+    if let rk = rankOf(Self.HUMAN, .circ(circ)) {
+      var rh = S["rh"]!.a
+      rh.append([.n(gweek(day)), .n(circ), .n(rk)])
+      if rh.count > 260 { rh.removeFirst() }
+      S["rh"] = .arr(rh)
+      let b = S["best"]![String(circ)]
+      if b == nil || Double(rk) < b![0]!.d { let v: JV = [.n(rk), .n(season), .n(weekOf(day))]; S["best"]?[String(circ)] = v }
+    }
+    let r = Self.R([String(S["seed"]!.i), "week", String(gweek(day))])
+    if let rv = rivalList(1).first, activeAI(rv), rivalScore(S["h2h"]![String(rv)]!) >= 6, !S["off"]!.a.contains(where: { $0["type"] == "challenge" }),
+       (S["ss"]!["ch"]?.num ?? 0) < Self.c("CHALLENGES").d, r() < 0.25 {
+      let before = S["off"]!.count
+      matchOffer("challenge", rv, r)
+      if S["off"]!.count > before { let ch = (S["ss"]!["ch"]?.num ?? 0) + 1; S["ss"]?["ch"] = .n(ch) }
+    }
+    if S["me"]!["rep"]!.d >= 60 && !S["off"]!.a.contains(where: { $0["type"] == "exhibition" }) && r() < 0.12 {
+      if let star = rankList(.circ(Swift.min(4, circ + 1))).map({ $0.0 }).first(where: { $0 != Self.HUMAN && activeAI($0) }) { matchOffer("exhibition", star, r) }
+    }
+  }
+  /* a save of any age gains what it lacks */
+  func upgrade() {
+    if !truthy(S["ml"]) { S["ml"] = [:] }
+    if S["rev"] == nil { let n = S["arch"]!.count; S["rev"] = .n(n) }
+    if S["me"]!["fr"] == nil { let d = S["profile"]!["disc"]!.s, fr = CareerLib.round(CareerLib.rate(humanAttrs(), d, d) * Self.c("FR_K").d); S["me"]?["fr"] = .n(fr) }
+    if S["me"]!["cardAt"] == nil { let sea = season; S["me"]?["cardAt"] = .n(sea) }
   }
 
   public func digest() -> String { String(CareerLib.hashStr(S.stringify()), radix: 36) }

@@ -43,7 +43,7 @@ function loadFd() {
   const at1 = '    assignTiers(Object.keys(S.pop.m).map(Number), i => ratingOf(i, prefOf(i)));';
   if (!src.includes(at1)) throw new Error('ios-golden: Career create moved');
   src = src.replace(at1, at1 + ' __trace.push(JSON.stringify(S));');
-  for (const at of ['    S.ser = genSeries(seed, pr.nat, pr.town);', '    S.cal = genCalendar(1);']) {
+  for (const at of ['    S.ser = genSeries(seed, pr.nat, pr.town);', '    S.cal = genCalendar(1);', "    news(`${pr.name} starts out as a ${TIERS[S.me.tier].name}.`);"]) {
     if (!src.includes(at)) throw new Error('ios-golden: Career create moved: ' + at);
     src = src.replace(at, at + ' __trace.push(JSON.stringify(S));');
   }
