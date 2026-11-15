@@ -73,7 +73,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf', 'newPractice', 'practiceJudge', 'scatter', 'addBall', 'removeBall', 'rng', 'canDrop', 'onTable', 'TRICKS', 'trickJudge', 'trickPoints', 'trickSol', 'trickGame', 'programMax', 'TRICK_VAL', 'trickPts', 'trickScoreFromStars', 'trickStars', 'newBall', 'DRILL_LIB', 'drillRun', 'drillShot', 'drillTier', 'drillTotal', 'drillJudge', 'drillBalls', 'drillOver'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf', 'newPractice', 'practiceJudge', 'scatter', 'addBall', 'removeBall', 'rng', 'canDrop', 'onTable', 'TRICKS', 'trickJudge', 'trickPoints', 'trickSol', 'trickGame', 'programMax', 'TRICK_VAL', 'trickPts', 'trickScoreFromStars', 'trickStars', 'newBall', 'DRILL_LIB', 'drillRun', 'drillShot', 'drillTier', 'drillTotal', 'drillJudge', 'drillBalls', 'drillOver', 'TUTORIALS', 'tutGame', 'tutJudge', 'tutNum', 'tutSol'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -794,7 +794,30 @@ ${D.NAT.map(n => `    (${q(n.id)}, ${q(n.name)}, ${q(n.first)}, ${q(n.last)}, ${
     const starts = [Date.UTC(2026, 0, 1), Date.UTC(1999, 11, 20), Date.UTC(2028, 1, 20), Date.UTC(1969, 11, 25), Date.UTC(2038, 0, 10)];
     for (const t0 of starts) for (let i = 0; i < 160; i++) { const day = at(t0 + i * 864e5); daily.days.push([day, fn.dayNum(day), fn.dailyTrick(day).id]); }
   }
-  return { math, career, careerData, jv, daily: JSON.stringify(daily), drills: JSON.stringify(drills), tricks: JSON.stringify(tricks), practice: JSON.stringify(practice), hero: JSON.stringify({ heroes }), v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
+  /* sim 1l, tutorials: every step (both groups where 8-ball's numbers swap) on its tutorial's table: the game as laid
+     (balls, the state its setup leaves), then the stored solution and two misses (the angle 0.04 off, at 40% power) struck
+     from the solution's placement, judged by the real judge and the step's goal, with the step's words */
+  const tutorials = { steps: [] };
+  {
+    const bits = v => hx(v);
+    for (const t of S.TUTORIALS) {
+      S.setPockets(t.pockets); S.setTable(...t.table);
+      t.steps.forEach((st, i) => {
+        for (const grp of t.ctx && st.swap ? ['solids', 'stripes'] : [t.ctx ? 'solids' : null]) {
+          const c = grp ? { group: grp } : {}, g0 = S.tutGame(t, i, c), sol = S.tutSol(t.id, i);
+          const view = g => ({ balls: g.balls.map(b => [b.n, bits(b.x), bits(b.y)]), inHand: g.inHand, striker: g.striker === undefined ? null : g.striker, need: g.need === undefined ? null : g.need,
+            groups: g.groups, open: g.open, on: g.on === undefined ? null : String(g.on), score: g.score || null, brk: g.brk === undefined ? null : g.brk, breakShot: g.breakShot, shots: g.shots, turn: g.turn });
+          const g = sol.place ? S.placeCue(g0, sol.place[0], sol.place[1]) : g0, ball = sol.ball === undefined ? (t.kind === 'carom' ? g0.striker : 0) : sol.ball;
+          const runs = [[0, 1], [0.04, 1], [0, 0.4]].map(([da, kp]) => {
+            const r = S.simulateShot(g.balls, { angle: sol.shot ? 0 : sol.angle + da, power: sol.power * kp, spin: sol.spin, ball }), j = S.tutJudge(t, i, g, r), v = j.n.verdict || {};
+            return { da, kp, ok: j.ok, why: j.why, potted: v.potted || [], foul: v.foul || null, winner: j.n.winner, turn: j.n.turn, done: j.ok && st.done ? st.done(j.n) : null };
+          });
+          tutorials.steps.push({ id: t.id, i, grp, head: st.head, text: st.text(c), aim: S.tutNum(t, i, c, st.aim) ?? null, pocket: st.pocket ?? null, game: view(g0), placed: sol.place ? view(g) : null, runs });
+        }
+      });
+    }
+  }
+  return { math, career, careerData, jv, tutorials: JSON.stringify(tutorials), daily: JSON.stringify(daily), drills: JSON.stringify(drills), tricks: JSON.stringify(tricks), practice: JSON.stringify(practice), hero: JSON.stringify({ heroes }), v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
 }
 /* tests/ios-check.cjs rebuilds both in memory and requires the committed files to match */
 module.exports = { build, OUT, loadFd };
@@ -813,6 +836,7 @@ if (require.main === module) {
   fs.writeFileSync(path.join(OUT, 'tricks.json'), b.tricks);
   fs.writeFileSync(path.join(OUT, 'drills.json'), b.drills);
   fs.writeFileSync(path.join(OUT, 'daily.json'), b.daily);
+  fs.writeFileSync(path.join(OUT, 'tutorials.json'), b.tutorials);
   fs.writeFileSync(path.join(__dirname, '..', 'ios', 'FeltSim', 'Sources', 'FeltSim', 'CareerData.swift'), b.careerData);
   const steps = b.cases.reduce((a, c) => a + c.result.steps, 0);
   console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${b.games.length} games (${b.games.reduce((a, g) => a + g.steps.length, 0)} judgements), ${b.cpuCases.length} CPU decisions, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);
