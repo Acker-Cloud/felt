@@ -34,6 +34,11 @@ check('ios trick shot goldens match the page (1h: layouts, stored solutions, the
 check('ios drill goldens match the page (1m: layouts along each run, scores and words, totals, tiers)', read('drills.json') === b.drills, read('drills.json') ? 'drills.json is stale' : 'drills.json missing');
 check('ios daily shot goldens match the page (5s: dayNum and the day\'s shot)', read('daily.json') === b.daily, read('daily.json') ? 'daily.json is stale' : 'daily.json missing');
 check('ios tutorial goldens match the page (1l: every step laid, solved and judged)', read('tutorials.json') === b.tutorials, read('tutorials.json') ? 'tutorials.json is stale' : 'tutorials.json missing');
+{
+  /* How to play's words in the app (ios/Felt/help.json) are the page's own, taken by tools/ios-help.cjs */
+  const H = require('../tools/ios-help.cjs'), have = fs.existsSync(H.OUT) ? fs.readFileSync(H.OUT, 'utf8') : null;
+  check('ios How to play words match the page (#howList and each topic)', have === H.build(), have ? 'help.json is stale: node tools/ios-help.cjs' : 'help.json missing');
+}
 check('ios career goldens and CareerData.swift match the career engine', read('career.json') === b.career && careerData === b.careerData,
   read('career.json') === b.career ? 'CareerData.swift is stale' : 'career.json is stale');
 check('the goldens cover every ported table and pot balls', b.tables.length === 10 && b.cases.length >= 150 && b.cases.some(c => c.result.potted.length > 3)

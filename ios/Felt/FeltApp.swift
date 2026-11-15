@@ -31,7 +31,12 @@ struct Home: View {
   @State private var tutoring: PracticeGo? = nil
   @State private var lessoning = false
   @State private var lessonOffer = false
+  @State private var helpPath: String? = nil
   struct PracticeGo: Identifiable { let layout: String; var id: String { layout } }
+  /* How to play's actions: the lesson, a game's tutorial, the drills, the career (More Modes: the home's Modes section) */
+  private var helpActs: HelpActions {
+    HelpActions(lesson: { lessoning = true }, tutorial: { tutoring = PracticeGo(layout: $0) }, modes: { helpPath = nil }, drills: { helpPath = "drills" }, career: { showCareer = true })
+  }
   /* maybeOfferLesson: once the opening is over, on a first run (no test hook) */
   private func maybeOfferLesson(_ s: IntroModel.State) {
     guard s == .done, !LessonStore.rec.seen, !ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-felt-") && $0 != "-felt-intro" && $0 != "-felt-offer" }) else { return }
@@ -156,10 +161,19 @@ struct Home: View {
       }
       .navigationTitle("").navigationBarTitleDisplayMode(.inline)
       .navigationDestination(isPresented: $showCareer) { CareerView(store: career) }
+      .navigationDestination(item: $helpPath) { p in
+        if p == "drills" { DrillsList { drilling = PracticeGo(layout: $0) } }
+        else if p.hasPrefix("topic:"), let t = HelpTopic.all.first(where: { $0.id == String(p.dropFirst(6)) }) { HelpPage(t: t, acts: helpActs) }
+        else { HelpView(acts: helpActs) }
+      }
       .navigationDestination(item: $statsPath) { k in if k == "all" { StatsView() } else { StatsKindPage(kind: k, rec: Rec.load()) } }
       .navigationDestination(item: $setupGame) { g in GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) }) }
       .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { store.markLive(); playingTourney = true } }
       .toolbar {
+        /* #helpBtn: How to play (6) */
+        ToolbarItem(placement: .topBarTrailing) {
+          NavigationLink { HelpView(acts: helpActs) } label: { Image(systemName: "questionmark.circle") }.accessibilityLabel("How to Play").accessibilityIdentifier("help")
+        }
         /* #statsBtn: Stats and records (6s) */
         ToolbarItem(placement: .topBarTrailing) {
           NavigationLink { StatsView() } label: { Image(systemName: "chart.bar") }.accessibilityLabel("Stats").accessibilityIdentifier("stats")
@@ -181,6 +195,8 @@ struct Home: View {
       if let i = a.firstIndex(of: "-felt-stats") { statsPath = i + 1 < a.count && !a[i + 1].hasPrefix("-") ? a[i + 1] : "all" }
       /* `-felt-practice 8|9|heyball|scatter|empty`: a practice session */
       if let i = a.firstIndex(of: "-felt-practice"), i + 1 < a.count { practicing = PracticeGo(layout: a[i + 1]) }
+      /* `-felt-help [topic]`: How to play, or a topic's page */
+      if let i = a.firstIndex(of: "-felt-help") { helpPath = i + 1 < a.count && !a[i + 1].hasPrefix("-") ? "topic:" + a[i + 1] : "help" }
       /* `-felt-lesson`: the lesson */
       if a.contains("-felt-lesson") { lessoning = true }
       /* `-felt-tutorial id`: that tutorial (`-felt-tutshow` plays each step's Show me) */

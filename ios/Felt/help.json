@@ -1,0 +1,699 @@
+{
+ "topics": [
+  {
+   "id": "Ctl",
+   "title": "Controls",
+   "sub": "Aim, power, spin",
+   "rules": [
+    [
+     "Aim",
+     "Drag anywhere on the table to swing the cue. Or tap where the cue ball should go."
+    ],
+    [
+     "Fine-Tune",
+     "Roll the ridged wheel beside the power bar for the last hair."
+    ],
+    [
+     "Shoot",
+     "Pull along the power bar and let go. The further you pull, the harder the hit."
+    ],
+    [
+     "Spin",
+     "Move the blue tip on the cue ball: high for follow, low for draw. Tap the tip, or double tap the pad, to centre it. Hold it to raise the cue: with side spin a raised cue curves the ball (a swerve low, a masse high)."
+    ],
+    [
+     "Ball in Hand",
+     "Drag the cue ball to place it, as often as you like. Only the shot locks it in."
+    ],
+    [
+     "Pause",
+     "Tap the pause button. The game waits."
+    ]
+   ],
+   "fine": [
+    "Only the power bar shoots. The table only aims.",
+    "To cancel a shot, slide back to the start or off the bar.",
+    "Auto aim starts each turn on the ball to play and marks a pocket. The cut is up to you.",
+    "To move the cue ball, start the drag on or next to it. Drop it somewhere illegal and it goes back to the last good spot."
+   ],
+   "act": {
+    "id": "lessonAgain",
+    "tut": null,
+    "text": "Play the Lesson"
+   }
+  },
+  {
+   "id": "8",
+   "title": "8-Ball",
+   "sub": "Solids and stripes",
+   "rules": [
+    [
+     "Break",
+     "Ball in hand behind the head string."
+    ],
+    [
+     "Groups",
+     "The table is open until the first legal pot. That player takes the group: solids (1 to 7) or stripes (9 to 15)."
+    ],
+    [
+     "Your Shot",
+     "Hit one of yours first. Then pot a ball or send any ball to a rail."
+    ],
+    [
+     "Go Again",
+     "Pot one of yours, in any pocket, and you shoot again."
+    ],
+    [
+     "Fouls",
+     "The wrong ball first, no rail, or the cue ball down. Your opponent gets ball in hand anywhere."
+    ],
+    [
+     "Win",
+     "Clear your group, then pot the 8."
+    ],
+    [
+     "Lose",
+     "Pot the 8 before your group is clear, or scratch while potting it."
+    ]
+   ],
+   "fine": [
+    "Once your group is gone, the 8 is the ball to hit first.",
+    "An 8 potted on the break is spotted and the breaker carries on.",
+    "Under WPA rules: a total miss on the break is an illegal break; a ball off the table on it gives your opponent the table as it lies or ball in hand behind the head string; on an open table with a group gone, the 8 may be played; a called ball must be your own."
+   ],
+   "act": {
+    "id": "tutGo8",
+    "tut": "8",
+    "text": "Play the 8-Ball Tutorial"
+   }
+  },
+  {
+   "id": "9",
+   "title": "9-Ball",
+   "sub": "Lowest ball first",
+   "rules": [
+    [
+     "Rack",
+     "Nine balls in a diamond: the 1 in front, the 9 in the middle. Break from behind the head string."
+    ],
+    [
+     "Lowest First",
+     "Always hit the lowest ball on the table first. Then pot a ball or hit a rail."
+    ],
+    [
+     "Any Pot Counts",
+     "Whatever drops counts, so combinations and caroms are fine."
+    ],
+    [
+     "Fouls",
+     "Your opponent gets ball in hand anywhere."
+    ],
+    [
+     "Three in a Row",
+     "Three fouls in a row lose the game. You are warned after two."
+    ],
+    [
+     "Win",
+     "Pot the 9 on a legal shot, early or last."
+    ]
+   ],
+   "fine": [
+    "The warning after two fouls shows on the chip and in the pause menu.",
+    "Under WPA rules: three balls must drop or lie past the head string after a break, or your opponent may hand it back and any 9 is spotted. No push out after a foul on the break."
+   ],
+   "act": {
+    "id": "tutGo9",
+    "tut": "9",
+    "text": "Play the 9-Ball Tutorial"
+   }
+  },
+  {
+   "id": "Bump",
+   "title": "Bumper Pool",
+   "sub": "Five each, to the far cup",
+   "rules": [
+    [
+     "The Game",
+     "Red against white, five balls each, round twelve posts. There is no cue ball: you strike your own."
+    ],
+    [
+     "Aim for the Far Cup",
+     "Pot your balls in the cup at the far end. Never your own cup."
+    ],
+    [
+     "Marked Ball First",
+     "Your ball with the spot must drop before any other of yours."
+    ],
+    [
+     "Pick a Ball",
+     "Tap one of yours to strike it. Auto aim picks one, and a line, for you."
+    ],
+    [
+     "Opening",
+     "Red, then white, shoot their marked ball. Whoever potted goes next (red if both). If neither did, the one nearer the far cup."
+    ],
+    [
+     "Go Again",
+     "Pot one of yours in the far cup and you shoot again."
+    ],
+    [
+     "Fouls",
+     "Striking their ball, one of yours in your own cup, an unmarked ball before your marked one, potting theirs, or a ball off the table."
+    ],
+    [
+     "After a Foul",
+     "Your balls that dropped go back to your marked spot. Your opponent drops one of theirs in."
+    ],
+    [
+     "Win",
+     "The first with all five down."
+    ]
+   ],
+   "fine": [
+    "A foul on white's opening shot gives red the table.",
+    "Potting your opponent's ball counts for them.",
+    "The ball they drop in is their marked one if it is still up, else the one furthest from their cup.",
+    "With a keyboard, B picks the ball to strike.",
+    "Choose the classic octagon or the rectangle when you start."
+   ],
+   "act": {
+    "id": "tutGoB",
+    "tut": "bumper",
+    "text": "Play the Bumper Pool Tutorial"
+   }
+  },
+  {
+   "id": "Carom",
+   "title": "Three-Cushion",
+   "sub": "Three cushions, no pockets",
+   "rules": [
+    [
+     "The Game",
+     "Three balls and no pockets on a 10 ft table. You only ever strike your own cue ball: white for player 1, yellow for player 2."
+    ],
+    [
+     "Score a Point",
+     "Your cue ball hits both other balls, and three cushions before the second one."
+    ],
+    [
+     "Counting Cushions",
+     "Any order. The same cushion twice counts twice, and cushions before the first ball count too."
+    ],
+    [
+     "Go Again",
+     "Score and you shoot again. Otherwise the turn passes."
+    ],
+    [
+     "Break",
+     "Hit the red first, directly: no cushion before it."
+    ],
+    [
+     "Fouls",
+     "A ball off the table, not the red first on the break, or your cue ball played straight into a ball it touches. No point, and the turn passes."
+    ],
+    [
+     "Win",
+     "The first to the race: 5, 10 or 15 points, chosen when you start."
+    ]
+   ],
+   "fine": [
+    "In the one-cushion game, one cushion is enough.",
+    "The break: the red on the foot spot, your opponent's ball on the head spot, yours beside it on the head string.",
+    "A ball off the table goes back on its spot: the red the foot spot, the next shooter's ball the head spot, the other the centre spot. A spot taken: the spot of the ball on it.",
+    "With your cue ball touching a ball you may play on, the other ball or a cushion first, or have the touching balls spotted.",
+    "The full aim guide traces your cue ball through its first three cushions, a dot on each."
+   ],
+   "act": {
+    "id": "tutGoC",
+    "tut": "carom",
+    "text": "Play the Three-Cushion Tutorial"
+   }
+  },
+  {
+   "id": "Snk",
+   "title": "Snooker",
+   "sub": "A red, then a colour",
+   "rules": [
+    [
+     "The Game",
+     "Fifteen reds and six colours. Pot a red, then a colour, then a red again."
+    ],
+    [
+     "Reds",
+     "A red is 1 point. While reds remain, potted colours come back on their spots."
+    ],
+    [
+     "The Ball On",
+     "After a red, the first colour the cue ball hits is the one you are on."
+    ],
+    [
+     "Colours Last",
+     "With the reds gone, pot the colours in order."
+    ],
+    [
+     "Break",
+     "Place the cue ball anywhere in the D, the half circle on the baulk line. Hit a red first."
+    ],
+    [
+     "Fouls",
+     "Missing every ball, hitting or potting a ball you are not on, going in-off, or playing into a ball your cue ball touches. Your opponent scores 4 to 7."
+    ],
+    [
+     "After a Foul",
+     "The other player chooses: play from where the balls lie (from the D after an in-off), or make the offender play again from there, with no free ball."
+    ],
+    [
+     "Free Ball",
+     "Snookered by a ball after a foul? Nominate any colour as the ball on: hit it first. It counts as a red, or as the colour you are on, and it comes back on its spot."
+    ],
+    [
+     "Foul and a Miss",
+     "Miss the ball on when you could have hit it, and they may have the balls put back for you to play again. Three such misses with a ball on in full view lose the frame."
+    ],
+    [
+     "Win the Frame",
+     "Most points wins. You can concede from the pause menu."
+    ]
+   ],
+   "fine": [
+    "A foul is worth the ball on or the highest ball involved, whichever is more, from 4 up to 7. A red played on straight after a red costs 7.",
+    "With only the black left, the first score or foul ends the frame. If that leaves it level, the black is re-spotted, lots are drawn, and the winner chooses who plays it from the D.",
+    "The usual break clips the end red of the back row and brings the cue ball back to baulk.",
+    "The bar on the top rail shows the break, the ball on and the points left, and says when snookers are needed.",
+    "Choose one frame or best of three, and the 10 ft or 12 ft table, when you start.",
+    "The referee in felt is a fixed rule: a miss is called when any part of the ball on could be struck on a clear line, unless only the black is left or the striker needs snookers; from a put-back it is called whatever the scores. The second miss in a row brings a warning.",
+    "A free ball may not be used to snooker the opponent on every ball on, unless only the pink and black remain.",
+    "A cue ball that jumps over a ball before hitting one is a foul, at the value of the ball on. A cushion's corner in the way is not a snooker."
+   ],
+   "act": {
+    "id": "tutGoS",
+    "tut": "snooker",
+    "text": "Play the Snooker Tutorial"
+   }
+  },
+  {
+   "id": "10",
+   "title": "10-Ball",
+   "sub": "Call every shot",
+   "rules": [
+    [
+     "Rack",
+     "Ten balls in a triangle: the 1 in front, the 10 in the middle. Break from behind the head string."
+    ],
+    [
+     "Legal Break",
+     "Hit the 1 first, then pot a ball or drive four to the cushions."
+    ],
+    [
+     "Lowest First",
+     "Always hit the lowest ball first. Then pot a ball or hit a rail."
+    ],
+    [
+     "Call It",
+     "Every shot: tap the ball, then the pocket. An obvious shot is called for you from your aim. There is no safety."
+    ],
+    [
+     "Push Out",
+     "After a break with no foul, the next shot may be a push out. Your opponent shoots it or hands it back."
+    ],
+    [
+     "Win",
+     "Pot the 10 as a called shot, when it is the only ball left."
+    ]
+   ],
+   "fine": [
+    "A 10 on the break, or one that drops early or uncalled, is spotted. No win.",
+    "A called ball that misses ends your turn. If any ball dropped, the 10 too, your opponent shoots or hands it back.",
+    "An illegal break is a foul: ball in hand anywhere for your opponent, and it counts toward the three.",
+    "Three fouls in a row lose. You are warned after two."
+   ],
+   "act": null
+  },
+  {
+   "id": "Str",
+   "title": "Straight Pool",
+   "sub": "14.1, a point a ball",
+   "rules": [
+    [
+     "The Game",
+     "Fifteen balls, any ball first. Call ball and pocket: each one made is a point."
+    ],
+    [
+     "Break",
+     "Call a ball and pocket it, or send two balls and the cue ball to the cushions."
+    ],
+    [
+     "Carry On",
+     "Make your call and you shoot again. Other balls that drop with it count too."
+    ],
+    [
+     "Re-Rack",
+     "With one ball left the other fourteen are racked again. Break the rack open with the last one."
+    ],
+    [
+     "Fouls",
+     "A point off. Your opponent plays from where the cue ball stopped."
+    ],
+    [
+     "Win",
+     "The first to the race: 25, 50, 100 or 150, chosen when you start."
+    ]
+   ],
+   "fine": [
+    "Three fouls in a row cost 15 more, and the fouler breaks a full rack. You are warned after two.",
+    "A breaking foul costs two and does not count toward the three; your opponent takes the table or has you break again. A foul on the same shot is part of it.",
+    "A ball pocketed on the break counts as driven to a rail. The cue ball's rail must come after it hits the rack.",
+    "A miss, or a safety, scores nothing: balls that dropped come back on the foot spot.",
+    "On a re-rack the last ball and the cue ball stay put unless they are in the rack. The ball alone in it: to the head spot. The cue ball alone in it: to your hand behind the line if the last ball lies below it, else to the head spot. Both in it, or the 15th down: all fifteen are racked.",
+    "In hand behind the line with every ball behind it, you may have the nearest spotted.",
+    "The pause menu shows each player's best run."
+   ],
+   "act": null
+  },
+  {
+   "id": "Rot",
+   "title": "Rotation",
+   "sub": "Numbers score, 61 wins",
+   "rules": [
+    [
+     "Rack",
+     "Fifteen balls: the 1 in front, the 2 and 3 in the back corners, the 15 in the middle."
+    ],
+    [
+     "Lowest First",
+     "Always hit the lowest ball first. Then pot a ball or hit a rail."
+    ],
+    [
+     "Score",
+     "Every ball you pot on a legal shot scores its number."
+    ],
+    [
+     "Go Again",
+     "Pot a ball and you shoot again."
+    ],
+    [
+     "Fouls",
+     "No score. Balls potted come back on the foot spot; your opponent gets ball in hand."
+    ],
+    [
+     "Win",
+     "The first to 61 of the 120 points on the table."
+    ]
+   ],
+   "fine": [
+    "60 all with the table clear: the player who potted the last ball wins (a felt house rule).",
+    "These are felt's house rules after the BCA game; no rule book was checked."
+   ],
+   "act": null
+  },
+  {
+   "id": "Hey",
+   "title": "Chinese 8-Ball",
+   "sub": "Snooker pockets, pool balls",
+   "rules": [
+    [
+     "The Table",
+     "A 9 ft table with snooker pockets round pool balls: rounded jaws, far tighter than a pool table's. A ball has to be dead on line to drop."
+    ],
+    [
+     "Break",
+     "Ball in hand behind the head string. Pot a ball or drive four object balls to the cushions."
+    ],
+    [
+     "Open Table",
+     "Balls potted on the break do not choose the groups. The first legal pot after the break does: the group of the ball you hit first, solids (1 to 7) or stripes (9 to 15). Only the other group down: the table stays open and the turn passes."
+    ],
+    [
+     "Your Shot",
+     "Hit one of yours first. Then pot a ball or send any ball to a rail."
+    ],
+    [
+     "Fouls",
+     "The wrong ball first, no rail, or the cue ball down. Your opponent gets ball in hand anywhere."
+    ],
+    [
+     "Win",
+     "Clear your group, then pot the 8 in any pocket. Nothing is called, and flukes count."
+    ],
+    [
+     "Lose",
+     "Pot the 8 before your group is clear, on a foul, or knock it off the table, on the break too."
+    ]
+   ],
+   "fine": [
+    "A foul on the break (a scratch, a ball off the table): your opponent takes ball in hand behind the head string, or has the balls racked again and breaks, or has you break. In hand there, the first ball hit must lie past the string, unless the cue ball crosses it first.",
+    "With every legal ball behind the string, you may have the nearest spotted on the foot spot.",
+    "No ball hit on the break: only the re-rack.",
+    "An illegal break: your opponent plays the table as it lies, or has it racked again.",
+    "An 8 on the break is not a foul: the breaker has it spotted and plays on, or breaks again. On a foul it is spotted and your opponent has the foul's choice.",
+    "On an open table the 8 may not be the first ball hit.",
+    "A ball knocked off the table is a foul and stays off. There is no three-foul rule.",
+    "The rules are the WPA Rules of Heyball, effective 16 August 2025."
+   ],
+   "act": {
+    "id": "tutGoH",
+    "tut": "heyball",
+    "text": "Play the Chinese 8-Ball Tutorial"
+   }
+  },
+  {
+   "id": "Call",
+   "title": "Called Shots",
+   "sub": "Ball, pocket, safety",
+   "rules": [
+    [
+     "When",
+     "Settings, Gameplay: off, 8-ball only, each game's official rules, or every shot. A career event sets its own."
+    ],
+    [
+     "Call",
+     "Tap the ball, then the pocket. The table marks both until the shot."
+    ],
+    [
+     "Obvious Shots",
+     "Where the rules allow, your aim calls it for you: \"Calling: 6 in corner\". Tap the pill to change it."
+    ],
+    [
+     "Safety",
+     "Tap Safety to play one. Your turn ends whatever drops. 10-ball has none."
+    ],
+    [
+     "Shoot",
+     "The power bar shoots as always. With a call missing it says Call your shot and waits."
+    ],
+    [
+     "Missed Call",
+     "Not a foul: your turn ends. 14.1 spots what dropped; 10-ball lets your opponent choose."
+    ]
+   ],
+   "fine": [
+    "Ball, pocket and rails (custom): also call Bank, Kick or Combo. Strict (custom): and nothing else may drop.",
+    "Fouls are judged apart from the call: a made call on a scratch is still a foul.",
+    "The pause menu keeps your declarations, made and missed."
+   ],
+   "act": null
+  },
+  {
+   "id": "Solo",
+   "title": "Solo Modes",
+   "sub": "Practice, tricks, career",
+   "rules": [
+    [
+     "Practice",
+     "No opponent and no fouls, always your shot. Undo takes back the last one."
+    ],
+    [
+     "Practice Tools",
+     "The tools button holds ball in hand and reset rack. On a free table it adds and removes balls."
+    ],
+    [
+     "Drills",
+     "In Practice: a few shots each, scored out of 100 from where the balls really went. Bronze, silver and gold by score; a career's practice is played here too."
+    ],
+    [
+     "Trick Shots",
+     "One layout, one goal. Show me plays one way to make it."
+    ],
+    [
+     "Stars",
+     "Three for a make on the first try, two within three tries, one for any make. Tries add up across visits."
+    ],
+    [
+     "Daily Shot",
+     "One trick shot a day, the same for everyone. Your first try counts."
+    ],
+    [
+     "Streak",
+     "Play on consecutive days and it grows. Miss a day and it starts again."
+    ],
+    [
+     "Career",
+     "Your own player among 300 others: enter events from the calendar, climb twelve tiers, season after season."
+    ],
+    [
+     "Matches",
+     "Played on the table, on the event's own rules and race. Leaving one before its end forfeits it."
+    ]
+   ],
+   "fine": [
+    "Retries on the daily shot are practice. They never change your streak."
+   ],
+   "act": null
+  },
+  {
+   "id": "Cue",
+   "title": "Cue Elevation",
+   "sub": "Swerve and masse",
+   "rules": [
+    [
+     "What It Is",
+     "The cue raised above the bed, from level up to 60 degrees. Every shot starts level."
+    ],
+    [
+     "Set It",
+     "Drag the slider up to raise the cue, down to lower it. Level puts it back down. A tap anywhere else closes it."
+    ],
+    [
+     "Swerve",
+     "A little elevation with side spin: the ball sets off straight, then bends late towards the side you hit."
+    ],
+    [
+     "Masse",
+     "A steep cue with side spin: the ball curves hard and early, round a ball in the way."
+    ],
+    [
+     "No Side Spin",
+     "A raised cue then only drives the ball into the cloth: no curve."
+    ]
+   ],
+   "fine": [
+    "The pad shows the angle while the cue is raised.",
+    "More side spin and a higher cue make a bigger curve. A harder hit runs further before it bends.",
+    "The CPU plays a level cue."
+   ],
+   "act": null
+  },
+  {
+   "id": "Modes",
+   "title": "More Modes",
+   "sub": "Tournament, exhibition, party",
+   "rules": [
+    [
+     "Quick Tournament",
+     "A bracket of 4, 8 or 16 against named CPU players, single or double elimination, on the game you pick."
+    ],
+    [
+     "Your Matches",
+     "Played on the table to the race you chose: racks, snooker's frames, or points in one game at 14.1 and three-cushion."
+    ],
+    [
+     "The Other Matches",
+     "Settled by the career's match model from the players' strengths, and marked simulated."
+    ],
+    [
+     "Leaving a Match",
+     "Quit, another game or closing the app forfeits it: a loss."
+    ],
+    [
+     "AI Exhibition",
+     "Watch two CPU players, each with a style you pick, on any table. The bar under the table pauses and sets 1x, 2x or 4x."
+    ],
+    [
+     "Party",
+     "Two to four people on one device: 9-ball, rotation or straight pool. When the turn passes, the screen asks for the next player."
+    ],
+    [
+     "Everyone's Chip",
+     "With three or four players, each has a chip by the power bar. The lit one is to shoot."
+    ]
+   ],
+   "fine": [
+    "A tournament locks its rules for every match and is saved as it goes, so it carries on after the app is closed.",
+    "An exhibition and a party never change your record.",
+    "A party keeps the racks won from rack to rack, and the break passes round the table.",
+    "8-ball, snooker, bumper pool and three-cushion are two-player games, so a party never offers them."
+   ],
+   "act": {
+    "id": "helpModes",
+    "tut": null,
+    "text": "Open More Modes"
+   }
+  },
+  {
+   "id": "Drills",
+   "title": "Drills",
+   "sub": "Scored practice, medals",
+   "rules": [
+    [
+     "What They Are",
+     "Short scored exercises in Practice: long pots, cuts, power, the break, position, spin, banks, kicks, safeties, a run and a pressure 9."
+    ],
+    [
+     "Play One",
+     "Pick a drill, read its goal, then Start. Each is a few shots on its own layout."
+    ],
+    [
+     "Scoring",
+     "Out of 100, measured from where the balls really stop: a pot, how close, the right zone."
+    ],
+    [
+     "Medals",
+     "Bronze, silver and gold by score. The list shows each drill's medal and best."
+    ],
+    [
+     "In Your Career",
+     "The career's practice is played here: three sessions a day build your mastery."
+    ]
+   ],
+   "fine": [
+    "The table marks the target: a zone, a line or a box, and the pocket to use.",
+    "Again plays the same drill from the start. Your best is kept on this device."
+   ],
+   "act": {
+    "id": "helpDrills",
+    "tut": null,
+    "text": "Open the Drills"
+   }
+  },
+  {
+   "id": "Career",
+   "title": "Career",
+   "sub": "Seasons, tiers, rankings",
+   "rules": [
+    [
+     "Your Player",
+     "Create a player and join a tour of 300 others. Up to six careers, each in its own save."
+    ],
+    [
+     "The Calendar",
+     "Enter events day by day: opens, leagues, qualifiers, majors and more, across the games."
+    ],
+    [
+     "Matches",
+     "Yours are played on the table, on the event's own rules and race. The rest of the draw is simulated."
+    ],
+    [
+     "Climb",
+     "Results earn ranking points. Climb twelve tiers, season after season."
+    ],
+    [
+     "Around the Tour",
+     "Rivals, sponsors and offers, a shop for your look, news, stats and records."
+    ],
+    [
+     "Forfeits",
+     "Leaving a match before its end, even by closing the app, forfeits it."
+    ]
+   ],
+   "fine": [
+    "Three practice drill sessions a day build your mastery.",
+    "Retire to end a career and see its recap. The best go into the Hall of Fame."
+   ],
+   "act": {
+    "id": "helpCareer",
+    "tut": null,
+    "text": "Open the Career"
+   }
+  }
+ ]
+}

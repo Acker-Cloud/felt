@@ -25,6 +25,8 @@ targets:
         buildPhase: resources
       - path: ../tests/drill-solutions.json
         buildPhase: resources
+      - path: Felt/help.json
+        buildPhase: resources
     dependencies:
       - package: FeltSim
         product: FeltSim
