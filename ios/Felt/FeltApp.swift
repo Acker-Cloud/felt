@@ -54,6 +54,7 @@ struct TableScreen: View {
   @Environment(\.dismiss) private var dismiss
   @State private var aimDrag: Double?
   @State private var placing = false
+  @State private var picking = false
   @Environment(\.displayScale) private var scale
 
   var body: some View {
@@ -74,7 +75,7 @@ struct TableScreen: View {
           .onChange(of: tg.size) { _, s in model.bake(s, scale: scale) }
           .contentShape(Rectangle())
           .gesture(DragGesture(minimumDistance: 0).onChanged { v in touch(v, tg.size, began: v.translation == .zero) }
-            .onEnded { _ in placing = false })
+            .onEnded { _ in placing = false; picking = false })
           .accessibilityElement()
           .accessibilityLabel("Table")
           .accessibilityIdentifier("table")
@@ -97,6 +98,19 @@ struct TableScreen: View {
   private func touch(_ v: DragGesture.Value, _ size: CGSize, began: Bool) {
     let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW)
     let (x, y) = m.table(v.location)
+    /* bumper pool: a touch on one of the shooter's own balls strikes that one from now on (pickBall) */
+    if began, model.game == .bumper, let g = model.g {
+      /* ballAt: the shooter's striker nearest the touch within max(22, 1.5 ball radii); the current one aims instead */
+      let reach = max(22, 1.5 * s.BALL_R * m.k)
+      var best: Int? = nil, bd = reach
+      for n in model.engine.bumperStrikers(g) {
+        guard let b = g.balls.first(where: { $0.n == n && $0.on }) else { continue }
+        let p = m.pt(b.x, b.y), d = JSMath.hypot(Double(p.x - v.location.x), Double(p.y - v.location.y))
+        if d < bd { bd = d; best = n }
+      }
+      if let n = best, n != model.cueN, model.pickBall(n) { picking = true; return }
+    }
+    if picking { return }
     if began, model.inHand, let c = model.cue, JSMath.hypot(c.x - x, c.y - y) < s.BALL_R * 3 { placing = true }
     if placing { model.place(x, y); return }
     guard model.rolling == nil, let c = model.cue else { return }

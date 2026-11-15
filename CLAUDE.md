@@ -538,8 +538,10 @@ Run these, do not guess them. Healthy output is shown so a wrong result is obvio
   the app bakes the table per size off the main thread and composites each ball's own image. `tools/ios-pixels.cjs`
   saves the page's own paints (fixed views, napCache cleared) and `FeltRenderTests` measures them: tables mean about
   1 level, p99 4 to 5; balls p99 13 to 14, the rest glyph edges (Skia vs CoreText, same SF face). Re-run it after
-  any change to 4a or 4b. Not ported yet: guide (4d), cue (4e), pots and effects (4c), HUD, rules, CPU, bumper
-  pool, career, modes, 3D, intro, settings.
+  any change to 4a or 4b. Since ported: the guide (4d), cue (4e), pots and effects (4c), the rail row and potted
+  windows (6b2, 6b3), the control strip (6b) and flash, every game's rules (1e, 1j, 1k, 1g: `rules.json`) and CPU (1f:
+  `cpu.json`), bumper pool whole (table art in the pixel harness, `suggestBumper` in `BumperAimTests`). Not ported
+  yet: the call menu, settings, modes, career, 3D, intro.
 
 ## Conventions
 

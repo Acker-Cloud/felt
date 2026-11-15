@@ -49,6 +49,21 @@ enum Words {
     let why = caromWhy(cv.count)
     return ("\(why). \(turnOf(who)).", (turnOf(who), why, 1.1))
   }
+  /* bumper pool's (page 5): bumperWords, a banner only where the page flashes one */
+  static func colourOf(_ p: Int) -> String { p != 0 ? "White" : "Red" }
+  static func bumper(_ v: Verdict, _ g: Game, _ shooter: Int, _ who: Int) -> (msg: String, banner: (String, String, Double)?) {
+    let left = { (p: Int) in g.balls.filter { $0.on && bOwner($0.n) == p }.count }
+    let tail = "\(colourOf(who).lowercased()), \(left(who)) left", bv = v.bumper!
+    if let f = v.foul {
+      let pen = bv.dropped != nil ? "\(nameOf(1 - shooter)) \(cpuMode && shooter == 1 ? "drop" : "drops") a ball in" : ""
+      return ("Foul: \(f). \(pen.isEmpty ? "" : pen + ". ")\(turnOf(who)): \(tail).", ("Foul: \(f)", [pen, turnOf(who)].filter { !$0.isEmpty }.joined(separator: "\n"), 1.7))
+    }
+    if bv.opening == 1 { return ("\(turnOf(who)): the opening shot, the marked ball.", (turnOf(who), "Opening shot: the marked ball", 1.1)) }
+    if who != shooter || bv.opening == 2 {
+      return ("\(turnOf(who)): \(tail).", (turnOf(who), bv.opening == 2 ? "The opening is over" : "\(colourOf(who)), \(left(who)) left", 1.0))
+    }
+    return ("\(nameOf(who)) \(cpuMode && who == 0 ? "go" : "goes") again: \(left(who)) left.", nil)
+  }
   /* snooker's (page 5k): onWords, ptsWord, dWords, frameHead */
   static func onWords(_ g: Game) -> String {
     let S = g.snk!
@@ -98,6 +113,7 @@ enum Words {
   static func overLine(_ g: Game) -> String {
     guard let w = g.winner, let v = g.verdict, !v.why.isEmpty, v.why != "forced" else { return "Game over." }
     let l = 1 - w, why = v.why, who = { (p: Int) in cpuMode ? (p == 0 ? "You" : "The CPU") : nameOf(p) }
+    if why.contains("all five") { return "\(who(w)) got all five \(cpuMode && w == 0 ? "of yours" : w != 0 ? "whites" : "reds") down\(v.foul != nil ? " (\(who(l)) fouled: \(v.foul!))" : "")." }
     if g.kind == "snooker", let S = g.snk {
       let fo = v.snk?.frameOver, sc = fo?.score ?? g.score!, won = S.won
       if fo?.conceded == true { return "\(who(l)) conceded\(S.frames > 1 ? ": \(won[w])-\(won[l]) in frames" : "")." }

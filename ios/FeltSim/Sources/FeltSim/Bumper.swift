@@ -243,4 +243,45 @@ extension CPU {
     let pick = best.prefix(Swift.max(1, L.robust)).reduce(best[0]) { a, b in b.mean > a.mean ? b : a }
     return play(pick.shot, ("bumper", pick.mean >= 400 ? 0.8 : 0.3))
   }
+
+  /* auto aim's suggestion (suggestBumper): the ball to strike and a clear line for it to the far cup, straight or off
+     one cushion, the shortest, the marked ball first while it is up; with none clear, the 'hint' search's shot */
+  public func suggestBumper(_ g: Game) -> (angle: Double, n: Int?, k: Int)? {
+    if g.winner != nil { return nil }
+    let me = g.turn, k = 1 - me, T = s.POCKETS[k], R = s.BALL_R
+    let balls = E.bumperStrikers(g, me).compactMap { n in g.balls.first { $0.n == n } }.filter { $0.on }
+    if balls.isEmpty { return nil }
+    func clear(_ ax: Double, _ ay: Double, _ bx: Double, _ by: Double, _ skip: Int) -> Bool {
+      s.BUMPERS.allSatisfy { s.segGap(ax, ay, bx, by, $0[0], $0[1]) >= R + BUMPER_R }
+        && g.balls.allSatisfy { !$0.on || $0.n == skip || s.segGap(ax, ay, bx, by, $0.x, $0.y) >= 2 * R }
+    }
+    let markOn = balls.contains { $0.n == B_MARK[me] }
+    var best: (len: Double, angle: Double, n: Int)? = nil
+    for b in balls {
+      let extra: Double = markOn && b.n != B_MARK[me] ? 2 : 0
+      var paths: [(Double, Double, [Double]?)] = [(T[0], T[1], nil)]
+      if let BL = s.BED_LINES {
+        for m in s.bumperBanks(T) {
+          let mx = m[0], my = m[1], j = Int(m[2]), l = BL[j], nx = l[0], ny = l[1], c = l[2], sg = s.CUSH[j]
+          let den = nx * (mx - b.x) + ny * (my - b.y), u = den != 0 ? (c + R - nx * b.x - ny * b.y) / den : -1
+          let px = b.x + (mx - b.x) * u, py = b.y + (my - b.y) * u, sl = M.hypot(sg[2] - sg[0], sg[3] - sg[1])
+          let along = ((px - sg[0]) * (sg[2] - sg[0]) + (py - sg[1]) * (sg[3] - sg[1])) / (sl * sl)
+          if u > 0 && u < 1 && along > R / sl && along < 1 - R / sl { paths.append((mx, my, [px, py])) }
+        }
+      } else {
+        for q in [(2 * R - T[0], T[1], 0, R), (2 * (s.TL - R) - T[0], T[1], 0, s.TL - R), (T[0], 2 * R - T[1], 1, R), (T[0], 2 * (s.TW - R) - T[1], 1, s.TW - R)] {
+          let (mx, my, ax, at) = q, u = ax != 0 ? (at - b.y) / (my - b.y) : (at - b.x) / (mx - b.x)
+          if u > 0 && u < 1 { paths.append((mx, my, [b.x + (mx - b.x) * u, b.y + (my - b.y) * u])) }
+        }
+      }
+      for (x, y, bounce) in paths {
+        let ok = bounce.map { clear(b.x, b.y, $0[0], $0[1], b.n) && clear($0[0], $0[1], T[0], T[1], b.n) } ?? clear(b.x, b.y, T[0], T[1], b.n)
+        let len = M.hypot(x - b.x, y - b.y) + (bounce != nil ? 0.3 : 0) + extra
+        if ok && (best == nil || len < best!.len) { best = (len, M.atan2(y - b.y, x - b.x), b.n) }
+      }
+    }
+    if let b = best { return (b.angle, b.n, k) }
+    let sh = cpuShot(g, seed: 1, level: "hint")
+    return (sh.angle, sh.ball, k)
+  }
 }

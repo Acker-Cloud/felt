@@ -11,7 +11,7 @@ import FeltSim
 import Observation
 
 enum TableGame: String, CaseIterable, Identifiable {
-  case eight = "8-Ball", nine = "9-Ball", ten = "10-Ball", heyball = "Chinese 8-Ball", snooker = "Snooker", carom = "Three-Cushion"
+  case eight = "8-Ball", nine = "9-Ball", ten = "10-Ball", heyball = "Chinese 8-Ball", snooker = "Snooker", carom = "Three-Cushion", bumper = "Bumper Pool"
   var id: String { rawValue }
   /* the sim's table, its shape, and the game whose look it wears (GAME_LOOK) */
   var table: (String, String?, String) {
@@ -22,6 +22,7 @@ enum TableGame: String, CaseIterable, Identifiable {
     case .heyball: ("heyball", nil, "heyball")
     case .snooker: ("snooker", "compact", "snooker")
     case .carom: ("carom", nil, "carom")
+    case .bumper: ("bumper", "octagon", "bumper")
     }
   }
   var line: String {
@@ -32,6 +33,7 @@ enum TableGame: String, CaseIterable, Identifiable {
     case .heyball: "Tight pockets, a 9 ft bed"
     case .snooker: "Fifteen reds on a 10 ft table"
     case .carom: "No pockets, three cushions"
+    case .bumper: "Round the posts"
     }
   }
 }
@@ -60,7 +62,7 @@ final class TableModel {
   private(set) var banner: (title: String, sub: String, until: TimeInterval)?
   /* a flash asked for before the clock runs (a new rack): shown for its ms from the next tick */
   @ObservationIgnored private var flashDue: (String, String, TimeInterval)?
-  var rulesKind: String? { ["8": "8", "9": "9", "10": "10", "heyball": "heyball", "snooker": "snooker", "carom": "carom"][game.table.2] }
+  var rulesKind: String? { ["8": "8", "9": "9", "10": "10", "heyball": "heyball", "snooker": "snooker", "carom": "carom", "bumper": "bumper"][game.table.2] }
 
   /* the baked table (FeltRender: index.html's paintTable and vignette) for one screen size */
   struct Baked { let image: CGImage; let size: CGSize; let scale: CGFloat }
@@ -96,7 +98,7 @@ final class TableModel {
   func ballPainter(upright: Bool, scale: CGFloat) -> BallPainter {
     if let p = painter, p.1 == upright, p.2 == scale { return p.0 }
     let look = TableLook.of(game: game.table.2), cloth = RGBA(css: look.cloth.base)
-    let bounce = ["8": "120,200,160", "9": "120,165,235", "10": "110,170,240", "heyball": "120,200,150", "snooker": "120,205,150", "carom": "120,160,230"][game.table.2] ?? "120,200,160"
+    let bounce = ["8": "120,200,160", "9": "120,165,235", "10": "110,170,240", "heyball": "120,200,150", "snooker": "120,205,150", "carom": "120,160,230", "bumper": "170,190,110"][game.table.2] ?? "120,200,160"
     let p = BallPainter(set: BallSet.of(game: game.table.2), bounce: bounce, dpr: Double(scale), portrait: upright,
                         lowRim: game != .eight && game != .carom, clothBase: [cloth.r * 255, cloth.g * 255, cloth.b * 255])
     painter = (p, upright, scale); ballCache = [:]
@@ -137,7 +139,7 @@ final class TableModel {
   }
 
   func rerack() {
-    rolling = nil; inHand = game != .carom; potCount = 0; banner = nil
+    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; potCount = 0; banner = nil
     if let k = rulesKind {
       g = engine.newGame(k)
       /* a test hook: `-felt-pots "1,9,8"` starts the rack with those balls down (the potted windows) */
@@ -151,7 +153,10 @@ final class TableModel {
       msg = k == "snooker" ? "\(Words.dWords(0)). On a red." : k == "carom" ? "\(Words.nameOf(0)) to break: the red first." : "\(Words.nameOf(0)) to break."
       /* start()'s flash: who breaks, and where the ball goes (1.4 s; carom 1.6 s, the race) */
       let brk = cpuLevel != nil ? "You break" : "Player 1 breaks"
-      if k == "carom" { flashDue = (brk, "Hit the red first. \(g!.need == 1 ? "One cushion" : "Three cushions"), \(g!.race!) points", 1.6) }
+      if k == "bumper" {
+        msg = "Opening shots: \(cpuLevel != nil ? "you shoot" : "Red shoots") the marked ball at the far cup."
+        flashDue = ("Opening shots", "\(cpuLevel != nil ? "You shoot" : "Red shoots") the marked ball at the far cup", 1.6)
+      } else if k == "carom" { flashDue = (brk, "Hit the red first. \(g!.need == 1 ? "One cushion" : "Three cushions"), \(g!.race!) points", 1.6) }
       else { flashDue = (brk, k == "snooker" ? "Ball in hand in the D" : "Ball in hand behind the line", 1.4) }
       randomOrient(); aimAtNearest()
       return
@@ -162,6 +167,7 @@ final class TableModel {
     case .ten: balls = sim.rack("10")
     case .heyball: balls = sim.rack("heyball")
     case .snooker: balls = sim.snookerRack()
+    case .bumper: balls = []
     case .carom:
       balls = [Ball(70, sim.HEAD_X, sim.TW / 2 + 0.1524), Ball(71, sim.HEAD_X, sim.TW / 2), Ball(72, sim.FOOT[0], sim.FOOT[1])]
     }
@@ -169,7 +175,18 @@ final class TableModel {
     aimAtNearest()
   }
 
+  /* bumper pool: the player chose the ball to strike this turn (pickBall), so auto aim keeps it */
+  @ObservationIgnored var picked = false
   func aimAtNearest() {
+    /* bumper's autoAim (page 5): suggestBumper's ball unless one was picked; its line, or straight at the far cup */
+    if game == .bumper, var gm = g, gm.winner == nil, let sg = CPU(engine: engine).suggestBumper(gm) {
+      if !picked, let n = sg.n, n != gm.striker { gm.striker = n; g = gm; syncBalls() }
+      if let c = cue {
+        let T = sim.POCKETS[sg.k]
+        aim = g?.striker == sg.n ? sg.angle : atan2(T[1] - c.y, T[0] - c.x)
+      }
+      return
+    }
     guard let c = balls.first(where: { $0.n == cueN }) else { return }
     let others = balls.filter { $0.on && $0.n != cueN }
     if let t = others.min(by: { JSMath.hypot($0.x - c.x, $0.y - c.y) < JSMath.hypot($1.x - c.x, $1.y - c.y) }) {
@@ -269,6 +286,7 @@ final class TableModel {
 
   /* settle() for a pocket game: the page's judge, then its words (banner and status line) */
   private func settleRules(_ r: ShotResult) {
+    picked = false
     guard let before = g else { return }
     let shot = RuleShot(r)
     let shooter = before.turn, next = engine.judge(before, shot)
@@ -281,6 +299,12 @@ final class TableModel {
   private func words(_ gm: Game, _ shooter: Int, chose: (who: Int, kind: String, choice: String)? = nil) {
     guard let v = gm.verdict else { return }
     if gm.winner != nil { msg = Words.overLine(gm); banner = nil; return }
+    if gm.kind == "bumper" {
+      let w = Words.bumper(v, gm, shooter, gm.turn)
+      msg = w.msg
+      banner = w.banner.map { ($0.0, $0.1, now + $0.2) }
+      return
+    }
     if gm.kind == "carom" {
       let w = Words.carom(v, gm, shooter, gm.turn)
       msg = w.msg
@@ -356,6 +380,7 @@ final class TableModel {
   private func cpuPlay(_ shot: CPUShot, _ gm: Game, t0: TimeInterval, seed: Double) {
     guard var g0 = g, g0.shots == gm.shots, g0.turn == gm.turn else { cpuBusy = false; cpuThinking = false; return }
     if let p = shot.place { g0 = engine.placeCue(g0, p[0], p[1]) }
+    if gm.kind == "bumper", let b = shot.ball { g0.striker = b }
     g0.call = shot.call; g = g0; syncBalls()
     aim = shot.angle; spin = shot.spin
     let think = cpuThinkMs(gm, shot, seed) / 1000, wait = max(0, think - (now - t0))
@@ -369,7 +394,7 @@ final class TableModel {
   }
   /* cpuThinkMs: short on the break or an easy pot, longer on a hard one, longest on a safety or kick */
   private func cpuThinkMs(_ gm: Game, _ shot: CPUShot, _ seed: Double) -> Double {
-    let T = ["break": 900.0, "pot": 650, "carom": 1500, "bank": 2000, "combo": 2200, "safety": 1900, "kick": 2300, "push": 1600, "blind": 1300, "kickpot": 2300, "jump": 2100, "swerve": 2100]
+    let T = ["break": 900.0, "pot": 650, "carom": 1500, "bumper": 1100, "bank": 2000, "combo": 2200, "safety": 1900, "kick": 2300, "push": 1600, "blind": 1300, "kickpot": 2300, "jump": 2100, "swerve": 2100]
     var ms = T[shot.intent.type] ?? 1300
     if shot.intent.type == "pot" || shot.intent.type == "carom" { ms += 1900 * pow(1 - min(1, max(0, shot.intent.q.isFinite ? shot.intent.q : 0.5)), 1.5) }
     if gm.inHand != nil && !gm.breakShot { ms += 500 }
@@ -478,6 +503,13 @@ final class TableModel {
     for n in off.filter({ !potOrder.contains($0) }).sorted() {
       potOrder.append(n); potBy[n] = gm.turn; potAt[n] = rolling != nil ? now + TableModel.POT_MS : 0
     }
+  }
+
+  /* pickBall: bumper pool, strike ball n from now on (one of the shooter's, any but on the opening) */
+  func pickBall(_ n: Int) -> Bool {
+    guard var gm = g, gm.kind == "bumper", engine.bumperStrikers(gm).contains(n), rolling == nil, stroke == nil, !cpuTurn else { return false }
+    if gm.striker != n { gm.striker = n; g = gm; syncBalls(); picked = true; aimAtNearest() }
+    return true
   }
 
   /* railNext (6b2): the ball to play next on a human's turn while aiming. 9, 10 and rotation: the ball on; 8-ball,

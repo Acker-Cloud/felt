@@ -9,7 +9,7 @@ import SwiftUI
 struct Look {
   var cloth: Color, cushion: Color, rail: Color, railDark: Color
   /* CLOTHS[...].ovMin and .illegal: every white overlay at least ovMin opaque; the illegal colour */
-  var ovMin: Double { ["8": 0.6, "9": 0.72, "10": 0.78, "heyball": 0.64, "snooker": 0.66, "carom": 0.66][game] ?? 0.6 }
+  var ovMin: Double { ["8": 0.6, "9": 0.72, "10": 0.78, "heyball": 0.64, "snooker": 0.66, "carom": 0.66, "bumper": 0.76][game] ?? 0.6 }
   var illegal: Color { game == "8" ? Color(hex: 0xffa597) : Color(hex: 0xffe27a) }
   var game = "8"
   static func of(_ g: TableGame) -> Look {
@@ -22,6 +22,7 @@ struct Look {
     case .heyball: Look(cloth: Color(hex: 0x1d4f91), cushion: Color(hex: 0x21579c), rail: Color(hex: 0x2a1a12), railDark: Color(rgb: 16, 9, 6))
     case .snooker: Look(cloth: Color(hex: 0x1b5d47), cushion: Color(hex: 0x1d6450), rail: Color(hex: 0x7c5228), railDark: Color(rgb: 86, 52, 22))
     case .carom: Look(cloth: Color(hex: 0x1d4f91), cushion: Color(hex: 0x21579c), rail: Color(hex: 0x33201a), railDark: Color(rgb: 20, 11, 8))
+    case .bumper: Look(cloth: Color(hex: 0x4f6030), cushion: Color(hex: 0x586a35), rail: Color(hex: 0x5c3a1e), railDark: Color(rgb: 58, 34, 16))
     }
   }
 }
@@ -216,12 +217,16 @@ struct TableCanvas: View {
     func circle(_ x: Double, _ y: Double, _ r: Double) -> Path { let c = dev(x, y), d = r * m.k * sc; return Path(ellipseIn: CGRect(x: c.x - d, y: c.y - d, width: 2 * d, height: 2 * d)) }
     for p in model.pots where p.k >= 0 && p.k < s.POCKETS.count {
       let u = (now - p.t) / TableModel.POT_MS, P = s.POCKETS[p.k], m1 = 1 - pow(1 - min(1, u / 0.5), 2), sink = ease(0.15, 1, u)
-      let x = p.from.0 + (P[0] - p.from.0) * m1, y = p.from.1 + (P[1] - p.from.1) * m1, at = dev(x, y), cl = T.potClip(p.k)
+      let x = p.from.0 + (P[0] - p.from.0) * m1, y = p.from.1 + (P[1] - p.from.1) * m1, at = dev(x, y)
       var g = ctx
-      var back = circle(cl.cx, cl.cy, cl.rb)
-      let a = dev(-cl.co, -cl.co), b = dev(s.TL + cl.co, s.TW + cl.co)
-      back.addRect(CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y)))
-      g.clip(to: back)
+      /* drawCupPot: a cup has no cap or rail to go under, only the closing circle */
+      if s.BUMPERS.isEmpty {
+        let cl = T.potClip(p.k)
+        var back = circle(cl.cx, cl.cy, cl.rb)
+        let a = dev(-cl.co, -cl.co), b = dev(s.TL + cl.co, s.TW + cl.co)
+        back.addRect(CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y)))
+        g.clip(to: back)
+      }
       g.clip(to: circle(P[0], P[1], s.POCKET_R[p.k] + (1 - ease(0.1, 0.55, u)) * 3 * s.BALL_R))
       let (img, ix, iy) = bp.ballImage(p.n, Double(at.x), Double(at.y), rb * (1 - 0.32 * sink), bp.axesOf(model.orient[p.n] ?? IDENT), dark: 0.88 * sink, rim: true)
       g.draw(Image(decorative: img, scale: 1), in: CGRect(x: ix, y: iy, width: Double(img.width), height: Double(img.height)))
@@ -293,6 +298,11 @@ struct TableCanvas: View {
       let nx = lit ? next : nil
       switch g.kind {
       case "snooker": items.append(("num", 0, String(g.score![p])))
+      case "bumper":
+        /* chipOf: the first of the player's balls still up, and how many */
+        let mine = on.filter { bOwner($0) == p }
+        if let f = mine.first { items.append(("ball", f, "")) }
+        items.append(("num", 0, String(mine.count)))
       case "carom": items.append(("num", C_CUE[p], String(g.score![p]))); items.append(("of", 0, "/\(g.race!)"))
       case "straight", "rotation":
         if let nx { items.append(("ball", nx, "")) } else if g.kind == "rotation" && lit, let f = on.first { items.append(("ball", f, "")) }
