@@ -22,7 +22,7 @@ struct Home: View {
           }
           .pickerStyle(.segmented)
           .accessibilityIdentifier("opponent")
-        } header: { Text("Opponent") } footer: { Text("The CPU plays 8-ball, 9-ball, 10-ball and Chinese 8-ball. Snooker is two players for now, three-cushion practice.") }
+        } header: { Text("Opponent") } footer: { Text("The CPU plays every game but snooker, which is two players for now.") }
         Section {
           ForEach(TableGame.allCases) { g in
             Button { playing = g } label: {

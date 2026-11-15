@@ -104,7 +104,14 @@ public struct Verdict: Equatable, Sendable {
   public var off: [Int]? = nil, chose: String? = nil, chooser: Int? = nil
   /* snooker's (sim 1j); nil on the pocket games */
   public var snk: SnkVerdict? = nil
+  /* carom's (sim 1k): the point, the count, the balls back on their spots */
+  public var carom: CaromVerdict? = nil
 }
+public struct CaromCount: Equatable, Sendable {
+  public var first: Int?, balls: [Int], cushions: Int, point: Bool
+  public init(first: Int?, balls: [Int], cushions: Int, point: Bool) { self.first = first; self.balls = balls; self.cushions = cushions; self.point = point }
+}
+public struct CaromVerdict: Equatable, Sendable { public var point: Bool, count: CaromCount, back: [Int] }
 public struct SnkVerdict: Equatable, Sendable {
   public var pen: Int, pts: Int, nom: Int?, back: [Int], brk: Int, ended: Int, frameOver: FrameOver?, reblack: Bool
   public var miss: Bool?, misses: Int?, warn: Bool?, freeBall: Int??, nominated: Int?? = nil
@@ -124,7 +131,7 @@ public struct SnkState: Equatable, Sendable {
 /* the shot's facts the rules read (resultOf) */
 public struct RuleShot: Sendable {
   public var balls: [GBall], first: Int?, railAfter: Bool, crossed: Bool?, potted: [Int], pocketOf: [Int: Int], rails: [Int: Int]?, kick: Int?
-  public var seq: [Int] = [], over: [Int]? = nil
+  public var seq: [Int] = [], over: [Int]? = nil, cue: Int? = nil
   public init(balls: [GBall], first: Int?, railAfter: Bool, crossed: Bool?, potted: [Int], pocketOf: [Int: Int], rails: [Int: Int]?, kick: Int?, seq: [Int] = [], over: [Int]? = nil) {
     self.balls = balls; self.first = first; self.railAfter = railAfter; self.crossed = crossed; self.potted = potted; self.pocketOf = pocketOf; self.rails = rails; self.kick = kick
     self.seq = seq; self.over = over
@@ -136,6 +143,7 @@ extension RuleShot {
   public init(_ r: ShotResult) {
     self.init(balls: r.balls.map { b in var g = GBall(n: b.n, x: b.x, y: b.y); g.vx = b.vx; g.vy = b.vy; g.on = b.on; g.wx = b.wx; g.wy = b.wy; g.wz = b.wz; return g },
               first: r.first, railAfter: r.railAfter, crossed: r.crossed, potted: r.potted, pocketOf: r.pocketOf, rails: r.rails, kick: r.kick, seq: r.seq, over: r.over)
+    cue = r.cue
   }
 }
 
@@ -147,6 +155,8 @@ public struct Game: Sendable {
   public var mode: String? = nil
   /* snooker's frame (sim 1j): nil on the pocket games */
   public var snk: SnkState? = nil
+  /* carom's (sim 1k): the shooter's cue ball, the cushions a point needs, innings per player */
+  public var striker: Int? = nil, need: Int? = nil, innings: [Int]? = nil
   func ball(_ n: Int) -> GBall? { balls.first { $0.n == n } }
 }
 
@@ -157,6 +167,7 @@ public final class RulesEngine {
 
   public func newGame(_ kind: String, rules: RuleSet? = nil) -> Game {
     if kind == "snooker" { return snookerGame() }
+    if kind == "carom" { return caromGame() }
     let R = rules.flatMap { $0.made && $0.game == kind ? $0 : nil } ?? makeRules(kind)
     let np = R.players
     let balls = sim.rack(kind).map { b -> GBall in GBall(n: b.n, x: b.x, y: b.y) }
@@ -216,6 +227,7 @@ public final class RulesEngine {
 
   public func legalTargets(_ g: Game) -> [Int] {
     if g.kind == "snooker" { return snookerOn(g) }
+    if g.kind == "carom" { return caromTargets(g) }
     let on = onTable(g)
     if g.mode != nil || g.kind == "straight" { return on }
     if !is8(g.kind) { return Array(on.prefix(1)) }
@@ -341,6 +353,7 @@ public final class RulesEngine {
   public func judge(_ g: Game, _ r: RuleShot) -> Game {
     switch g.kind {
     case "snooker": return judgeSnooker(g, r)
+    case "carom": return judgeCarom(g, r)
     case "9", "10": return judgeLowest(g, r)
     case "rotation": return judgeRotation(g, r)
     case "straight": return judgeStraight(g, r)
@@ -528,6 +541,7 @@ public final class RulesEngine {
   /* a pending choice made: a new game, or nil when it is not on offer */
   public func chooseOption(_ g: Game, _ choice: String) -> Game? {
     if g.kind == "snooker" { return chooseSnooker(g, choice) }
+    if g.kind == "carom" { return chooseCarom(g, choice) }
     guard let o = g.option, o.choices.contains(choice) else { return nil }
     var n = g
     n.option = nil; n.call = nil

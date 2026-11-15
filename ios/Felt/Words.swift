@@ -30,8 +30,25 @@ enum Words {
     "snkMiss": ["head": "Foul and a miss", "sub": "Play from here, or have the balls put back for them to play again.", "play": "Play it", "replace": "Put it back and they play again",
                 "again": "Make them play again from here", "free": "Free ball: nominate"],
     "snkFree": ["head": "Free ball", "sub": "Snookered after a foul: nominate any colour as the ball on, or play on.", "play": "Play it", "again": "Make them play again from here", "free": "Free ball: nominate"],
+    "respot": ["head": "Balls touching", "sub": "Your cue ball touches a ball. Play on, but not straight into it, or have the touching balls spotted.", "play": "Play it", "respot": "Spot them"],
     "snkBlack": ["head": "Re-spotted black", "sub": "Level on points. You won the draw: play the black from the D, or have them play it.", "play": "Play it", "pass": "They play it"],
   ]
+  /* carom's (page 5): caromWhy and caromWords */
+  static let NUMW = ["No", "One", "Two", "Three"]
+  static func caromWhy(_ c: CaromCount) -> String {
+    c.balls.isEmpty ? "No ball hit" : c.balls.count < 2 ? "Only one ball" : "\(c.cushions < NUMW.count ? NUMW[c.cushions] : String(c.cushions)) cushion\(c.cushions == 1 ? "" : "s") before the second ball"
+  }
+  static func carom(_ v: Verdict, _ g: Game, _ shooter: Int, _ who: Int) -> (msg: String, banner: (String, String, Double)) {
+    if let f = v.foul { return ("Foul: \(f). \(turnOf(who)).", ("Foul: \(f)", turnOf(who), 1.5)) }
+    let cv = v.carom!
+    if cv.point {
+      let sc = "\(g.score![shooter]) of \(g.race!)", run = (g.run ?? 0) > 1 ? ", a run of \(g.run!)" : ""
+      return ("Point: \(sc)\(run). \(nameOf(shooter)) \(cpuMode && shooter == 0 ? "go" : "goes") again.",
+              ("Point: \(sc)", "\(nameOf(shooter)) \(cpuMode && shooter == 0 ? "shoot" : "shoots") again\(run)", 0.9))
+    }
+    let why = caromWhy(cv.count)
+    return ("\(why). \(turnOf(who)).", (turnOf(who), why, 1.1))
+  }
   /* snooker's (page 5k): onWords, ptsWord, dWords, frameHead */
   static func onWords(_ g: Game) -> String {
     let S = g.snk!

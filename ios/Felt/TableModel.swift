@@ -58,7 +58,7 @@ final class TableModel {
   /* the status line (the page's say()) and the banner over the table (flash()) */
   private(set) var msg = ""
   private(set) var banner: (title: String, sub: String, until: TimeInterval)?
-  var rulesKind: String? { ["8": "8", "9": "9", "10": "10", "heyball": "heyball", "snooker": "snooker"][game.table.2] }
+  var rulesKind: String? { ["8": "8", "9": "9", "10": "10", "heyball": "heyball", "snooker": "snooker", "carom": "carom"][game.table.2] }
 
   /* the baked table (FeltRender: index.html's paintTable and vignette) for one screen size */
   struct Baked { let image: CGImage; let size: CGSize; let scale: CGFloat }
@@ -106,7 +106,8 @@ final class TableModel {
     return img
   }
 
-  var cueN: Int { game == .carom ? 70 : 0 }
+  /* the ball struck: carom's shooter strikes their own cue ball (game.striker) */
+  var cueN: Int { g?.striker ?? (game == .carom ? 70 : 0) }
   var shown: [Ball] { rolling?.balls ?? balls }
   var cue: Ball? { shown.first { $0.n == cueN && $0.on } }
 
@@ -117,7 +118,7 @@ final class TableModel {
 
   init(game: TableGame, cpu: String? = nil) {
     self.game = game
-    cpuLevel = ["8", "9", "10", "heyball"].contains(game.table.2) ? cpu : nil
+    cpuLevel = ["8", "9", "10", "heyball", "carom"].contains(game.table.2) ? cpu : nil
     Words.cpuMode = cpuLevel != nil
     sim.setTable(game.table.0, game.table.1)
     engine = RulesEngine(sim: sim)
@@ -136,7 +137,7 @@ final class TableModel {
     if let k = rulesKind {
       g = engine.newGame(k)
       syncBalls()
-      msg = k == "snooker" ? "\(Words.dWords(0)). On a red." : "\(Words.nameOf(0)) to break."
+      msg = k == "snooker" ? "\(Words.dWords(0)). On a red." : k == "carom" ? "\(Words.nameOf(0)) to break: the red first." : "\(Words.nameOf(0)) to break."
       randomOrient(); aimAtNearest()
       return
     }
@@ -260,6 +261,12 @@ final class TableModel {
   private func words(_ gm: Game, _ shooter: Int, chose: (who: Int, kind: String, choice: String)? = nil) {
     guard let v = gm.verdict else { return }
     if gm.winner != nil { msg = Words.overLine(gm); banner = nil; return }
+    if gm.kind == "carom" {
+      let w = Words.carom(v, gm, shooter, gm.turn)
+      msg = w.msg
+      if gm.option == nil { banner = (w.banner.0, w.banner.1, now + w.banner.2) }
+      return
+    }
     if gm.kind == "snooker" {
       let w = Words.snooker(v, gm, shooter, gm.option?.who ?? gm.turn)
       msg = gm.option != nil ? "\(w.msg) \(Words.OPT[gm.option!.kind]?["head"] ?? ""): \(Words.nameOf(gm.option!.who)) to choose." : w.msg
@@ -342,9 +349,9 @@ final class TableModel {
   }
   /* cpuThinkMs: short on the break or an easy pot, longer on a hard one, longest on a safety or kick */
   private func cpuThinkMs(_ gm: Game, _ shot: CPUShot, _ seed: Double) -> Double {
-    let T = ["break": 900.0, "pot": 650, "bank": 2000, "combo": 2200, "safety": 1900, "kick": 2300, "push": 1600, "blind": 1300, "kickpot": 2300, "jump": 2100, "swerve": 2100]
+    let T = ["break": 900.0, "pot": 650, "carom": 1500, "bank": 2000, "combo": 2200, "safety": 1900, "kick": 2300, "push": 1600, "blind": 1300, "kickpot": 2300, "jump": 2100, "swerve": 2100]
     var ms = T[shot.intent.type] ?? 1300
-    if shot.intent.type == "pot" { ms += 1900 * pow(1 - min(1, max(0, shot.intent.q.isFinite ? shot.intent.q : 0.5)), 1.5) }
+    if shot.intent.type == "pot" || shot.intent.type == "carom" { ms += 1900 * pow(1 - min(1, max(0, shot.intent.q.isFinite ? shot.intent.q : 0.5)), 1.5) }
     if gm.inHand != nil && !gm.breakShot { ms += 500 }
     ms *= 0.85 + 0.3 * cpuRng((seed.truncatingRemainder(dividingBy: 1e6)) * 7919 + 3)()
     return max(350, min(3500, ms.rounded()))

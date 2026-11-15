@@ -12,7 +12,7 @@ import Testing
   }()
   static func state(_ c: [String: Any]) -> (CPU, Game) {
     let G = RulesTests.games[(c["gi"] as! NSNumber).intValue], k = (c["k"] as! NSNumber).intValue, kind = G["kind"] as! String
-    let sim = Sim(); sim.setPockets("regulation"); sim.setTable(G["table"] as! String)
+    let sim = Sim(); sim.setPockets("regulation"); sim.setTable(G["table"] as! String, G["shape"] as? String)
     var cfg = CallConfig(); cfg.mode = G["mode"] as! String
     let rules = makeRules(kind, ruleset: G["ruleset"] as? String, call: cfg, race: (G["race"] as? NSNumber)?.intValue)
     let raw = k < 0 ? G["g0"] as! [String: Any] : (G["steps"] as! [[String: Any]])[k]["out"] as! [String: Any]
@@ -36,6 +36,7 @@ import Testing
     let wc = w["call"] as? [String: Any]
     #expect((got.call == nil) == (wc == nil), "\(name): call present")
     if let gc = got.call, let wc { #expect(gc == decodeCall(wc)!, "\(name): call \(gc) vs \(wc)") }
+    #expect(got.ball == (w["ball"] as? NSNumber)?.intValue && got.first == (w["first"] as? NSNumber)?.intValue, "\(name): carom's ball and first")
   }
 }
 

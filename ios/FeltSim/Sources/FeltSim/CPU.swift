@@ -30,6 +30,8 @@ public struct CPUProfile: Sendable {
 /* the shot the CPU plays: its stroke, where it places the cue ball, its call and what it is */
 public struct CPUShot: Sendable {
   public var angle: Double, power: Double, spin: Spin, place: [Double]?, call: ShotCall?, intent: (type: String, q: Double)
+  /* carom: the cue ball struck, and the ball the plan meets first */
+  public var ball: Int? = nil, first: Int? = nil
 }
 
 /* a pot line (cpuLine and its kin): mutable, as the page's objects are */
@@ -541,6 +543,7 @@ public final class CPU {
   }
 
   public func cpuShot(_ g: Game, seed: Double, level: String) -> CPUShot {
+    if g.kind == "carom" { return cpuCarom(g, seed: seed, level: level) }
     let L = CPUProfile.level(level)
     let rnd = cpuRng(seed * 2654435761 + 1), me = g.turn
     cpuCalibrate()
@@ -742,6 +745,7 @@ public final class CPU {
   /* the CPU's answer to a choice pending for it */
   public func cpuOption(_ g: Game, level: String) -> String? {
     guard let o = g.option else { return nil }
+    if g.kind == "carom" { return "respot" }
     if o.kind == "eightBreak" || o.kind == "kitchenSpot" { return "spot" }
     if o.kind == "breakMiss" { return "break" }
     let L = CPUProfile.level(level)
