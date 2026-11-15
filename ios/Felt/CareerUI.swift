@@ -654,6 +654,70 @@ struct CareerOptions: View {
   }
 }
 
+/* PAGES.records: Personal Bests (the longest winning run, the biggest upset, the longest match, the ladder), Your
+   Titles (newest first), Seasons (newest first: W-L, titles and prize; Promoted, Relegated or the tier), Hall of
+   Fame, Most Titles (you in bold) */
+struct CareerRecords: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, r = E.records(), p = r["personal"]!, H = CareerEngine.HUMAN
+    let nm = { (id: Int) -> String in id == H ? "You" : E.player(id)["name"]?.str ?? "A player" }
+    let ins = EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)
+    List {
+      CareerTitle(kick: "Career", title: "Records")
+      Section {
+        row("Longest Winning Run", nil, p["streak"].map { "\($0[0]!.i) (season \($0[1]!.i))" } ?? "None yet")
+        row("Biggest Upset", p["upset"].map { "\(nm($0[1]!.i)), \($0[3]?.str ?? "")" }, p["upset"].map { "\($0[0]!.i) rating points" } ?? "None yet")
+        row("Longest Match", p["longest"].map { "\(nm($0[1]!.i)), \($0[3]?.str ?? "")" }, p["longest"].map { "\($0[0]!.i) racks" } ?? "None yet")
+        if let l = p["ladder"] { row("Ladder", nil, "\(l[0]!.i) of \(l[1]!.i) beaten") }
+      } header: { CareerPageHead(t: "Personal Bests") }
+      .listRowInsets(ins)
+      Section {
+        let t = r["titles"]!.a.reversed()
+        if t.isEmpty { note("No titles yet.") }
+        ForEach(Array(t.enumerated()), id: \.offset) { _, x in row(x["name"]!.s, "Season \(x["season"]!.i), tier \(x["tier"]!.i)", nil) }
+      } header: { CareerPageHead(t: "Your Titles") }
+      .listRowInsets(ins)
+      if !r["seasons"]!.a.isEmpty {
+        Section {
+          ForEach(Array(r["seasons"]!.a.reversed().enumerated()), id: \.offset) { _, x in
+            let t0 = x["t0"]!.i, t1 = x["t1"]!.i, ti = x["ti"]!.i
+            row("Season \(x["s"]!.i)", "\(x["w"]!.i)-\(x["l"]!.i), \(ti) title\(ti == 1 ? "" : "s"), \(CareerWords.crWords(x["prize"]!.d))", t1 > t0 ? "Promoted" : t1 < t0 ? "Relegated" : "Tier \(t1)")
+          }
+        } header: { CareerPageHead(t: "Seasons") }
+        .listRowInsets(ins)
+      }
+      Section {
+        let h = r["hallOfFame"]!.a
+        if h.isEmpty { note("Nobody yet: a legacy of \(CareerEngine.const("HOF_LEG").i) gets you in. Titles weigh their tier squared by their prestige.") }
+        ForEach(Array(h.enumerated()), id: \.offset) { _, x in row(x["name"]!.s, "Inducted season \(x["season"]!.i)", "\(x["legacy"]!.i) legacy", me: x["id"]!.i == H) }
+      } header: { CareerPageHead(t: "Hall of Fame") }
+      .listRowInsets(ins)
+      if !r["titleLeaders"]!.a.isEmpty {
+        Section {
+          ForEach(Array(r["titleLeaders"]!.a.enumerated()), id: \.offset) { _, x in row(x["name"]!.s, nil, "\(x["titles"]!.i)", me: x["id"]!.i == H) }
+        } header: { CareerPageHead(t: "Most Titles") }
+        .listRowInsets(ins)
+      }
+    }
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+  }
+  /* cvNoteEl: plain words under the head, not a cell */
+  private func note(_ t: String) -> some View { Text(t).font(.system(size: 13)).foregroundStyle(.secondary).listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)) }
+  private func row(_ t: String, _ sub: String?, _ v: String?, me: Bool = false) -> some View {
+    HStack {
+      VStack(alignment: .leading, spacing: 1) {
+        Text(t).font(.system(size: 17, weight: me ? .bold : .regular))
+        if let sub, !sub.isEmpty { Text(sub).font(.system(size: 15)).foregroundStyle(.secondary) }
+      }
+      Spacer()
+      if let v { Text(v).font(.system(size: 15)).foregroundStyle(.secondary).monospacedDigit() }
+    }
+  }
+}
+
 struct CareerHubGroups: View {
   @Bindable var store: CareerStore
   var onPractice: () -> Void
@@ -675,7 +739,7 @@ struct CareerHubGroups: View {
       NavigationLink { CareerCalendar(store: store) } label: { row("Calendar", "\(open) event\(open == 1 ? "" : "s") open to you, \(entered) entered") }
       NavigationLink { CareerBracket(store: store, id: cur?["id"]?.str) } label: { row("Bracket and Standings", cur?["name"]?.str ?? "Your events, once drawn") }
       NavigationLink { CareerRankings(store: store) } label: { row("Rankings", rk.map { "\(circNames[circ]): number \($0["rank"]!.i), \($0["pts"]!.i) points" } ?? "Unranked so far") }
-      row("Tour Card", tier >= 8 && tier < 12 ? (E.moneyRank() > 0 ? "Money list: number \(E.moneyRank())" : "Earn on the money list") : "Not needed yet")
+      row("Tour Card", tourLine(E, tier))
     } header: { head("Season") }
     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
     Section {
@@ -695,6 +759,13 @@ struct CareerHubGroups: View {
       } label: { row(retiring ? "Tap again to retire" : "Retire", "End this career, see the recap", warn: true, chevron: true) }
     } header: { head("Career") }
     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+  }
+  /* the page's Tour Card line: the money list from tier 8, the card won, the qualifier a step from a card tier */
+  private func tourLine(_ E: CareerEngine, _ tier: Int) -> String {
+    let keep = CareerEngine.const("CARD_KEEP").i, mr = E.moneyRank(), card = E.S["me"]!["card"]?.i ?? 0
+    if tier >= 8 && tier < 12 { return mr > 0 ? "Money list: number \(mr). The top \(keep) keep their cards" : "Earn on the money list: the top \(keep) keep their cards" }
+    if card > 0 { return "Tier \(card) card won" }
+    return tier == 7 || tier == 9 ? "The step up needs a card: win the qualifier" : "Not needed yet"
   }
   private func head(_ t: String) -> some View { Text(t).font(.system(size: 13)).foregroundStyle(.secondary).textCase(nil) }
   private func row(_ t: String, _ sub: String, val: String? = nil, warn: Bool = false, chevron: Bool = false) -> some View {
@@ -893,6 +964,8 @@ struct CareerHub: View {
       CareerBracket(store: store, id: id)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-calendar") {
       if ProcessInfo.processInfo.arguments.contains("-felt-career-event"), let id = nm["event"]?.str { CareerEvent(store: store, id: id) } else { CareerCalendar(store: store) }
+    } else if ProcessInfo.processInfo.arguments.contains("-felt-career-records") {
+      CareerRecords(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-options") {
       CareerOptions(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-rivals") {
@@ -966,6 +1039,7 @@ struct CareerStats: View {
     List {
       block("All Games", st["all"]!)
       ForEach(st["byDisc"]!.keys, id: \.self) { d in block(CareerStore.gameName(d), st["byDisc"]![d]!) }
+      Section { NavigationLink("Records and Hall of Fame") { CareerRecords(store: store) }.accessibilityIdentifier("cvRecords") }
     }
     .navigationTitle("Stats")
   }

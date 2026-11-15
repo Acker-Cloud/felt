@@ -351,3 +351,20 @@ extension CareerEngine {
     return v
   }
 }
+
+/* Career.records(): personal bests (S.rb), your titles, the series' champions, the Hall of Fame, the seasons (S.arch)
+   and the ten title leaders (active players, then the retired, then you; most titles, then id) */
+extension CareerEngine {
+  public func records() -> JV {
+    let m = S["pop"]!["m"]!
+    let retired = m.keys.compactMap { Int($0) }.filter { !activeAI($0) }.sorted()
+    var lead: [(Int, Int)] = (activeIds() + retired).map { ($0, m[String($0)]?["ti"]?.i ?? 0) }
+    lead.append((Self.HUMAN, S["st"]!["all"]!["ti"]?.i ?? 0))
+    lead = Array(lead.filter { $0.1 > 0 }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0 < $1.0 }.prefix(10))
+    return ["personal": S["rb"]!,
+            "titles": .arr(S["me"]!["tl"]!.a.map { ["season": $0[0]!, "name": $0[1]!, "tier": $0[2]!] }),
+            "hallOfFame": .arr(S["hof"]!.a.map { ["id": $0[0]!, "name": cardOf($0[0]!.i)["name"]!, "season": $0[1]!, "legacy": $0[2]!] }),
+            "seasons": S["arch"]!,
+            "titleLeaders": .arr(lead.map { ["id": .n($0.0), "name": cardOf($0.0)["name"]!, "titles": .n($0.1)] })]
+  }
+}
