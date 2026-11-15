@@ -73,7 +73,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf', 'newPractice', 'practiceJudge', 'scatter', 'addBall', 'removeBall', 'rng', 'canDrop', 'onTable'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf', 'newPractice', 'practiceJudge', 'scatter', 'addBall', 'removeBall', 'rng', 'canDrop', 'onTable', 'TRICKS', 'trickJudge', 'trickPoints', 'trickSol', 'trickGame', 'programMax', 'TRICK_VAL', 'trickPts', 'trickScoreFromStars', 'trickStars', 'newBall'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -727,7 +727,33 @@ ${D.NAT.map(n => `    (${q(n.id)}, ${q(n.name)}, ${q(n.first)}, ${q(n.last)}, ${
       practice.tables.push({ table: T, racks, judged, edits });
     }
   }
-  return { math, career, careerData, jv, practice: JSON.stringify(practice), hero: JSON.stringify({ heroes }), v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
+  /* sim 1h, trick shots: on each table setting every challenge's layout and zone, its stored solution simulated (the rest
+     positions, the pots and their pockets) and judged (ok and the words), and the program's sums */
+  const tricks = { sets: [], val: Object.entries(S.TRICK_VAL).map(([id, v]) => [id, v.disc, v.val]).sort(), max: S.programMax(),
+    pts: [6, 7, 8, 9, 10].map(v => [0, 1, 2, 3, 4].map(n => S.trickPts(v, n))), stars: [1, 2, 3, 4, 9].map(n => S.trickStars(n)),
+    fromStars: S.trickScoreFromStars({ kiss: 3, carom: 2, two: 1, long: 3, bad: 3, needle: 7 }, { carom: 9 }) };
+  {
+    const bits = v => hx(v);
+    for (const [t, pk] of [['7', 'regulation'], ['9', 'regulation'], ['7', 'generous'], ['9', 'generous']]) {
+      S.setPockets(pk); S.setTable(t);
+      const rows = [];
+      for (const c of S.TRICKS) {
+        const P = S.trickPoints(c), sol = S.trickSol(c), g = S.trickGame(c);
+        const res = S.simulateShot(g.balls, { angle: sol.angle, power: sol.power, spin: sol.spin });
+        const j = S.trickJudge(c, res);
+        /* and three misses, so the failures' words and thresholds are judged too: the angle off, soft, and turned back */
+        /* (the tip kept on the ball, as the pad keeps it: the side only ever scaled down) */
+        const miss = [[0.06, 1, 1], [0, 0.35, 1], [Math.PI, 1, 0.5]].map(([da, kp, ks]) => {
+          const m = S.simulateShot(g.balls, { angle: sol.angle + da, power: sol.power * kp, spin: Object.assign({}, sol.spin, { x: sol.spin.x * ks }) }), mj = S.trickJudge(c, m);
+          return [mj.ok, mj.why, m.potted];
+        });
+        rows.push({ id: c.id, pts: Object.entries(P).map(([k, p]) => [k, bits(p[0]), bits(p[1])]), balls: g.balls.map(b => b.n),
+          rest: res.balls.map(b => [b.n, bits(b.x), bits(b.y), b.on]), potted: res.potted, pocketOf: res.pocketOf, ok: j.ok, why: j.why, miss });
+      }
+      tricks.sets.push({ table: t, pockets: pk, rows });
+    }
+  }
+  return { math, career, careerData, jv, tricks: JSON.stringify(tricks), practice: JSON.stringify(practice), hero: JSON.stringify({ heroes }), v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
 }
 /* tests/ios-check.cjs rebuilds both in memory and requires the committed files to match */
 module.exports = { build, OUT, loadFd };
@@ -743,6 +769,7 @@ if (require.main === module) {
   fs.writeFileSync(path.join(OUT, 'v3.json'), b.v3);
   fs.writeFileSync(path.join(OUT, 'hero.json'), b.hero);
   fs.writeFileSync(path.join(OUT, 'practice.json'), b.practice);
+  fs.writeFileSync(path.join(OUT, 'tricks.json'), b.tricks);
   fs.writeFileSync(path.join(__dirname, '..', 'ios', 'FeltSim', 'Sources', 'FeltSim', 'CareerData.swift'), b.careerData);
   const steps = b.cases.reduce((a, c) => a + c.result.steps, 0);
   console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${b.games.length} games (${b.games.reduce((a, g) => a + g.steps.length, 0)} judgements), ${b.cpuCases.length} CPU decisions, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);
