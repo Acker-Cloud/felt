@@ -77,7 +77,7 @@ function build() {
   for (let i = 0; i < 6000; i++) {
     const s = 10 ** (Math.floor(rnd() * 9) - 6), x = (rnd() - 0.5) * 2 * s * (i % 3 === 0 ? 30 : 1), y = rnd() * s * 5, p = i % 5 === 0 ? rnd() * 3 : 1.7, c = rnd() * 2 - 1;
     lines.push([x, y, p, c, F.sin(x), F.cos(x), F.tan(x), F.atan(x), F.acos(c), F.exp(-y * 1.088), F.exp(x), F.pow(y, p), F.pow(y, 1 / p),
-      Math.hypot(x, y), Math.hypot(x, y, c)].map(hx).join(' '));
+      Math.hypot(x, y), Math.hypot(x, y, c), F.atan2(c, x), F.asin(c), F.tanh(x), F.atanh(c * 0.999), F.log1p(y - 0.3), F.expm1(x)].map(hx).join(' '));
   }
   const math = lines.join('\n') + '\n';
 

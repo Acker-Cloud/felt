@@ -393,4 +393,148 @@ public enum JSMath {
     if (j >> 20) <= 0 { z = scalbn(z, Int(n)) } else { z = withHi(z, hi(z) &+ (n << 20)) }
     return s * z
   }
+
+  // MARK: asin, atan2, log1p, expm1, tanh, atanh (the CPU's)
+
+  public static func asin(_ x: Double) -> Double {
+    var t = 0.0, w: Double, p: Double, q: Double
+    let hx = hi(x), ix = hx & SIGNIF
+    if ix >= 0x3ff0_0000 {
+      if ((ix - 0x3ff0_0000) | lo(x)) == 0 { return x * pio2_hi + x * pio2_lo }
+      return (x - x) / (x - x)
+    } else if ix < 0x3fe0_0000 {
+      if ix < 0x3e40_0000 { return x }
+      t = x * x
+      p = t * (pS0 + t * (pS1 + t * (pS2 + t * (pS3 + t * (pS4 + t * pS5)))))
+      q = 1.0 + t * (qS1 + t * (qS2 + t * (qS3 + t * qS4)))
+      w = p / q
+      return x + x * w
+    }
+    w = 1.0 - abs(x)
+    t = w * 0.5
+    p = t * (pS0 + t * (pS1 + t * (pS2 + t * (pS3 + t * (pS4 + t * pS5)))))
+    q = 1.0 + t * (qS1 + t * (qS2 + t * (qS3 + t * qS4)))
+    let s = t.squareRoot()
+    if ix >= 0x3FEF_3333 { w = p / q; t = pio2_hi - (2.0 * (s + s * w) - pio2_lo) }
+    else {
+      w = withLo(s, 0)
+      let c = (t - w * w) / (s + w), r = p / q
+      p = 2.0 * s * r - (pio2_lo - 2.0 * c); q = 0x1.921fb54442d18p-1 - 2.0 * w; t = 0x1.921fb54442d18p-1 - (p - q)
+    }
+    return hx > 0 ? t : -t
+  }
+  private static let PI_LO = 0x1.1a62633145c07p-53, TINY = 1.0e-300, PIO4_ = 0x1.921fb54442d18p-1
+  public static func atan2(_ y: Double, _ x: Double) -> Double {
+    let hx = hi(x), ix = hx & SIGNIF, lx = lo(x), hy = hi(y), iy = hy & SIGNIF, ly = lo(y)
+    if x.isNaN || y.isNaN { return x + y }
+    if ((hx &- 0x3ff0_0000) | lx) == 0 { return atan(y) }
+    let m = ((hy >> 31) & 1) | ((hx >> 30) & 2)
+    if (iy | ly) == 0 { switch m { case 0, 1: return y; case 2: return Double.pi + TINY; default: return -Double.pi - TINY } }
+    if (ix | lx) == 0 { return hy < 0 ? -pio2_hi - TINY : pio2_hi + TINY }
+    if ix == EXP_BITS {
+      if iy == EXP_BITS { switch m { case 0: return PIO4_ + TINY; case 1: return -PIO4_ - TINY; case 2: return 3.0 * PIO4_ + TINY; default: return -3.0 * PIO4_ - TINY } }
+      switch m { case 0: return 0.0; case 1: return -0.0; case 2: return Double.pi + TINY; default: return -Double.pi - TINY }
+    }
+    if iy == EXP_BITS { return hy < 0 ? -pio2_hi - TINY : pio2_hi + TINY }
+    let k = (iy &- ix) >> 20
+    let z: Double
+    if k > 60 { z = pio2_hi + 0.5 * PI_LO } else if hx < 0 && k < -60 { z = 0.0 } else { z = atan(abs(y / x)) }
+    switch m { case 0: return z; case 1: return -z; case 2: return Double.pi - (z - PI_LO); default: return (z - PI_LO) - Double.pi }
+  }
+  private static let LN2_HI = 0x1.62e42feep-1, LN2_LO = 0x1.a39ef35793c76p-33
+  private static let LP = [0x1.5555555555593p-1, 0x1.999999997fa04p-2, 0x1.2492494229359p-2, 0x1.c71c51d8e78afp-3, 0x1.7466496cb03dep-3, 0x1.39a09d078c69fp-3, 0x1.2f112df3e5244p-3]
+  public static func log1p(_ x: Double) -> Double {
+    var hfsq: Double, f = 0.0, c = 0.0, s: Double, z: Double, R: Double, u: Double, k: Int32 = 1, hu: Int32 = 0
+    let hx = hi(x), ax = hx & SIGNIF
+    if hx < 0x3FDA_827A {
+      if ax >= 0x3ff0_0000 { return x == -1.0 ? -.infinity : .nan }
+      if ax < 0x3e20_0000 { if 0x1.0p54 + x > 0.0 && ax < 0x3c90_0000 { return x }; return x - x * x * 0.5 }
+      if hx > 0 || hx <= Int32(bitPattern: 0xbfd2_bec3) { k = 0; f = x; hu = 1 }
+    }
+    if hx >= EXP_BITS { return x + x }
+    if k != 0 {
+      if hx < 0x4340_0000 { u = 1.0 + x; hu = hi(u); k = (hu >> 20) - 1023; c = k > 0 ? 1.0 - (u - x) : x - (u - 1.0); c /= u }
+      else { u = x; hu = hi(u); k = (hu >> 20) - 1023; c = 0 }
+      hu &= 0x000f_ffff
+      if hu < 0x6_a09e { u = withHi(u, hu | 0x3ff0_0000) } else { k += 1; u = withHi(u, hu | 0x3fe0_0000); hu = (0x0010_0000 - hu) >> 2 }
+      f = u - 1.0
+    }
+    hfsq = 0.5 * f * f
+    let kd = Double(k)
+    if hu == 0 {
+      if f == 0.0 { if k == 0 { return 0.0 }; c += kd * LN2_LO; return kd * LN2_HI + c }
+      R = hfsq * (1.0 - 0.66666666666666666 * f)
+      if k == 0 { return f - R }
+      return kd * LN2_HI - ((R - (kd * LN2_LO + c)) - f)
+    }
+    s = f / (2.0 + f)
+    z = s * s
+    R = z * (LP[0] + z * (LP[1] + z * (LP[2] + z * (LP[3] + z * (LP[4] + z * (LP[5] + z * LP[6]))))))
+    if k == 0 { return f - (hfsq - s * (hfsq + R)) }
+    return kd * LN2_HI - ((hfsq - (s * (hfsq + R) + (kd * LN2_LO + c))) - f)
+  }
+  private static let Q = [-0x1.11111111110f4p-5, 0x1.a01a019fe5585p-10, -0x1.4ce199eaadbb7p-14, 0x1.0cfca86e65239p-18, -0x1.afdb76e09c32dp-23]
+  public static func expm1(_ x0: Double) -> Double {
+    var x = x0, y: Double, hi_: Double, lo_: Double, c = 0.0, t: Double, e: Double, k: Int32
+    var hx = hi(x)
+    let xsb = hx & Int32(bitPattern: 0x8000_0000)
+    hx &= SIGNIF
+    if hx >= 0x4043_687A {
+      if hx >= 0x4086_2E42 {
+        if hx >= 0x7ff0_0000 { if ((hx & 0xf_ffff) | lo(x)) != 0 { return x + x }; return xsb == 0 ? x : -1.0 }
+        if x > 0x1.62e42fefa39efp9 { return .infinity }
+      }
+      if xsb != 0 { if x + TINY < 0.0 { return TINY - 1.0 } }
+    }
+    if hx > 0x3fd6_2e42 {
+      if hx < 0x3FF0_A2B2 {
+        if xsb == 0 { hi_ = x - LN2_HI; lo_ = LN2_LO; k = 1 } else { hi_ = x + LN2_HI; lo_ = -LN2_LO; k = -1 }
+      } else {
+        k = Int32(0x1.71547652b82fep0 * x + (xsb == 0 ? 0.5 : -0.5))
+        t = Double(k); hi_ = x - t * LN2_HI; lo_ = t * LN2_LO
+      }
+      x = hi_ - lo_
+      c = (hi_ - x) - lo_
+    } else if hx < 0x3c90_0000 {
+      t = 1.0e300 + x
+      return x - (t - (1.0e300 + x))
+    } else { k = 0 }
+    let hfx = 0.5 * x, hxs = x * hfx
+    let r1 = 1.0 + hxs * (Q[0] + hxs * (Q[1] + hxs * (Q[2] + hxs * (Q[3] + hxs * Q[4]))))
+    t = 3.0 - r1 * hfx
+    e = hxs * ((r1 - t) / (6.0 - x * t))
+    if k == 0 { return x - (x * e - hxs) }
+    e = (x * (e - c) - c)
+    e -= hxs
+    if k == -1 { return 0.5 * (x - e) - 0.5 }
+    if k == 1 { if x < -0.25 { return -2.0 * (e - (x + 0.5)) }; return 1.0 + 2.0 * (x - e) }
+    if k <= -2 || k > 56 { y = 1.0 - (e - x); y = withHi(y, hi(y) &+ (k << 20)); return y - 1.0 }
+    t = 1.0
+    if k < 20 { t = withHi(t, 0x3ff0_0000 - (0x20_0000 >> k)); y = t - (e - x); y = withHi(y, hi(y) &+ (k << 20)) }
+    else { t = withHi(t, (0x3ff - k) << 20); y = x - (e + t); y += 1.0; y = withHi(y, hi(y) &+ (k << 20)) }
+    return y
+  }
+  public static func tanh(_ x: Double) -> Double {
+    var t: Double, z: Double
+    let jx = hi(x), ix = jx & SIGNIF
+    if ix >= EXP_BITS { return jx >= 0 ? 1.0 / x + 1.0 : 1.0 / x - 1.0 }
+    if ix < 0x4036_0000 {
+      if ix < 0x3c80_0000 { return x * (1.0 + x) }
+      if ix >= 0x3ff0_0000 { t = expm1(2.0 * abs(x)); z = 1.0 - 2.0 / (t + 2.0) }
+      else { t = expm1(-2.0 * abs(x)); z = -t / (t + 2.0) }
+    } else { z = 1.0 - TINY }
+    return jx >= 0 ? z : -z
+  }
+  /* fdlibm's e_atanh.c, through log1p */
+  public static func atanh(_ x0: Double) -> Double {
+    var x = x0
+    let hx = hi(x), lx = lo(x), ix = hx & SIGNIF
+    if (ix | (lx != 0 ? 1 : 0)) > 0x3ff0_0000 { return (x - x) / (x - x) }
+    if ix == 0x3ff0_0000 { return x / 0 }
+    if ix < 0x3e30_0000 && 1e300 + x > 0 { return x }
+    x = withHi(x, ix)
+    let t: Double
+    if ix < 0x3fe0_0000 { let u = x + x; t = 0.5 * log1p(u + u * x / (1.0 - x)) } else { t = 0.5 * log1p((x + x) / (1.0 - x)) }
+    return hx >= 0 ? t : -t
+  }
 }

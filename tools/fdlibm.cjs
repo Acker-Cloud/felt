@@ -4,7 +4,7 @@
    and felt's physics is chaotic, so the iOS port's goldens run index.html's sim on these instead
    (tools/ios-golden.cjs): one reference, the same on every machine. hypot is V8's own builtin
    (Kahan sum normalised to the largest), the same on every V8, so Math.hypot is kept.
-   Only what sim 1a-1d calls. Pure doubles; every operation is a single IEEE-754 rounding. */
+   Only what the sim region calls (physics, rules and the CPU). Pure doubles; every operation is a single IEEE-754 rounding. */
 'use strict';
 const dv = new DataView(new ArrayBuffer(8));
 const hi = x => { dv.setFloat64(0, x); return dv.getInt32(0); };
@@ -318,11 +318,155 @@ function pow(x, y) {
   if ((j >> 20) <= 0) z = scalbn(z, n); else z = withHi(z, (hi(z) + (n << 20)) | 0);
   return s * z;
 }
+const ASIN_PIO4 = PIO4;
+function asin(x) {
+  let t = 0, w, p, q, c, r, s;
+  const hx = hi(x), ix = hx & SIGNIF;
+  if (ix >= 0x3ff00000) {
+    if (((ix - 0x3ff00000) | lo(x)) === 0) return x * PIO2_HI + x * PIO2_LO;
+    return (x - x) / (x - x);
+  } else if (ix < 0x3fe00000) {
+    if (ix < 0x3e400000) return x;
+    t = x * x;
+    p = t * (PS0 + t * (PS1 + t * (PS2 + t * (PS3 + t * (PS4 + t * PS5)))));
+    q = 1.0 + t * (QS1 + t * (QS2 + t * (QS3 + t * QS4)));
+    w = p / q;
+    return x + x * w;
+  }
+  w = 1.0 - Math.abs(x);
+  t = w * 0.5;
+  p = t * (PS0 + t * (PS1 + t * (PS2 + t * (PS3 + t * (PS4 + t * PS5)))));
+  q = 1.0 + t * (QS1 + t * (QS2 + t * (QS3 + t * QS4)));
+  s = Math.sqrt(t);
+  if (ix >= 0x3FEF3333) { w = p / q; t = PIO2_HI - (2.0 * (s + s * w) - PIO2_LO); }
+  else {
+    w = withLo(s, 0); c = (t - w * w) / (s + w); r = p / q;
+    p = 2.0 * s * r - (PIO2_LO - 2.0 * c); q = ASIN_PIO4 - 2.0 * w; t = ASIN_PIO4 - (p - q);
+  }
+  return hx > 0 ? t : -t;
+}
+const PI_LO = hf(0x11a62633145c07, -105), TINY = 1.0e-300;
+function atan2(y, x) {
+  const hx = hi(x), ix = hx & SIGNIF, lx = lo(x), hy = hi(y), iy = hy & SIGNIF, ly = lo(y);
+  if (Number.isNaN(x) || Number.isNaN(y)) return x + y;
+  if (((hx - 0x3ff00000) | lx) === 0) return atan(y);
+  const m = ((hy >> 31) & 1) | ((hx >> 30) & 2);
+  if ((iy | ly) === 0) { switch (m) { case 0: case 1: return y; case 2: return Math.PI + TINY; default: return -Math.PI - TINY; } }
+  if ((ix | lx) === 0) return hy < 0 ? -PIO2_HI - TINY : PIO2_HI + TINY;
+  if (ix === EXP_BITS) {
+    if (iy === EXP_BITS) { switch (m) { case 0: return PIO4 + TINY; case 1: return -PIO4 - TINY; case 2: return 3.0 * PIO4 + TINY; default: return -3.0 * PIO4 - TINY; } }
+    switch (m) { case 0: return 0.0; case 1: return -0.0; case 2: return Math.PI + TINY; default: return -Math.PI - TINY; }
+  }
+  if (iy === EXP_BITS) return hy < 0 ? -PIO2_HI - TINY : PIO2_HI + TINY;
+  const k = (iy - ix) >> 20;
+  let z;
+  if (k > 60) z = PIO2_HI + 0.5 * PI_LO;
+  else if (hx < 0 && k < -60) z = 0.0;
+  else z = atan(Math.abs(y / x));
+  switch (m) { case 0: return z; case 1: return -z; case 2: return Math.PI - (z - PI_LO); default: return (z - PI_LO) - Math.PI; }
+}
+const LP = [hf(0x15555555555593, -53), hf(0x1999999997fa04, -54), hf(0x12492494229359, -54), hf(0x1c71c51d8e78af, -55), hf(0x17466496cb03de, -55), hf(0x139a09d078c69f, -55), hf(0x12f112df3e5244, -55)];
+function log1p(x) {
+  let hfsq, f = 0, c = 0, s, z, R, u, k = 1, hu = 0;
+  const hx = hi(x), ax = hx & SIGNIF;
+  if (hx < 0x3FDA827A) {
+    if (ax >= 0x3ff00000) return x === -1.0 ? -Infinity : NaN;
+    if (ax < 0x3e200000) { if (2 ** 54 + x > 0.0 && ax < 0x3c900000) return x; return x - x * x * 0.5; }
+    if (hx > 0 || hx <= (0xbfd2bec3 | 0)) { k = 0; f = x; hu = 1; }
+  }
+  if (hx >= EXP_BITS) return x + x;
+  if (k !== 0) {
+    if (hx < 0x43400000) { u = 1.0 + x; hu = hi(u); k = (hu >> 20) - 1023; c = k > 0 ? 1.0 - (u - x) : x - (u - 1.0); c /= u; }
+    else { u = x; hu = hi(u); k = (hu >> 20) - 1023; c = 0; }
+    hu &= 0x000fffff;
+    if (hu < 0x6a09e) u = withHi(u, hu | 0x3ff00000);
+    else { k += 1; u = withHi(u, hu | 0x3fe00000); hu = (0x00100000 - hu) >> 2; }
+    f = u - 1.0;
+  }
+  hfsq = 0.5 * f * f;
+  if (hu === 0) {
+    if (f === 0.0) { if (k === 0) return 0.0; c += k * LN2LO; return k * LN2HI + c; }
+    R = hfsq * (1.0 - 0.66666666666666666 * f);
+    if (k === 0) return f - R;
+    return k * LN2HI - ((R - (k * LN2LO + c)) - f);
+  }
+  s = f / (2.0 + f);
+  z = s * s;
+  R = z * (LP[0] + z * (LP[1] + z * (LP[2] + z * (LP[3] + z * (LP[4] + z * (LP[5] + z * LP[6]))))));
+  if (k === 0) return f - (hfsq - s * (hfsq + R));
+  return k * LN2HI - ((hfsq - (s * (hfsq + R) + (k * LN2LO + c))) - f);
+}
+const Q = [-hf(0x111111111110f4, -57), hf(0x1a01a019fe5585, -62), -hf(0x14ce199eaadbb7, -66), hf(0x10cfca86e65239, -70), -hf(0x1afdb76e09c32d, -75)];
+function expm1(x) {
+  let y, hi_, lo_, c = 0, t, e, hxs, hfx, r1, k;
+  let hx = hi(x);
+  const xsb = hx & (0x80000000 | 0);
+  y = Math.abs(x);
+  hx &= SIGNIF;
+  if (hx >= 0x4043687A) {
+    if (hx >= 0x40862E42) {
+      if (hx >= 0x7ff00000) { if (((hx & 0xfffff) | lo(x)) !== 0) return x + x; return xsb === 0 ? x : -1.0; }
+      if (x > hf(0x162e42fefa39ef, -43)) return Infinity;
+    }
+    if (xsb !== 0) { if (x + TINY < 0.0) return TINY - 1.0; }
+  }
+  if (hx > 0x3fd62e42) {
+    if (hx < 0x3FF0A2B2) {
+      if (xsb === 0) { hi_ = x - LN2HI; lo_ = LN2LO; k = 1; } else { hi_ = x + LN2HI; lo_ = -LN2LO; k = -1; }
+    } else {
+      k = Math.trunc(INVLN2 * x + (xsb === 0 ? 0.5 : -0.5));
+      t = k; hi_ = x - t * LN2HI; lo_ = t * LN2LO;
+    }
+    x = hi_ - lo_;
+    c = (hi_ - x) - lo_;
+  } else if (hx < 0x3c900000) {
+    t = 1.0e300 + x;
+    return x - (t - (1.0e300 + x));
+  } else k = 0;
+  hfx = 0.5 * x;
+  hxs = x * hfx;
+  r1 = 1.0 + hxs * (Q[0] + hxs * (Q[1] + hxs * (Q[2] + hxs * (Q[3] + hxs * Q[4]))));
+  t = 3.0 - r1 * hfx;
+  e = hxs * ((r1 - t) / (6.0 - x * t));
+  if (k === 0) return x - (x * e - hxs);
+  e = (x * (e - c) - c);
+  e -= hxs;
+  if (k === -1) return 0.5 * (x - e) - 0.5;
+  if (k === 1) { if (x < -0.25) return -2.0 * (e - (x + 0.5)); return 1.0 + 2.0 * (x - e); }
+  if (k <= -2 || k > 56) { y = 1.0 - (e - x); y = withHi(y, (hi(y) + (k << 20)) | 0); return y - 1.0; }
+  t = 1.0;
+  if (k < 20) { t = withHi(t, 0x3ff00000 - (0x200000 >> k)); y = t - (e - x); y = withHi(y, (hi(y) + (k << 20)) | 0); }
+  else { t = withHi(t, (0x3ff - k) << 20); y = x - (e + t); y += 1.0; y = withHi(y, (hi(y) + (k << 20)) | 0); }
+  return y;
+}
+function tanh(x) {
+  let t, z;
+  const jx = hi(x), ix = jx & SIGNIF;
+  if (ix >= EXP_BITS) return jx >= 0 ? 1.0 / x + 1.0 : 1.0 / x - 1.0;
+  if (ix < 0x40360000) {
+    if (ix < 0x3c800000) return x * (1.0 + x);
+    if (ix >= 0x3ff00000) { t = expm1(2.0 * Math.abs(x)); z = 1.0 - 2.0 / (t + 2.0); }
+    else { t = expm1(-2.0 * Math.abs(x)); z = -t / (t + 2.0); }
+  } else z = 1.0 - TINY;
+  return jx >= 0 ? z : -z;
+}
+/* fdlibm's e_atanh.c (the JDK has none): through log1p */
+function atanh(x) {
+  const hx = hi(x), lx = lo(x), ix = hx & SIGNIF;
+  if ((ix | (lx !== 0 ? 1 : 0)) > 0x3ff00000) return (x - x) / (x - x);
+  if (ix === 0x3ff00000) return x / 0;
+  if (ix < 0x3e300000 && 1e300 + x > 0) return x;
+  x = withHi(x, ix);
+  let t;
+  if (ix < 0x3fe00000) { t = x + x; t = 0.5 * log1p(t + t * x / (1.0 - x)); }
+  else t = 0.5 * log1p((x + x) / (1.0 - x));
+  return hx >= 0 ? t : -t;
+}
 /* a Math with the transcendental functions swapped; everything else (sqrt, hypot, max, ...) is the engine's, which is exact or V8's own */
 function fdMath(base = Math) {
   const M = Object.create(null);
   for (const k of Object.getOwnPropertyNames(base)) M[k] = base[k];
-  Object.assign(M, { sin, cos, tan, atan, acos, exp, pow });
+  Object.assign(M, { sin, cos, tan, atan, acos, exp, pow, asin, atan2, tanh, atanh, log1p, expm1 });
   return M;
 }
-module.exports = { sin, cos, tan, atan, acos, exp, pow, fdMath };
+module.exports = { sin, cos, tan, atan, acos, exp, pow, asin, atan2, tanh, atanh, log1p, expm1, fdMath };

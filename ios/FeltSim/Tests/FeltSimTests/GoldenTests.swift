@@ -57,17 +57,18 @@ private func intMap(_ a: Any?) -> [Int: Int] {
 
   @Test func math() throws {
     let txt = try String(contentsOf: fixture("math.txt"), encoding: .utf8)
-    var bad = [Int](repeating: 0, count: 15), n = 0
+    var bad = [Int](repeating: 0, count: 21), n = 0
     for line in txt.split(separator: "\n") {
       let f = line.split(separator: " ").map { Double(bitPattern: UInt64($0, radix: 16)!) }
       let (x, y, p, c) = (f[0], f[1], f[2], f[3])
       let got = [JSMath.sin(x), JSMath.cos(x), JSMath.tan(x), JSMath.atan(x), JSMath.acos(c), JSMath.exp(-y * 1.088), JSMath.exp(x),
-        JSMath.pow(y, p), JSMath.pow(y, 1 / p), JSMath.hypot(x, y), JSMath.hypot(x, y, c)]
+        JSMath.pow(y, p), JSMath.pow(y, 1 / p), JSMath.hypot(x, y), JSMath.hypot(x, y, c),
+        JSMath.atan2(c, x), JSMath.asin(c), JSMath.tanh(x), JSMath.atanh(c * 0.999), JSMath.log1p(y - 0.3), JSMath.expm1(x)]
       for (i, g) in got.enumerated() where g.bitPattern != f[4 + i].bitPattern { bad[i] += 1 }
       n += 1
     }
     #expect(n > 1000)
-    #expect(bad.allSatisfy { $0 == 0 }, "mismatches per function (sin cos tan atan acos exp exp pow pow hypot2 hypot3): \(bad)")
+    #expect(bad.allSatisfy { $0 == 0 }, "mismatches per function (sin cos tan atan acos exp exp pow pow hypot2 hypot3 atan2 asin tanh atanh log1p expm1): \(bad)")
   }
 
   private func setUp(_ sim: Sim, _ c: [String: Any]) {
