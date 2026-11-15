@@ -101,6 +101,8 @@ struct SettingsView: View {
   @AppStorage("felt.settings.look.balls") private var lookBalls = "classic"
 
   @AppStorage("felt.settings.stalemate") private var stalemate = false
+  @AppStorage("felt.settings.hand") private var hand = "right"
+  @AppStorage("felt.settings.bar") private var bar = "mid"
   /* the list (prefsList): a row per page (PREF_PAGES), its icon, name and line, pushed from the right. The page's
      Accessibility page is not here: none of its settings (ball marks, high-contrast aim, text size, Space on the bar)
      are ported yet */
@@ -108,7 +110,7 @@ struct SettingsView: View {
     List {
       Section {
         NavigationLink { page("Gameplay") { gameplay } } label: { PrefRow(icon: "circle.grid.2x1.fill", name: "Gameplay", line: "Rules, called shots, races, aim guide") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-        NavigationLink { page("Controls") { controls } } label: { PrefRow(icon: "switch.2", name: "Controls", line: "Auto aim") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        NavigationLink { page("Controls") { controls } } label: { PrefRow(icon: "switch.2", name: "Controls", line: "Auto aim, layout, power bar") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("Graphics") { graphics } } label: { PrefRow(icon: "photo", name: "Graphics", line: "Cloth, camera, motion") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("Audio and Haptics") { audio } } label: { PrefRow(icon: "speaker.wave.2.fill", name: "Audio and Haptics", line: "Sound, haptics") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("About") { about } } label: { PrefRow(icon: "info.circle", name: "About", line: "This build") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
@@ -150,6 +152,10 @@ struct SettingsView: View {
     Section {
       Picker("Auto Aim", selection: $autoAim) { Text("On").tag(true); Text("Off").tag(false) }.pickerStyle(.segmented).labelsHidden()
     } header: { Text("Auto Aim") } footer: { Text("Auto aim starts each turn pointed at the ball to play next. The cut is up to you.") }
+    Section {
+      Picker("Hand", selection: $hand) { Text("Right-Handed").tag("right"); Text("Left-Handed").tag("left") }
+      Picker("Power Bar", selection: $bar) { Text("Middle").tag("mid"); Text("At the Edge").tag("edge") }
+    } header: { Text("Layout") } footer: { Text("Left-handed mirrors the controls: the strip under the table runs the other way. At the edge puts the power bar under your thumb, at the end of the strip.") }
   }
   /* ppGfx: Table, Look, Table View, After the Shot, Opening */
   @ViewBuilder private var graphics: some View {

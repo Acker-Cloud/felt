@@ -329,9 +329,11 @@ struct TableScreen: View {
     /* the elevation sheet over the pad (upright: above it, at the strip's leading end), a tap anywhere else closing it */
     .overlay(alignment: .bottomLeading) {
       if model.elevOpen && model.spinOk && !model.paused {
-        ZStack(alignment: .bottomLeading) {
+        /* over the pad: the strip's leading end, or its trailing end left-handed (the strip reversed) */
+        let lefty = UserDefaults.standard.string(forKey: "felt.settings.hand") == "left"
+        ZStack(alignment: lefty ? .bottomTrailing : .bottomLeading) {
           Color.black.opacity(0.001).ignoresSafeArea().onTapGesture { model.elevOpen = false }
-          ElevPop(model: model).padding(.leading, 8).padding(.bottom, 84)
+          ElevPop(model: model).padding(lefty ? .trailing : .leading, 8).padding(.bottom, 84)
         }
       }
     }
@@ -536,6 +538,10 @@ struct TableScreen: View {
 struct Controls: View {
   let model: TableModel
   let upright: Bool
+  /* settings.hand and settings.bar (Settings > Controls > Layout): left-handed reverses the strip (row-reverse); at the
+     edge puts the power bar at the strip's end (order 6), on a column after the wheel (orders 1 and 2) */
+  @AppStorage("felt.settings.hand") private var hand = "right"
+  @AppStorage("felt.settings.bar") private var bar = "mid"
   var body: some View {
     let items = Group {
       SpinPad(model: model)
@@ -549,12 +555,24 @@ struct Controls: View {
       GeometryReader { g in
         let avail = g.size.width - 56 - 44 - 12, minP: CGFloat = g.size.width + 4 < 390 ? 136 : 150
         let wheel = max(44, min(96, 72 + (avail - 72) / 2, avail - minP))
+        let base = bar == "edge" ? ["spin", "wheel", "pause", "power"] : ["spin", "power", "wheel", "pause"]
         HStack(spacing: 4) {
-          SpinPad(model: model)
-          PowerBar(model: model, upright: true).frame(width: avail - wheel).overlay { LessonRing(on: model.lesson?.step == 3 && !model.lessonDone) }
-          FineWheel(model: model, upright: true).frame(width: wheel).overlay { LessonRing(on: model.lesson?.step == 2 && !model.lessonDone) }
-          pause
+          ForEach(hand == "left" ? base.reversed() : base, id: \.self) { id in
+            switch id {
+            case "spin": SpinPad(model: model)
+            case "power": PowerBar(model: model, upright: true).frame(width: avail - wheel).overlay { LessonRing(on: model.lesson?.step == 3 && !model.lessonDone) }
+            case "wheel": FineWheel(model: model, upright: true).frame(width: wheel).overlay { LessonRing(on: model.lesson?.step == 2 && !model.lessonDone) }
+            default: pause
+            }
+          }
         }
+      }
+    } else if bar == "edge" {
+      VStack(spacing: 10) {
+        SpinPad(model: model)
+        pause
+        FineWheel(model: model, upright: false).overlay { LessonRing(on: model.lesson?.step == 2 && !model.lessonDone) }
+        PowerBar(model: model, upright: false).overlay { LessonRing(on: model.lesson?.step == 3 && !model.lessonDone) }
       }
     } else { VStack(spacing: 10) { items } }
   }
