@@ -97,13 +97,16 @@ import SwiftUI
     let a = E.assist()
     tm.assist = truthy(a["purity"]) ? nil : a
     tm.execSeed = CareerLib.seedOf([E.S["id"]?.str ?? "", nm["event"]!.s, String(nm["match"]!.i), "exec"])
-    /* lookCareer: the career's equipped items, by slot ('cloth-grey' is CLOTH grey), in the hall */
+    tm.dress = dress()
+    return (g, tm)
+  }
+  /* lookCareer: the career's equipped items, by slot ('cloth-grey' is CLOTH grey), in the hall */
+  func dress() -> Dress {
     let eq = E.equipped(), key = { (s: String) -> String in String((eq[s]?.str ?? "").split(separator: "-", maxSplits: 1).last ?? "") }
     let st = Dress.standard
-    tm.dress = Dress(cloth: TableLook.CLOTH[key("cloth")] != nil ? key("cloth") : st.cloth, cue: Dress.ORDER["cue"]!.contains(key("cue")) ? key("cue") : st.cue,
-                     chalk: Dress.CHALK[key("chalk")] != nil ? key("chalk") : st.chalk, rail: TableLook.RAILS[key("rail")] != nil ? key("rail") : st.rail,
-                     balls: Dress.ORDER["balls"]!.contains(key("balls")) ? key("balls") : st.balls, room: "hall")
-    return (g, tm)
+    return Dress(cloth: TableLook.CLOTH[key("cloth")] != nil ? key("cloth") : st.cloth, cue: Dress.ORDER["cue"]!.contains(key("cue")) ? key("cue") : st.cue,
+                 chalk: Dress.CHALK[key("chalk")] != nil ? key("chalk") : st.chalk, rail: TableLook.RAILS[key("rail")] != nil ? key("rail") : st.rail,
+                 balls: Dress.ORDER["balls"]!.contains(key("balls")) ? key("balls") : st.balls, room: "hall")
   }
   /* the table's result: the score against the race, or a forfeit (leaving the match) */
   func report(_ mine: Int, _ theirs: Int, _ forfeit: Bool) {
@@ -304,10 +307,21 @@ struct CareerCreate: View {
     return "\(label), \(CALL_WORDS[req] ?? "official calls")" + (req != "off" ? " (\(DETAIL_WORDS[r["call"]?["detail"]?.str ?? ""] ?? "ball and pocket"))" : "")
   }
   /* avatarEl: initials on the avatar's colour, else the page's fallback (AV_COLS by hashStr of the name) */
-  static func avatar(_ name: String, _ av: JV?, _ d: CGFloat = 46) -> some View {
+  static func avatar(_ name: String, _ av: JV?, _ d: CGFloat = 46, ring: String? = nil) -> some View {
     let col = av?["col"]?.str ?? TourneyRun.AV_COLS[Int(TourneyRun.hashStr(name) % UInt32(TourneyRun.AV_COLS.count))]
     let ini = av?["ini"]?.str ?? name.split(separator: " ").compactMap { $0.first }.prefix(2).map(String.init).joined()
-    return Text(ini).font(.system(size: d * 0.37, weight: .bold)).foregroundStyle(.white).frame(width: d, height: d).background(Circle().fill(css(col))).accessibilityHidden(true)
+    /* framedAv: the equipped ring (ring-gold is RINGS gold) 2 pt out, 2.5 pt wide; a star badge for the earned ones */
+    let key = ring.map { String($0.split(separator: "-", maxSplits: 1).last ?? "") }, fr = key.flatMap { CareerShop.RINGS[$0] }
+    let star = ["champion", "centurion", "drill", "legacy"].contains(key ?? "")
+    return Text(ini).font(.system(size: d * 0.37, weight: .bold)).foregroundStyle(.white).frame(width: d, height: d).background(Circle().fill(css(col)))
+      .overlay { if let fr { Circle().stroke(css(fr), lineWidth: 2.5).padding(-3.25) } }
+      .overlay(alignment: .bottomTrailing) {
+        if let fr, star {
+          Image(systemName: "star.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(css(fr)).frame(width: 20, height: 20)
+            .background(Circle().fill(Color(rgb: 0x14, 0x14, 0x16))).overlay(Circle().stroke(css(fr), lineWidth: 1.5)).offset(x: 7, y: 7)
+        }
+      }
+      .accessibilityHidden(true)
   }
 }
 struct CareerHubTop: View {
@@ -326,7 +340,7 @@ struct CareerHubTop: View {
       .padding(.leading, 4)
       VStack(alignment: .leading, spacing: 12) {
         HStack(spacing: 12) {
-          CareerWords.avatar(pr["name"]!.s, pr["avatar"])
+          CareerWords.avatar(pr["name"]!.s, pr["avatar"], ring: E.equipped()["ring"]?.str)
           VStack(alignment: .leading, spacing: 1) {
             Text(pr["name"]!.s + (pr["nick"]?.str.flatMap { $0.isEmpty ? nil : " \"\($0)\"" } ?? "")).font(.system(size: 17, weight: .semibold))
             Text("\(tierName), tier \(tier). \(CareerWords.natName(pr["nat"]!.s)), \(CareerStore.gameName(pr["disc"]!.s))").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6))
@@ -335,6 +349,10 @@ struct CareerHubTop: View {
         HStack(alignment: .top) {
           fact("Credits", CareerWords.crWords(me["money"]!.d)); fact("Rating", "\(me["fr"]?.i ?? 0)"); fact("Titles", "\(titles)")
         }
+        /* the prestige and venue owned and equipped, by name, over the bar */
+        let eq = E.equipped(), shop = CareerEngine.const("SHOP").a
+        let words = ["prestige", "venue"].compactMap { k in eq[k]?.str.flatMap { id in shop.first { $0["id"]?.str == id }?["name"]?.str } }.joined(separator: ", ")
+        if !words.isEmpty { Text(words).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)) }
         GeometryReader { g in
           ZStack(alignment: .leading) {
             Capsule().fill(Color.white.opacity(0.12))
@@ -348,7 +366,8 @@ struct CareerHubTop: View {
         let o = nm["opponent"]!, r = nm["rules"]!, g = r["game"]!.s, h = nm["h2h"]!.a, fr = nm["fr"]!
         ModeField("Next Match") {
           VStack(alignment: .leading, spacing: 12) {
-            if let tg = TourneyView.game(g) { HeroView(game: tg, txt: 0).frame(height: 170).clipped().allowsHitTesting(false) }
+            /* cvBanner: the event's table in the career's look */
+            if let tg = TourneyView.game(g) { HeroView(game: tg, txt: 0, dress: store.dress()).frame(height: 170).clipped().allowsHitTesting(false) }
             VStack(alignment: .leading, spacing: 12) {
               HStack {
                 Text(nm["eventName"]!.s).font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.7)).lineLimit(1)

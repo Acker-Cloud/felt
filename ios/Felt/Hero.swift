@@ -328,11 +328,12 @@ enum HeroArt {
   @ObservationIgnored var t0 = 0.0
   @ObservationIgnored var key = ""
   var done = false
-  func build(_ game: TableGame, size: CGSize, txt: Double) {
-    let W = Int(size.width * HeroArt.DPR), H = Int(size.height * HeroArt.DPR), k = "\(game.rawValue)|\(W)x\(H)"
+  /* dress: a look to wear instead of the settings' (the career hub's banner wears the career's equipped look) */
+  func build(_ game: TableGame, size: CGSize, txt: Double, dress over: Dress? = nil) {
+    let W = Int(size.width * HeroArt.DPR), H = Int(size.height * HeroArt.DPR), k = "\(game.rawValue)|\(W)x\(H)|\(over.map { "\($0.cloth),\($0.rail),\($0.balls),\($0.cue)" } ?? "")"
     if key == k || W < 8 || H < 8 { return }
     key = k
-    let kind = game.table.2, dress = Prefs.dress(kind), spec = TableModel.spec(for: game)
+    let kind = game.table.2, dress = over ?? Prefs.dress(kind), spec = TableModel.spec(for: game)
     Task.detached(priority: .userInitiated) {
       let d = HeroArt.prep(kind, spec), run = HeroArt.run(d), art = HeroArt.still(d, W, H, txt: txt * HeroArt.DPR, dress: dress)
       let look = TableLook.of(dress), cloth = RGBA(css: look.cloth.base)
@@ -360,6 +361,7 @@ enum HeroArt {
 struct HeroView: View {
   let game: TableGame
   var txt = 0.0
+  var dress: Dress? = nil
   @State private var hero = HeroModel()
   var body: some View {
     GeometryReader { g in
@@ -370,8 +372,8 @@ struct HeroView: View {
         }
         .onChange(of: tl.date) { _, _ in hero.tick() }
       }
-      .onAppear { hero.build(game, size: g.size, txt: txt) }
-      .onChange(of: g.size) { _, s in hero.build(game, size: s, txt: txt) }
+      .onAppear { hero.build(game, size: g.size, txt: txt, dress: dress) }
+      .onChange(of: g.size) { _, s in hero.build(game, size: s, txt: txt, dress: dress) }
       .contentShape(Rectangle())
       .onTapGesture { hero.replay() }
     }
