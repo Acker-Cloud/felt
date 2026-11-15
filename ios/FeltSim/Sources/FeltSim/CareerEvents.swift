@@ -478,6 +478,7 @@ extension CareerEngine {
     bookMatch(p.ev, p.T, p.m, opp, my, op, res)
     bound("match")
     resolveEvent(p.ev)
+    autosave()
     return nil
   }
   /* the player's match settled by the match model (their skills against the opponent) */
@@ -497,13 +498,15 @@ extension CareerEngine {
     if live() != nil { return nil }
     bounds = []
     let day = S["day"]!.i
+    var stop: String? = nil
     let target = toSeason ? season * Self.YEAR : week ? (day / 7 + 1) * 7 : day + Swift.max(0, days ?? 1)
     while true {
-      if myPending() != nil { if forfeit { while forfeitPending() { resolveAll() }; continue }; return "match" }
+      if myPending() != nil { if forfeit { while forfeitPending() { resolveAll() }; continue }; stop = "match"; break }
       if S["day"]!.i >= target { break }
       enterDay(S["day"]!.i + 1)
-      if bounds.contains("season") && stopAtSeason { return "season" }
+      if bounds.contains("season") && stopAtSeason { stop = "season"; break }
     }
-    return nil
+    if !bounds.isEmpty { autosave() }
+    return stop
   }
 }

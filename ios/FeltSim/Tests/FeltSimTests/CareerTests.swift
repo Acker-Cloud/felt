@@ -129,4 +129,40 @@ import Testing
       }
     }
   }
+  /* saves against the page's: the store's every key and value at each mark, and each call's answer */
+  @Test func saves() {
+    let url = Bundle.module.url(forResource: "career.json", withExtension: nil, subdirectory: "Fixtures")!
+    let fx = JV.parse(try! String(contentsOf: url, encoding: .utf8))!
+    let E = CareerEngine(), marks = fx["saves"]!.a
+    var k = 0
+    func snap(_ what: String, _ out: JV?) {
+      let want = marks[k]; k += 1
+      #expect(want["what"]!.s == what)
+      if let o = want["out"]?.str { #expect(out?.stringify() == o, "\(what): \(out?.stringify() ?? "nil") vs \(o)") }
+      let ws = Dictionary(want["store"]!.a.map { ($0[0]!.s, $0[1]!.s) }, uniquingKeysWith: { a, _ in a })
+      #expect(Set(E.store.keys) == Set(ws.keys), "\(what): keys \(E.store.keys.sorted()) vs \(ws.keys.sorted())")
+      for (key, v) in ws where E.store[key] != v { Issue.record("\(what): \(key) differs (\(E.store[key]?.count ?? -1) vs \(v.count) chars)") }
+    }
+    let r = E.create(["name": "Ada Save", "nat": "GB", "disc": "8", "style": "potter", "difficulty": "medium", "start": "amateur", "age": 28], seed: 31337)
+    snap("create", ["ok": .bool(r.ok), "id": .str(r.id!)])
+    for _ in 0..<6 {
+      let day = E.S["day"]!.i
+      if let ev = E.S["cal"]!.a.first(where: { $0["start"]!.i > day && E.eligibility($0).isEmpty }) { E.enter(ev["id"]!.s) }
+      if E.advance(week: true) == "match" { E.simMatch() }
+    }
+    snap("played", nil)
+    snap("slots", .arr(E.listSlots()))
+    E.store["felt.career.v2.c1"] = "F2|junk"
+    snap("slots-corrupt", .arr(E.listSlots()))
+    let l1 = E.load("c1")
+    snap("load-bak", ["ok": .bool(l1.ok), "recovered": l1.recovered.map { .str($0) } ?? .null, "digest": .str(E.digest())])
+    E.store["felt.career.v2.c1"] = "x"; E.store["felt.career.v2.c1.bak"] = nil
+    let l2 = E.load("c1")
+    snap("load-none", ["ok": .bool(l2.ok), "why": .str(l2.why ?? "")])
+    E.load("c1")
+    let r2 = E.create(["name": "Bo Two", "nat": "SE", "disc": "snooker", "style": "defender", "difficulty": "easy", "start": "novice", "age": 19], seed: 99)
+    snap("create2", ["ok": .bool(r2.ok), "id": .str(r2.id!)])
+    snap("delete", ["ok": .bool(E.deleteSlot("c1"))])
+    snap("slots-end", .arr(E.listSlots()))
+  }
 }

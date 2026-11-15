@@ -13,6 +13,9 @@ public final class CareerEngine {
   public var store: [String: String] = [:]
   /* the boundaries crossed during the current call ("match", "event", "season") */
   public var bounds: [String] = []
+  /* told of every store write (key, value; nil removes), and whether advance and reportMatch save */
+  public var persist: ((String, String?) -> Void)? = nil
+  public var autosaveOn = true
   public init() {}
   static let C = CareerData.C
   static func c(_ k: String) -> JV { C[k]! }
@@ -148,9 +151,9 @@ public final class CareerEngine {
     if let o, o.isObj, o["v"] == 1, o["slots"]?.isArr == true { return o }
     return ["v": 1, "n": 0, "slots": [], "active": nil, "v1": nil]
   }
-  func writeIndex(_ idx: JV) { store[Self.c("K_INDEX").s] = idx.stringify() }
-  /* create, as far as the port has reached: the state, the population and its tiers (the page's first checkpoint) */
-  public func create(_ profile: JV, seed: Int? = nil) -> (ok: Bool, id: String?) {
+  func writeIndex(_ idx: JV) { sset(Self.c("K_INDEX").s, idx.stringify()) }
+  /* create: the state, the population and its tiers, the series, the first calendar, the week, offers, the save */
+  public func create(_ profile: JV, seed: Int? = nil, save doSave: Bool = true) -> (ok: Bool, id: String?) {
     var idx = readIndex()
     if idx["slots"]!.count >= Int(Self.c("MAX_SLOTS").d) { return (false, nil) }
     let pr = cleanProfile(profile, nil)
@@ -172,6 +175,7 @@ public final class CareerEngine {
     upgrade()
     news("\(pr["name"]!.s) starts out as a \(Self.c("TIERS")[S["me"]!["tier"]!.i]!["name"]!.s).")
     trace.append(S.stringify())
+    if doSave { save() }
     return (true, id)
   }
   /* the states at the page's checkpoints in create (the golden's __trace), for the tests */
