@@ -81,6 +81,10 @@ import SwiftUI
     var tm = TableModel.TMatch(m: nm["match"]!.i, foe: nm["opponent"]!["name"]!.s, level: nm["level"]!.s, arch: nm["ai"]?["arch"]?.str, need: pts ? 1 : race, points: pts, race: race,
                                lag: nm["breaker"]!.i, ruleset: CR[r["ruleset"]!.s] ?? DEFAULT_RULESET[d] ?? "8-house")
     tm.call = c; tm.spec = spec; tm.career = true
+    /* career.assist and career.seed (careerPlay): the skills' caps and jitter unless simulation purity is on */
+    let a = E.assist()
+    tm.assist = truthy(a["purity"]) ? nil : a
+    tm.execSeed = CareerLib.seedOf([E.S["id"]?.str ?? "", nm["event"]!.s, String(nm["match"]!.i), "exec"])
     /* lookCareer: the career's equipped items, by slot ('cloth-grey' is CLOTH grey), in the hall */
     let eq = E.equipped(), key = { (s: String) -> String in String((eq[s]?.str ?? "").split(separator: "-", maxSplits: 1).last ?? "") }
     let st = Dress.standard
@@ -595,6 +599,61 @@ struct CareerPlayer: View {
   }
 }
 
+/* PAGES.options: Difficulty over Options; Play (Simulation Purity, Execution Variance); What Your Skills Change Now (with
+   purity: nothing; else the guide's cap, auto aim, and each jitter from Career.assist()); the page's closing note */
+struct CareerOptions: View {
+  @Bindable var store: CareerStore
+  var body: some View {
+    let _ = store.rev
+    let E = store.E, o = E.S["me"]!["opt"]!, a = E.assist(), diff = E.S["profile"]?["difficulty"]?.str ?? "medium"
+    List {
+      CareerTitle(kick: "Difficulty: \(diff)", title: "Options")
+      Section {
+        toggle("Simulation Purity", "Skills are a record only: your shots are exactly yours", truthy(o["purity"]), "cvPurity") { E.setOptions(purity: $0) }
+        toggle("Execution Variance", "Without purity: a little jitter on your shots from your skills", truthy(o["variance"]), "cvVariance") { E.setOptions(variance: $0) }
+      } header: { CareerPageHead(t: "Play") }
+      .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+      Section {
+        if truthy(a["purity"]) {
+          Text("Nothing: the physics, the guide and auto aim are as in any game, from your settings.").font(.system(size: 15)).foregroundStyle(.secondary)
+        } else {
+          row("Guide", "Capped by position play", ["none": "Off", "short": "Short", "long": "Full"][a["guide"]?.str ?? ""] ?? "")
+          row("Auto Aim", "Needs tactics 40", truthy(a["autoAim"]) ? "Allowed" : "Off")
+          row("Aim Jitter", nil, String(format: "%.2f deg", a["aimNoise"]!.d * 180 / .pi))
+          row("Power Jitter", nil, String(format: "%.1f%%", a["powerNoise"]!.d * 100))
+          row("Break Power Jitter", nil, String(format: "%.1f%%", a["breakNoise"]!.d * 100))
+          row("Tip Jitter", nil, String(format: "%.1f%%", a["spinNoise"]!.d * 100))
+          row("On the Hill", "Jitter multiplier, from pressure", "x\(JV.numberString(a["hillNoise"]!.d))")
+        }
+      } header: { CareerPageHead(t: "What Your Skills Change Now") } footer: {
+        Text("The bank guide and the safety hint the engine allows are not drawn on this table yet. Nothing here ever changes the physics or the CPU.").font(.system(size: 13))
+      }
+      .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+    }
+    .environment(\.defaultMinListRowHeight, 44)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
+  }
+  private func toggle(_ t: String, _ sub: String, _ on: Bool, _ id: String, _ set: @escaping (Bool) -> Void) -> some View {
+    Toggle(isOn: Binding(get: { on }, set: { set($0); store.E.save(); store.touch() })) {
+      VStack(alignment: .leading, spacing: 1) {
+        Text(t).font(.system(size: 17))
+        Text(sub).font(.system(size: 15)).foregroundStyle(.secondary)
+      }
+    }
+    .tint(Color(rgb: 0x34, 0xc7, 0x59)).accessibilityIdentifier(id)
+  }
+  private func row(_ t: String, _ sub: String?, _ v: String) -> some View {
+    HStack {
+      VStack(alignment: .leading, spacing: 1) {
+        Text(t).font(.system(size: 17))
+        if let sub { Text(sub).font(.system(size: 15)).foregroundStyle(.secondary) }
+      }
+      Spacer()
+      Text(v).font(.system(size: 15)).foregroundStyle(.secondary).monospacedDigit()
+    }
+  }
+}
+
 struct CareerHubGroups: View {
   @Bindable var store: CareerStore
   var onPractice: () -> Void
@@ -629,6 +688,7 @@ struct CareerHubGroups: View {
     } header: { head("You") }
     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
     Section {
+      NavigationLink { CareerOptions(store: store) } label: { row("Options", truthy(me["opt"]?["purity"]) ? "Simulation purity on" : "Skills shape your play") }
       Button { store.E.save(); store.E.S = .null; store.touch() } label: { row("Switch Career", "Your careers, a new one", chevron: true) }.tint(.primary)
       Button {
         if retiring { retiring = false; store.E.retire(); store.touch() } else { retiring = true; Task { try? await Task.sleep(for: .seconds(4)); retiring = false } }
@@ -708,6 +768,8 @@ struct CareerHub: View {
     /* `-felt-career-bracket`: the next match's event's bracket in place of the hub (a test hook) */
     if ProcessInfo.processInfo.arguments.contains("-felt-career-bracket"), let id = nm["event"]?.str {
       CareerBracket(store: store, id: id)
+    } else if ProcessInfo.processInfo.arguments.contains("-felt-career-options") {
+      CareerOptions(store: store)
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-rivals") {
       if let r = ProcessInfo.processInfo.arguments.contains("-felt-career-player") ? E.rivals().first?["id"]?.i : nil { CareerPlayer(store: store, id: r) } else { CareerRivals(store: store) }
     } else {

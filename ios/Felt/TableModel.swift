@@ -261,7 +261,9 @@ final class TableModel {
      race is one game, need 1), the lag's winner, and where the result goes */
   struct TMatch { let m: Int, foe: String, level: String, arch: String?, need: Int, points: Bool, race: Int, lag: Int, ruleset: String; var score = [0, 0], rack = 1, done = false, counted = false
     /* a career match (careerTerms): its event's calls and table, the event's own words */
-    var call: CallConfig? = nil, spec: (table: String, shape: String?, pockets: String)? = nil, career = false, dress: Dress? = nil }
+    var call: CallConfig? = nil, spec: (table: String, shape: String?, pockets: String)? = nil, career = false, dress: Dress? = nil
+    /* Career.assist() when simulation purity is off (nil when on), the execution jitter's seed, the shots it has drawn */
+    var assist: JV? = nil, execSeed: UInt32 = 0, shot = 0 }
   private(set) var tmatch: TMatch?
   /* settleSolo's trick shot: judged, the tries, the old stars and the program's run (TRICK_RUN attempts: full value on
      the first, minus 1, minus 2), then the result sheet */
@@ -888,7 +890,7 @@ final class TableModel {
   @ObservationIgnored var picked = false
   func aimAtNearest() {
     /* auto aim off: each turn keeps the aim it was left with (a new rack still aims) */
-    if !Prefs.autoAim && (g?.shots ?? 0) > 0 { return }
+    if !(Prefs.autoAim && careerAutoAim) && (g?.shots ?? 0) > 0 { return }
     /* bumper's autoAim (page 5): suggestBumper's ball unless one was picked; its line, or straight at the far cup */
     if game == .bumper, var gm = g, gm.winner == nil, let sg = CPU(engine: engine).suggestBumper(gm) {
       aimAnim = nil; hint = nil
@@ -905,8 +907,8 @@ final class TableModel {
        nor once the player has aimed by hand this turn (the hint still follows) */
     aimAnim = nil; hint = nil
     if let gm = g, !cpuTurn, lesson == nil, rolling == nil {
-      guard Prefs.autoAim, let sg = CPU(engine: engine).suggestAim(gm), let c = cue, gm.balls.contains(where: { $0.n == sg.n && $0.on }) else {
-        if !Prefs.autoAim && (g?.shots ?? 0) == 0 { nearestAim() }
+      guard Prefs.autoAim && careerAutoAim, let sg = CPU(engine: engine).suggestAim(gm), let c = cue, gm.balls.contains(where: { $0.n == sg.n && $0.on }) else {
+        if !(Prefs.autoAim && careerAutoAim) && (g?.shots ?? 0) == 0 { nearestAim() }
         return
       }
       hint = (sg.n, sg.k); hintT = now
@@ -965,15 +967,46 @@ final class TableModel {
     markPower = power
     stroke = (power, nil)
   }
+  /* careerAssist (6d): a career match's assist, while the match is on and simulation purity is off */
+  var careerAssist: JV? { guard let t = tmatch, t.career, !t.done, g?.mode == nil else { return nil }; return t.assist }
+  static let GUIDE_ORDER = ["off", "short", "full"]
+  /* careerGuide: the settings' guide, capped by position play in a career match */
+  var guideMode: String {
+    let mode = Prefs.guide
+    guard let gd = careerAssist?["guide"]?.str, let i = Self.GUIDE_ORDER.firstIndex(of: mode) else { return mode }
+    let cap = gd == "none" ? "off" : gd == "long" ? "full" : "short"
+    return Self.GUIDE_ORDER[min(i, Self.GUIDE_ORDER.firstIndex(of: cap)!)]
+  }
+  /* careerAutoAim: auto aim needs tactics 40 in a career match */
+  var careerAutoAim: Bool { careerAssist.map { $0["autoAim"] != false } ?? true }
+  /* careerExec: the skills' jitter on the player's own shot (normal draws from the match's seed and shot count: spin x,
+     spin y, angle, power), times hillNoise when either player is a rack from the match */
+  private func careerExec(_ angle: Double, _ pw: Double, _ sp: Spin) -> (angle: Double, power: Double, spin: Spin) {
+    guard let a = careerAssist, !cpuTurn, var tm = tmatch else { return (angle, pw, sp) }
+    let an = a["aimNoise"]?.d ?? 0, pn = a["powerNoise"]?.d ?? 0, bn = a["breakNoise"]?.d ?? 0, sn = a["spinNoise"]?.d ?? 0
+    if an == 0 && pn == 0 && bn == 0 && sn == 0 { return (angle, pw, sp) }
+    tm.shot += 1; tmatch = tm
+    let r = rng(tm.execSeed &+ UInt32(truncatingIfNeeded: tm.shot) &* 0x9e3779b1)
+    let gn = { () -> Double in let u = max(1e-9, r()), v = r(); return (-2 * Foundation.log(u)).squareRoot() * Foundation.cos(2 * Double.pi * v) }
+    let hill = !tm.points && (tm.score.max() ?? 0) == tm.need - 1 ? (a["hillNoise"]?.d ?? 1) : 1
+    var x = sp.x + gn() * sn * hill, y = sp.y + gn() * sn * hill
+    let L = (x * x + y * y).squareRoot()
+    if L > 1 { x /= L; y /= L }
+    let ang = angle + gn() * an * hill
+    let pow = clamp(pw * (1 + gn() * ((g?.breakShot ?? false) ? bn : pn) * hill), 0, 1)
+    return (ang, pow, spinOf(x: x, y: y, e: sp.e))
+  }
   private func strikeNow(_ pw: Double, _ t: TimeInterval) {
     if g?.mode == "trick" { scoreDaily() }
     /* shoot(): the declaration the player built (humanCall) goes on the game; judge takes it from there */
     if var gm = g, !cpuTurn { gm.call = humanCall(); g = gm }
     /* shotRecord: what the shot needs to be played again, and the game as it stood (notableOf) */
-    lastShot = ShotRec(balls: balls.map { $0.copy() }, angle: aim, power: pw, spin: spin, ball: cueN, g: g, orient: orient); offer = nil
+    /* a career match without simulation purity: the skills' execution jitter (6d, careerExec) */
+    let ex = careerExec(aim, pw, spin)
+    lastShot = ShotRec(balls: balls.map { $0.copy() }, angle: ex.angle, power: ex.power, spin: ex.spin, ball: cueN, g: g, orient: orient); offer = nil
     let tab = sim.newTable(balls, cue: cueN)
     if let c = cue { lastCue = (c.x, c.y, aim) }
-    sim.strike(tab, aim, pw, spin)
+    sim.strike(tab, ex.angle, ex.power, ex.spin)
     rolling = tab; heard = 0; carry = 0; lastT = t; inHand = false; power = 0; stroke = nil; shotAt = t
     fps.prev = nil   /* the -felt-fps hook counts a roll's own frames: the time between rolls is no stall */
   }
@@ -1610,7 +1643,7 @@ final class TableModel {
     if pvFrame == frame { return pvLast }
     pvFrame = frame
     let pw = power > 0 ? power : markPower, q = { (v: Double, s: Double) in (v / s).rounded() }
-    let lens = game == .carom ? PV_CAROM : Prefs.guide == "short" ? PV_SHORT : PV_FULL
+    let lens = game == .carom ? PV_CAROM : guideMode == "short" ? PV_SHORT : PV_FULL
     var lay = [lens[0]]
     for b in balls where b.n != cueN { lay += b.on ? [b.x, b.y] : [-1] }
     let key = [q(aim, TableModel.PV_SNAP), q(pw, 0.001), q(spin.x, 0.005), q(spin.y, 0.005), q(spin.e, 0.002), c.x, c.y]

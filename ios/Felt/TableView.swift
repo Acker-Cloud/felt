@@ -320,7 +320,7 @@ struct TableCanvas: View {
     }
   }
   func drawGuide(_ sink: GuideSink, _ m: Mapper) {
-    if Prefs.guide == "off" || model.rp != nil { return }
+    if model.guideMode == "off" || model.rp != nil { return }
     guard let c = model.cue else { return }
     let gi = model.guide()
     guard let h = gi?.0 ?? (model.rolling == nil ? model.aimHit : nil) else { return }
@@ -413,7 +413,7 @@ struct TableCanvas: View {
   /* pt: table to screen (top-down the fitted view, in 3D the camera); rect: [left, right, top, bottom] it must stay inside */
   func loupeStep(pt: (Double, Double) -> CGPoint, rect: (Double, Double, Double, Double), rp: Double) -> (L: (x: Double, y: Double, r: Double), a: Double, C: CGPoint, h: AimHit, P: FeltSim.Preview)? {
     let now = model.now * 1000
-    let gi = Prefs.guide == "off" ? nil : model.guide()
+    let gi = model.guideMode == "off" ? nil : model.guide()
     let on = gi != nil && model.rolling == nil && !model.cpuTurn && model.fineAim
     let dt = model.loupeT > 0 ? min(100, max(0, now - model.loupeT)) : 16
     model.loupeT = now
