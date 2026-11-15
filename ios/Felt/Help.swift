@@ -23,6 +23,8 @@ struct HelpActions {
 
 struct HelpView: View {
   let acts: HelpActions
+  /* howList: a row per topic, its picture on the accent's tile (a game's ball, else the topic's glyph), the name and
+     line, 54 pt; the title the list's head, as the page's header */
   var body: some View {
     List {
       Section {
@@ -30,21 +32,27 @@ struct HelpView: View {
           NavigationLink { HelpPage(t: t, acts: acts) } label: {
             HStack(spacing: 12) {
               Group {
-                if let b = t.ball { BallDot(n: b.0, style: b.1).frame(width: 30, height: 30) }
-                else { Image(systemName: t.glyph).font(.system(size: 15, weight: .semibold)).frame(width: 30, height: 30).background(RoundedRectangle(cornerRadius: 8).fill(Color(white: 0.24))) }
+                if let b = t.ball { BallDot(n: b.0, style: b.1).frame(width: 18, height: 18) }
+                else { Image(systemName: t.glyph).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white) }
               }
+              .frame(width: 30, height: 30).background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(red: 0.12, green: 0.42, blue: 0.29)))
               .accessibilityHidden(true)
-              VStack(alignment: .leading, spacing: 2) {
-                Text(t.title).font(.body.weight(.semibold))
-                Text(t.sub).font(.footnote).foregroundStyle(.secondary)
+              VStack(alignment: .leading, spacing: 1) {
+                Text(t.title).font(.system(size: 17))
+                Text(t.sub).font(.system(size: 15)).foregroundStyle(.secondary)
               }
-            }.frame(minHeight: 44)
+            }
           }
           .accessibilityIdentifier("tab" + t.id)
+          .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         }
+      } header: {
+        Text("How to Play").font(.system(size: 28, weight: .bold)).foregroundStyle(Color.white).textCase(nil).padding(.leading, -4).padding(.bottom, 6).accessibilityAddTraits(.isHeader)
       }
     }
-    .navigationTitle("How to Play")
+    .environment(\.defaultMinListRowHeight, 54)
+    .contentMargins(.top, 0, for: .scrollContent)
+    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
   }
 }
 
