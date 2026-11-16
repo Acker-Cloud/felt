@@ -365,7 +365,15 @@ struct TableScreen: View {
         }
       }
     }
-    .onChange(of: model.spinOk) { _, ok in if !ok { model.elevOpen = false } }
+    .onChange(of: model.spinOk) { _, ok in if !ok { model.elevOpen = false; model.hideElevTip() } }
+    /* #elevTip: beside the pad as the elevation sheet stands (over it), once ever; gone with the turn or a pause (spinOk) */
+    .overlay(alignment: .bottomLeading) {
+      if model.elevTip && !model.elevOpen && !model.paused {
+        let lefty = UserDefaults.standard.string(forKey: "felt.settings.hand") == "left"
+        ElevTip(model: model).frame(maxWidth: .infinity, alignment: lefty ? .trailing : .leading).padding(.horizontal, 8).padding(.bottom, 88)
+      }
+    }
+    .onChange(of: model.paused) { _, p in if p { model.hideElevTip() } }
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
     .overlay(alignment: .top) { CalloutView(model: model).padding(.top, 0) }
     .overlay(alignment: .bottom) { ReplayPill(model: model).padding(.bottom, 92) }
@@ -891,6 +899,31 @@ struct ElevPop: View {
     .shadow(color: .black.opacity(0.5), radius: 12, y: 6)
     .accessibilityAddTraits(.isModal)
     .accessibilityLabel("Cue elevation")
+  }
+}
+
+/* #elevTip: the coach card's look (rgba(22, 22, 24, .95), the line's border, 16 pt corners), at most 300 pt wide: Raise the
+   Cue, how, and Got It (a white 44 pt capsule) */
+struct ElevTip: View {
+  let model: TableModel
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      Text(TableModel.ELEV_TIP_HEAD).font(.system(size: 12, weight: .semibold)).kerning(0.12).foregroundStyle(Color(rgb: 0xf2, 0xc9, 0x4c)).padding(.bottom, 2)
+      Text(TableModel.ELEV_TIP_TEXT).font(.system(size: 15)).lineSpacing(15 * 0.35 - 3).fixedSize(horizontal: false, vertical: true).padding(.bottom, 8)
+      Button { model.hideElevTip() } label: {
+        Text("Got It").font(.system(size: 15, weight: .bold)).padding(.horizontal, 16).frame(minWidth: 88, minHeight: 44)
+          .background(Capsule().fill(.white)).foregroundStyle(Color(rgb: 0x14, 0x14, 0x14))
+      }
+      .accessibilityIdentifier("elevTipOk")
+    }
+    .foregroundStyle(.white)
+    .padding(EdgeInsets(top: 10, leading: 14, bottom: 12, trailing: 14))
+    .frame(maxWidth: 300, alignment: .leading)
+    .background(RoundedRectangle(cornerRadius: 16).fill(Color(rgb: 22, 22, 24).opacity(0.95)))
+    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
+    .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
+    .fixedSize(horizontal: false, vertical: true)
+    .accessibilityElement(children: .contain).accessibilityIdentifier("elevTip")
   }
 }
 
@@ -1451,6 +1484,44 @@ struct ModePop<T: Hashable>: View {
   }
 }
 
+/* numRoll (6m): a score that goes up rolls up to it (ROLL_MS, an ease-out) in the rail's seats, snooker's break and the
+   party's handoff. A number that falls, or the first one shown, is set at once; so is every number under Reduce Motion.
+   numMem keeps each key's final number and text; text(key, s) is what to show now, asked every frame with the final
+   text: a new one starts its roll from the last. The boards between racks (boardOf) are not ported. */
+@MainActor enum NumRoll {
+  static let ROLL_MS = 0.250
+  private struct Mem { var v: Int?; var s: String; var roll: (from: Int, was: String, suf: String, t0: Double)? }
+  private static var numMem: [String: Mem] = [:]
+  private(set) static var rolls = 0
+  static func text(_ key: String, _ s: String, now: Double = CACurrentMediaTime()) -> String {
+    if var m = numMem[key], m.s == s {
+      guard let r = m.roll, let v = m.v else { return s }
+      let u = Swift.min(1, (now - r.t0) / ROLL_MS), n = Int((Double(r.from) + Double(v - r.from) * (1 - pow(1 - u, 3))).rounded())
+      if u >= 1 { m.roll = nil; numMem[key] = m; return s }
+      return n == r.from ? r.was : "\(n)\(r.suf)"
+    }
+    /* /^(\d+)(\D.*)?$/: the leading figures and what follows them */
+    let d = s.prefix { $0.isASCII && $0.isNumber }, v = d.isEmpty ? nil : Int(d), was = numMem[key]
+    var m = Mem(v: v, s: s, roll: nil)
+    if let v, let w = was, let wv = w.v, v > wv, !Prefs.reduceMotion {
+      m.roll = (wv, w.s, String(s.dropFirst(d.count)), now)
+      rolls += 1
+    }
+    numMem[key] = m
+    return m.roll != nil ? m.roll!.was : s
+  }
+  /* whether key's number is rolling now (a view's timeline runs only then) */
+  static func live(_ key: String) -> Bool { numMem[key]?.roll != nil }
+}
+/* a number shown through numRoll, its own timeline running while it rolls */
+struct RollText: View {
+  let key: String, text: String
+  var body: some View {
+    let _ = NumRoll.text(key, text)
+    TimelineView(.animation(minimumInterval: nil, paused: !NumRoll.live(key))) { _ in Text(NumRoll.text(key, text)) }
+  }
+}
+
 /* showHandoff: whose turn it is, what they are on, everyone's score, and Ready; the table hidden under it */
 struct Handoff: View {
   let model: TableModel
@@ -1472,7 +1543,7 @@ struct Handoff: View {
             HStack {
               Text(P.names[i] + (i == p ? " (to shoot)" : "")).fontWeight(i == p ? .bold : .regular)
               Spacer()
-              Text(model.partyScore(i)).monospacedDigit().fontWeight(.bold)
+              RollText(key: "ho\(i)", text: model.partyScore(i)).monospacedDigit().fontWeight(.bold)
             }
             .padding(.horizontal, 16).frame(minHeight: 44)
             if i < P.names.count - 1 { Divider().padding(.leading, 16) }

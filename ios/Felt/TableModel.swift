@@ -56,7 +56,25 @@ final class TableModel {
   var power = 0.0                         /* the bar's pull, 0 to 1, while held */
   var spin = Spin()
   /* #elevPop: the cue elevation sheet, opened by a hold on the pad; spinOk: the player's turn to aim */
-  var elevOpen = false
+  var elevOpen = false { didSet { if elevOpen { hideElevTip() } } }
+  /* the elevation tip (5s, #elevTip): the first jump or masse challenge ever opened says where the raised cue is (the
+     pad's hold), in a card by the pad, once. It goes on Got It, when the elevation sheet opens, or once the turn is not
+     the player's to aim; seen persists under ELEV_TIP_KEY ({ v: 1, seen }) the moment it shows, so it never shows again */
+  static let ELEV_TIP_KEY = "felt.elevTip.v1"
+  static let ELEV_TIP_HEAD = "Raise the Cue", ELEV_TIP_TEXT = "Hold the english pad, or right click it, to raise the cue. Slide it up: high and firm jumps, high with side curves."
+  private(set) var elevTip = false
+  @ObservationIgnored private var elevTipSeen = TableModel.loadElevTip()
+  @ObservationIgnored private(set) var elevTipShows = 0
+  static func loadElevTip() -> Bool { guard let o = TrickStore.json(ELEV_TIP_KEY) as? [String: Any] else { return false }; return TrickStore.int(o["v"]) == 1 && (o["seen"] as? Bool) == true }
+  @discardableResult func showElevTip() -> Bool {
+    if elevTipSeen || !spinOk { return false }
+    elevTipSeen = true
+    TrickStore.put(TableModel.ELEV_TIP_KEY, ["v": 1, "seen": true])
+    elevTip = true; elevTipShows += 1
+    msg = TableModel.ELEV_TIP_TEXT
+    return true
+  }
+  func hideElevTip() { if elevTip { elevTip = false } }
   var spinOk: Bool { rolling == nil && stroke == nil && !cpuTurn && trickRes == nil && !drillBlocked && (g?.winner == nil) }
   /* setElev: whole degrees 0 to 60 on spin.e (radians) */
   func setElev(_ deg: Double) { spin = spinOf(x: spin.x, y: spin.y, e: max(0, min(60, deg.rounded())) * Double.pi / 180) }
@@ -833,8 +851,10 @@ final class TableModel {
     if let T = trick, let c = trickById(T.id) {
       g = engine.trickGame(c); trickRes = nil
       syncBalls()
+      hideElevTip()
       let hint = trickHint(c)
       flashDue = (c.title, hint.isEmpty ? c.goal : "\(c.goal) \(hint)", 2.2); msg = c.title + ". " + c.goal + (hint.isEmpty ? "" : " " + hint)
+      if !hint.isEmpty { showElevTip() }
       randomOrient(); aimAtNearest()
       return
     }

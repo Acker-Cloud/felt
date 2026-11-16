@@ -715,6 +715,8 @@ struct TableCanvas: View {
     if g.kind == "snooker", let S = g.snk {
       if let f = S.free { snkDots = S.on == .red ? [41, f] : [f] }
       else { switch S.on { case .red: snkDots = [41]; case .colour: snkDots = S_COLS.filter { c in g.balls.contains { $0.n == c && $0.on } }; case .ball(let b): snkDots = [b]; case .none: snkDots = [] } }
+      /* numRoll(e, 'snkBreak', val): the break rolls up as it grows (asked at 0 too, as the page's bar keeps it) */
+      let brkS = NumRoll.text("snkBreak", String(S.brk))
       let brkW = S.brk > 0 ? Double(ctx.resolve(Text(String(S.brk)).font(font)).measure(in: CGSize(width: 200, height: 100)).width) + ig : 0
       let w = (Double(snkDots.count) * (sdot + 2) + brkW + 4) * unit
       if !snkDots.isEmpty || S.brk > 0, let sx = seatX[g.turn] ?? seatX[0] {
@@ -731,7 +733,7 @@ struct TableCanvas: View {
         }
         if S.brk > 0 {
           var e = ctx; e.addFilter(.shadow(color: edge, radius: 0.7))
-          let t = ctx.resolve(Text(String(S.brk)).font(font).foregroundColor(ink))
+          let t = ctx.resolve(Text(brkS).font(font).foregroundColor(ink))
           e.draw(t, at: CGPoint(x: cx + ig, y: cy), anchor: .leading)
         }
         _ = cy
@@ -792,7 +794,8 @@ struct TableCanvas: View {
           g2.stroke(Path(ellipseIn: pr.insetBy(dx: 0.75, dy: 0.75)), with: .color(ink), lineWidth: 1.5)
         default:
           /* carom's points are engraved like the others (the seats tell the players apart), then the race */
-          let t = Text(it.text).font(it.kind == "of" ? Font.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit() : font).foregroundColor(ink)
+          /* numRoll(t, 'chip' + p, c.num): a seat's number rolls up as it rises */
+          let t = Text(it.kind == "num" ? NumRoll.text("chip\(p)", it.text) : it.text).font(it.kind == "of" ? Font.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit() : font).foregroundColor(ink)
           var e = g2; e.addFilter(.shadow(color: edge, radius: 0.7))
           e.draw(t, at: CGPoint(x: cx, y: cy))
         }
