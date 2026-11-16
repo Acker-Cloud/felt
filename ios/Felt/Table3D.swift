@@ -642,7 +642,7 @@ struct Table3DView: UIViewRepresentable {
   func makeUIView(context: Context) -> MTKView {
     let v = MTKView(frame: .zero, device: context.coordinator?.device)
     v.colorPixelFormat = .bgra8Unorm; v.depthStencilPixelFormat = .depth32Float; v.sampleCount = 4
-    v.preferredFramesPerSecond = 60; v.delegate = context.coordinator; v.isUserInteractionEnabled = false
+    v.preferredFramesPerSecond = 120; v.delegate = context.coordinator; v.isUserInteractionEnabled = false
     return v
   }
   func updateUIView(_ v: MTKView, context: Context) {}

@@ -1,6 +1,7 @@
 /* felt, native. Home lists the tables; a table is aimed by touch, fine-tuned on the wheel, given
    english on the pad and shot from the power bar alone: pull it down, let go. */
 import FeltSim
+import QuartzCore
 import SwiftUI
 
 @main
@@ -380,6 +381,9 @@ struct TableScreen: View {
     }
     .tint(.primary)
     .statusBarHidden()
+    /* a swipe from an edge takes two at the table (the first only shows the home bar), as games do */
+    .defersSystemGestures(on: .all)
+    .persistentSystemOverlays(.hidden)
     .focusable().focusEffectDisabled().focused($keys)
     .onAppear { keys = true }
     /* `-felt-keybench`: keys through model.key (10 right, 2 up, Space with keyShoot, then the result printed) */
@@ -433,7 +437,7 @@ struct TableScreen: View {
     let _ = { if Mapper.current != ext { Mapper.current = ext } }()
     layout {
       GeometryReader { tg in
-        TimelineView(.animation(paused: model.paused)) { tl in
+        LinkTimeline(paused: model.paused) { tl in
           Group {
             if model.view3d && !model.v3Top2d {
               /* the rail row pinned to the stage's foot (V3_PIN_B 26 up), off the projected pockets and sights */
@@ -727,18 +731,25 @@ struct FineWheel: View {
     let _ = Bench.hit("FineWheel")
     let stops: [Gradient.Stop] = [.init(color: Color(rgb: 0x14, 0x14, 0x16), location: 0), .init(color: Color(rgb: 0x50, 0x50, 0x5a), location: 0.24),
       .init(color: Color(rgb: 0x6e, 0x6e, 0x78), location: 0.5), .init(color: Color(rgb: 0x50, 0x50, 0x5a), location: 0.76), .init(color: Color(rgb: 0x14, 0x14, 0x16), location: 1)]
-    RoundedRectangle(cornerRadius: 12).fill(LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom))
+    /* upright the wheel turns across (left and right), on its side along its column */
+    RoundedRectangle(cornerRadius: 12).fill(LinearGradient(stops: stops, startPoint: upright ? .leading : .top, endPoint: upright ? .trailing : .bottom))
       .overlay {
         Canvas { ctx, size in
           /* .ridges: inset 8 across, every 4 pt a dark line and a light one under it, moved by --roll */
+          let len = upright ? size.width : size.height
           var y = roll.truncatingRemainder(dividingBy: 4) - 4
-          while y < size.height {
-            ctx.fill(Path(CGRect(x: 8, y: y, width: size.width - 16, height: 1)), with: .color(.black.opacity(0.6)))
-            ctx.fill(Path(CGRect(x: 8, y: y + 1, width: size.width - 16, height: 1)), with: .color(Color(rgb: 240, 240, 244).opacity(0.62)))
+          while y < len {
+            if upright {
+              ctx.fill(Path(CGRect(x: y, y: 8, width: 1, height: size.height - 16)), with: .color(.black.opacity(0.6)))
+              ctx.fill(Path(CGRect(x: y + 1, y: 8, width: 1, height: size.height - 16)), with: .color(Color(rgb: 240, 240, 244).opacity(0.62)))
+            } else {
+              ctx.fill(Path(CGRect(x: 8, y: y, width: size.width - 16, height: 1)), with: .color(.black.opacity(0.6)))
+              ctx.fill(Path(CGRect(x: 8, y: y + 1, width: size.width - 16, height: 1)), with: .color(Color(rgb: 240, 240, 244).opacity(0.62)))
+            }
             y += 4
           }
           let sh: [Gradient.Stop] = [.init(color: .black.opacity(0.55), location: 0), .init(color: .clear, location: 0.3), .init(color: .clear, location: 0.7), .init(color: .black.opacity(0.55), location: 1)]
-          ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .linearGradient(Gradient(stops: sh), startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)))
+          ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .linearGradient(Gradient(stops: sh), startPoint: .zero, endPoint: upright ? CGPoint(x: size.width, y: 0) : CGPoint(x: 0, y: size.height)))
         }
       }
       .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -750,9 +761,9 @@ struct FineWheel: View {
       .gesture(DragGesture(minimumDistance: 0).onChanged { v in
         let t = v.time.timeIntervalSinceReferenceDate * 1000
         if !live { live = true; model.fineAim = true; model.lessonWheel(); model.takeAim(); wv = nil; wt = t; trail = [(t, model.aim, Double(v.location.x), Double(v.location.y))] }
-        let d = v.translation.height, dy = Double(d - last)
+        let d = upright ? v.translation.width : v.translation.height, dy = Double(d - last)
         guard dy != 0 else { return }
-        /* wheelRate by the finger's smoothed speed; down turns the cue clockwise on screen */
+        /* wheelRate by the finger's smoothed speed; right (upright) or down (on its side) turns the cue clockwise on screen */
         if model.rolling == nil {
           wv = AimFeel.fingerSpeed(wv, abs(dy), t - wt)
           model.aim += dy * AimFeel.wheelRate(wv ?? 0); roll += d - last
@@ -2747,4 +2758,36 @@ enum HomeLayout {
 struct CardAspect: ViewModifier {
   let on: Bool
   func body(content: Content) -> some View { if on { content.aspectRatio(1.7, contentMode: .fit) } else { content.frame(height: 92) } }
+}
+
+/* the table's frame clock: a CADisplayLink asking for the display's full rate (120 Hz on ProMotion; SwiftUI's
+   TimelineView(.animation) held the table at 60 on the phone), the date read as TimelineView's context gives it */
+struct LinkTick { let date: Date }
+@MainActor @Observable final class FrameClock {
+  var t = Date.timeIntervalSinceReferenceDate
+  @ObservationIgnored private var link: CADisplayLink?
+  @ObservationIgnored private lazy var proxy = Proxy(self)
+  private final class Proxy: NSObject {
+    weak var c: FrameClock?
+    init(_ c: FrameClock) { self.c = c }
+    @MainActor @objc func step(_ l: CADisplayLink) { c?.t = Date.timeIntervalSinceReferenceDate }
+  }
+  func run(_ on: Bool) {
+    if on, link == nil {
+      let l = CADisplayLink(target: proxy, selector: #selector(Proxy.step(_:)))
+      l.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+      l.add(to: .main, forMode: .common); link = l
+    } else if !on { link?.invalidate(); link = nil }
+  }
+}
+struct LinkTimeline<Content: View>: View {
+  let paused: Bool
+  @ViewBuilder let content: (LinkTick) -> Content
+  @State private var clock = FrameClock()
+  var body: some View {
+    content(LinkTick(date: Date(timeIntervalSinceReferenceDate: clock.t)))
+      .onAppear { clock.run(!paused) }
+      .onChange(of: paused) { _, p in clock.run(!p) }
+      .onDisappear { clock.run(false) }
+  }
 }
