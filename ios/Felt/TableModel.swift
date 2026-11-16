@@ -194,9 +194,10 @@ final class TableModel {
     guard let g0 = rec.g else { return nil }
     return engine.shotMoments(g0, res, engine.judge(g0, RuleShot(res))).keys.first { NOTABLE_MOMENTS.contains($0) }
   }
-  /* offerReplay: the balls at rest after a shot, on a turn to aim (never in the lesson or a tutorial, or over a result) */
+  /* offerReplay: the balls at rest after a shot, on a turn to aim or the CPU's think (state aim or thinking: never with a
+     choice the rules give on the table, never in the lesson or a tutorial, or over a result) */
   private func offerReplay(_ res: ShotResult) {
-    guard let rec = lastShot, lesson == nil, tut == nil, trickRes == nil, drillRes == nil, g?.winner == nil, Prefs.bool("replays", true) else { return }
+    guard let rec = lastShot, lesson == nil, tut == nil, trickRes == nil, drillRes == nil, g?.winner == nil, g?.option == nil, Prefs.bool("replays", true) else { return }
     let nb = notableOf(res, rec)
     offer = (nb, now + (nb != nil ? TableModel.REPLAY_NOTABLE_MS : TableModel.REPLAY_OFFER_MS))
   }
@@ -204,7 +205,7 @@ final class TableModel {
   /* startReplay: the record's whole roll (its prediction, camPredict, run to the end): the moments (the first contact,
      the first object ball's drop) and the camera's plan in close (CAM_REPLAY) on the cue ball and the first ball it hits */
   func startReplay() {
-    guard rp == nil, let rec = lastShot, rolling == nil, stroke == nil else { return }
+    guard rp == nil, let rec = lastShot, rolling == nil, stroke == nil, g?.option == nil else { return }
     hideOffer(); aimLock = .free
     let P = camPred.flatMap { $0.id == rec.id ? $0 : nil } ?? Cam.predict(sim, id: rec.id, balls: rec.balls, ball: rec.ball, angle: rec.angle, power: rec.power, spin: rec.spin)
     while !Cam.step(sim, P, 1) {}
