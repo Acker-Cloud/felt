@@ -432,6 +432,15 @@ struct TableScreen: View {
   /* the window's interface orientation, read as the size changes (a turn) */
   private var interface: UIInterfaceOrientation { (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.effectiveGeometry.interfaceOrientation ?? .portrait }
 
+  /* a PopLayer in the window's own space (the screen's W and H with the insets, turned as the screen is) */
+  private func popLayer(call: Bool) -> some View {
+    GeometryReader { geo in
+      let ins = geo.safeAreaInsets, W = geo.size.width + ins.leading + ins.trailing, H = geo.size.height + ins.top + ins.bottom
+      let side = W > H && H < 600, ccw = side && (ins.leading != ins.trailing ? ins.leading > ins.trailing : interface != .landscapeLeft)
+      PopLayer(model: model, W: W, H: H, turn: side ? (ccw ? -1 : 1) : 0, call: call)
+        .offset(x: -ins.leading, y: -ins.top)
+    }
+  }
   var body: some View {
     let _ = Bench.hit("TableScreen")
     GeometryReader { geo in
@@ -457,9 +466,6 @@ struct TableScreen: View {
           screen(W: W, H: H, ins: ins, upright: H > W)
             .frame(width: W, height: H)
         }
-        /* the elevation sheet and its tip, placed in the window by the pad's frame (the call's menu is over everything:
-           the last overlay) */
-        PopLayer(model: model, W: W, H: H, turn: side ? (ccw ? -1 : 1) : 0, call: false)
       }
       .offset(x: -ins.leading, y: -ins.top)
     }
@@ -477,6 +483,10 @@ struct TableScreen: View {
     .overlay { if let r = model.drillRes, !model.paused { DrillResultView(model: model, res: r, back: { dismiss() }) } }
     .overlay(alignment: model.coachAtTop ? .top : .bottom) { if model.tut != nil, !model.tutDone, !model.paused { CoachCard(model: model).pageCap(320).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
     .overlay(alignment: model.coachAtTop ? .top : .bottom) { if let L = model.lesson, !model.lessonDone, !model.paused { LessonCard(s: L).pageCap(320).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
+    /* the elevation sheet and its tip (#elevPop, #elevTip: z-index 4) over the practice tools (2), the coach and lesson
+       cards (3), the callout and the replay pill; placed in the window by the pad's frame. The call's menu is over
+       everything (the last overlay) */
+    .overlay { popLayer(call: false) }
     .overlay { if model.lessonDone, !model.paused { LessonDoneView(home: { dismiss() }) } }
     .overlay { if model.tutDone, let t = tutById(model.tut!.id), !model.paused { TutDoneView(t: t, home: { dismiss() }) } }
     .onDisappear { model.abandonCpuGame(); Chrome.shared.atTable -= 1 }
@@ -496,14 +506,7 @@ struct TableScreen: View {
     }
     /* the call's menu (#callBar, a .seg.pop.open: z-index 60) over every other table overlay: the strip and the rail row,
        the tools, the coach card, the callout, the replay pill, the elevation sheet; placed in the window by the bar's frame */
-    .overlay {
-      GeometryReader { geo in
-        let ins = geo.safeAreaInsets, W = geo.size.width + ins.leading + ins.trailing, H = geo.size.height + ins.top + ins.bottom
-        let side = W > H && H < 600, ccw = side && (ins.leading != ins.trailing ? ins.leading > ins.trailing : interface != .landscapeLeft)
-        PopLayer(model: model, W: W, H: H, turn: side ? (ccw ? -1 : 1) : 0, call: true)
-          .offset(x: -ins.leading, y: -ins.top)
-      }
-    }
+    .overlay { popLayer(call: true) }
     .tint(.primary)
     .statusBarHidden()
     /* a swipe from an edge takes two at the table (the first only shows the home bar), as games do */
