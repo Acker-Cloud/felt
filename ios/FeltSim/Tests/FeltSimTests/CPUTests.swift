@@ -74,4 +74,23 @@ import Testing
     var last = -1.0
     for i in 0...100 { let p = cpuAnim(Double(i) / 100, from: 0, to: 1, power: 1); #expect(p.aim >= last); last = p.aim }
   }
+  /* the think wait on the frame clock: it runs with the frames, stands still while held (the pause menu, the handoff) and
+     adds nothing for the time held, a frame's step at most 0.1 s; due at the hold over the speed */
+  @Test func thinkClock() {
+    var c = CPUThinkClock()
+    c.step(10, held: false)
+    #expect(c.el == 0 && !c.due(650, speed: 1))
+    for k in 1...30 { c.step(10 + Double(k) / 60, held: false) }
+    #expect(abs(c.el - 0.5) < 1e-9 && !c.due(650, speed: 1) && c.due(650, speed: 2))
+    for k in 31...600 { c.step(10 + Double(k) / 60, held: true) }
+    #expect(abs(c.el - 0.5) < 1e-9 && c.last == nil, "held ten seconds: the think stood still")
+    c.step(30, held: false)
+    #expect(abs(c.el - 0.5) < 1e-9, "the frame after the hold adds nothing")
+    for k in 1...10 { c.step(30 + Double(k) / 60, held: false) }
+    #expect(abs(c.el - (0.5 + 10.0 / 60)) < 1e-9 && c.due(650, speed: 1))
+    c.step(31, held: false)
+    #expect(abs(c.el - (0.6 + 10.0 / 60)) < 1e-9, "a long frame counts 0.1 s")
+    c.step(30, held: false)
+    #expect(abs(c.el - (0.6 + 10.0 / 60)) < 1e-9, "never backwards")
+  }
 }

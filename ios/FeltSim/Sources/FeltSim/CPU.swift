@@ -128,6 +128,21 @@ public func cpuAnim(_ u0: Double, from: Double, to: Double, power: Double) -> (a
   return (aim, u > 0.6 ? power * (1 - JSMath.pow(1 - (u - 0.6) / 0.4, 2)) : nil)
 }
 
+/* page 5's think wait (F8: cpuThinkMs, counted from the turn's start) on the frame clock: el, the time run, grows by each
+   frame's step (never backwards, at most 0.1 s, as cpuAnim's) and not at all while held (the pause menu, the handoff, a
+   replay: the page moves cpuT0 on by them); a held frame leaves last nil, so the frame after adds nothing. The plan goes
+   once el reaches the hold over the speed */
+public struct CPUThinkClock {
+  public var el = 0.0, last: Double? = nil
+  public init() {}
+  public mutating func step(_ now: Double, held: Bool) {
+    if held { last = nil; return }
+    if let l = last { el += Swift.min(0.1, Swift.max(0, now - l)) }
+    last = now
+  }
+  public func due(_ holdMs: Double, speed: Double) -> Bool { el >= holdMs / 1000 / speed }
+}
+
 /* JS's ToUint32 of an integer-valued double (rng's seed >>> 0) */
 func toUint32(_ x: Double) -> UInt32 {
   let m = x.truncatingRemainder(dividingBy: 4294967296)

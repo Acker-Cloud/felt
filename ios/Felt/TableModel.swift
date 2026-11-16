@@ -734,6 +734,9 @@ final class TableModel {
   /* the page's aiming: the player's turn, the stroke, or the CPU's with its plan (never while its search runs) */
   var cueShown: Bool { !cpuTurn || stroke != nil || cpuPlan != nil }
   @ObservationIgnored private(set) var cpuPlan: (from: Double, angle: Double, power: Double, el: Double, last: Double, shots: Int, turn: Int)? = nil
+  /* the search's answer and its think time (the page's cpuReady, .hold), held until the think clock runs past it */
+  @ObservationIgnored private var cpuReady: (shot: CPUShot, gm: Game, hold: Double)? = nil
+  @ObservationIgnored private(set) var cpuClock = CPUThinkClock()
 
   /* practice (page 5s): the session's layout and seed, the undo stack (UNDO_MAX), its numbers, editing and the tools strip */
   struct Practice { var layout: String, seed: UInt32, undo: [Game] = [], shots = 0, pots = 0, potting = 0, edit: Bool, tools = false }
@@ -1271,8 +1274,11 @@ final class TableModel {
     let tt0 = CACurrentMediaTime()
     defer { if TableModel.fpsOn { let d = CACurrentMediaTime() - tt0; if d > 0.1 { print(String(format: "felt-fps slow tick %.0f ms", d * 1000)) } } }
     defer { frame &+= 1 }
-    if paused { lastT = nil; camLast = nil; return }
+    /* the CPU's think (cpuClock) and its turn and pull (cpuPlan, its last frame put at infinity, so the frame after the
+       pause adds nothing) stand still under the pause menu, as the page's resume moves cpuT0 and cpuAnim on */
+    if paused { lastT = nil; camLast = nil; cpuClock.last = nil; cpuPlan?.last = .infinity; return }
     self.now = now
+    if cpuThinking { cpuClock.step(now, held: rp != nil || handoff != nil) }
     defer { camStep(now) }
     stepAutoAim()
     stepPlaceBack()
@@ -1289,6 +1295,7 @@ final class TableModel {
     if let st = stroke {
       if st.t0 == nil { stroke = (st.power, now) } else if now - st.t0! >= TableModel.STROKE_MS / speed { strikeNow(st.power, now) }
     }
+    cpuThinkStep()
     cpuAnimStep()
     if cpuTurn && rolling == nil && stroke == nil && !cpuBusy { cpuStep() }
     guard let tab = rolling else { lastT = nil; return }
@@ -1464,8 +1471,9 @@ final class TableModel {
   func cpuStep() {
     guard cpuTurn, !cpuBusy, rolling == nil, stroke == nil, let gm = g, let level = actingLevel else { return }
     let arch = actingArch, hill = actingHill
-    cpuBusy = true; cpuThinking = true; cpuPlanned = false
-    let t0 = now, spec = spec, seed = Double(Int.random(in: 1...1_000_000))
+    cpuBusy = true; cpuThinking = true; cpuPlanned = false; cpuReady = nil; cpuClock = CPUThinkClock()
+    cpuClock.step(now, held: false)
+    let spec = spec, seed = Double(Int.random(in: 1...1_000_000))
     if gm.option != nil {
       let c = CPU(engine: engine); c.arch = arch; c.hill = hill
       let pick = c.cpuOption(gm, level: level) ?? gm.option!.choices[0]
@@ -1480,23 +1488,27 @@ final class TableModel {
       let sim = Sim(); TableModel.setUp(sim, spec)
       let c = CPU(engine: RulesEngine(sim: sim)); c.arch = arch; c.hill = hill
       let shot = c.cpuShot(gm, seed: seed, level: level)
-      await MainActor.run { self.cpuPlay(shot, gm, t0: t0, seed: seed) }
+      await MainActor.run { self.cpuPlay(shot, gm, seed: seed) }
     }
   }
-  /* the search's answer waits for the think time (the page's cpuReady), then becomes the plan: the cue ball placed, the
-     line, the call and the spin set, and the cue turns onto it and draws back (cpuAnimStep) */
-  private func cpuPlay(_ shot: CPUShot, _ gm: Game, t0: TimeInterval, seed: Double) {
+  /* the search's answer waits for the think time (the page's cpuReady, its hold), counted on the frame clock from the
+     turn's start (cpuClock: still under the pause menu, the handoff or a replay) */
+  private func cpuPlay(_ shot: CPUShot, _ gm: Game, seed: Double) {
     guard let g1 = g, g1.shots == gm.shots, g1.turn == gm.turn else { cpuBusy = false; cpuThinking = false; return }
-    let think = cpuThinkMs(gm, shot, seed) / 1000 / speed, wait = max(0, think - (now - t0))
-    Task { @MainActor in
-      try? await Task.sleep(for: .milliseconds(Int(wait * 1000)))
-      guard var g0 = g, g0.shots == gm.shots, g0.turn == gm.turn, cpuTurn else { cpuBusy = false; cpuThinking = false; return }
-      if let p = shot.place { g0 = engine.placeCue(g0, p[0], p[1]) }
-      if gm.kind == "bumper", let b = shot.ball { g0.striker = b }
-      g0.call = shot.call; g = g0; syncBalls()
-      spin = shot.spin; cpuPlanned = true
-      cpuPlan = (aim, shot.angle, shot.power, 0, now, g0.shots, g0.turn); power = 0   /* the cue at rest until the pull */
-    }
+    cpuReady = (shot, gm, cpuThinkMs(gm, shot, seed))
+  }
+  /* think's first half, each frame: once the think time is up the answer becomes the plan: the cue ball placed, the line,
+     the call and the spin set, and the cue turns onto it and draws back (cpuAnimStep) */
+  private func cpuThinkStep() {
+    guard let r = cpuReady, cpuClock.due(r.hold, speed: speed) else { return }
+    cpuReady = nil
+    let gm = r.gm, shot = r.shot
+    guard var g0 = g, g0.shots == gm.shots, g0.turn == gm.turn, cpuTurn else { cpuBusy = false; cpuThinking = false; return }
+    if let p = shot.place { g0 = engine.placeCue(g0, p[0], p[1]) }
+    if gm.kind == "bumper", let b = shot.ball { g0.striker = b }
+    g0.call = shot.call; g = g0; syncBalls()
+    spin = shot.spin; cpuPlanned = true
+    cpuPlan = (aim, shot.angle, shot.power, 0, now, g0.shots, g0.turn); power = 0   /* the cue at rest until the pull */
   }
   /* think's second half, each frame (cpuAnim); at the end the stroke, as commit() */
   private func cpuAnimStep() {
