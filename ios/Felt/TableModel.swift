@@ -1465,21 +1465,35 @@ final class TableModel {
       msg = "\(group.isEmpty ? "" : group + " ")\(Words.nameOf(who)) goes again.\(ballOn)"
     }
   }
-  /* a choice the rules give (game.option) made */
+  /* the player's answer to a choice the rules give (game.option; the page's choose): the CPU's choices that follow are
+     answered at once (nextTurn), then the flash ('turn', 1000 ms) names the choice over the CPU's that followed, else
+     the turn, and the status line says both: "Spot the 8. CPU: Re-rack." */
   func choose(_ choice: String) {
     guard let gm = g, let o = gm.option, let next = engine.chooseOption(gm, choice) else { return }
-    g = next; syncBalls()
-    let said = choice.hasPrefix("free:") ? "free ball, the \(snkName(Int(choice.dropFirst(5)) ?? 0))" : Words.optLabel(o.kind, choice).lowercased()
-    msg = "\(Words.nameOf(o.who)): \(said). \(Words.turnOf(next.turn))."
-    if next.option != nil { words(next, gm.turn, chose: (o.who, o.kind, choice)) }
+    g = next
     randomOrientIfRacked(gm, next)
+    var chose: (who: Int, kind: String, choice: String)? = nil
+    while let a = g, let co = a.option, let pick = cpuPick(), let n = engine.chooseOption(a, pick) { chose = (co.who, co.kind, pick); g = n; randomOrientIfRacked(a, n) }
+    syncBalls()
+    let gn = g!, t = Words.optLabel(o.kind, choice)
+    /* optionSay: a choice still to make, the player's own */
+    let then = chose.map { "\(Words.nameOf($0.who)): \(Words.optLabel($0.kind, $0.choice))" }
+      ?? gn.option.map { "\(Words.nameOf($0.who)): \(Words.OPT[$0.kind]?["head"] ?? ""). \(Words.OPT[$0.kind]?["sub"] ?? "")" } ?? Words.turnOf(gn.turn)
+    banner = (t, chose != nil ? then : Words.turnOf(gn.turn), now + 1.0)
+    msg = "\(t). \(then)\(then.hasSuffix(".") ? "" : ".")"
     aimAtNearest()
-    cpuAnswer()
   }
   /* the page's nextTurn: a choice the rules give the CPU (game.option) is answered at once, with no think time and no
-     wait, and the turn goes on from what it chose (choose answers the next one, if the CPU's). Called as the shot
-     settles, after a player's choice and from cpuStep, so never under the pause menu, the handoff or a replay */
-  private func cpuAnswer() { if let pick = cpuPick() { choose(pick) } }
+     wait, and the turn goes on from what it chose. Called from cpuStep (the shot's and the player's choices answer the
+     CPU's themselves), so never under the pause menu, the handoff or a replay */
+  private func cpuAnswer() {
+    var chose: (who: Int, kind: String, choice: String)? = nil
+    while let a = g, let co = a.option, let pick = cpuPick(), let n = engine.chooseOption(a, pick) { chose = (co.who, co.kind, pick); g = n; randomOrientIfRacked(a, n) }
+    guard let c = chose, let gn = g else { return }
+    syncBalls()
+    msg = "\(Words.nameOf(c.who)): \(Words.optLabel(c.kind, c.choice).lowercased()). \(Words.turnOf(gn.turn))."
+    aimAtNearest()
+  }
   /* cpuOption's answer to the choice on the table, when it is the CPU's to make */
   private func cpuPick() -> String? {
     guard cpuTurn, let gm = g, let o = gm.option, let level = actingLevel else { return nil }
