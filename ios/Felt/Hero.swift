@@ -328,6 +328,9 @@ enum HeroArt {
   @ObservationIgnored var t0 = 0.0
   @ObservationIgnored var key = ""
   var done = false
+  /* held: the morph's flight (6m), the first frame drawn and kept; onFrame: each frame made */
+  @ObservationIgnored var held = false
+  @ObservationIgnored var onFrame: ((CGImage) -> Void)? = nil
   /* dress: a look to wear instead of the settings' (the career hub's banner wears the career's equipped look) */
   func build(_ game: TableGame, size: CGSize, txt: Double, dress over: Dress? = nil) {
     let W = Int(size.width * HeroArt.DPR), H = Int(size.height * HeroArt.DPR), k = "\(game.rawValue)|\(W)x\(H)|\(over.map { "\($0.cloth),\($0.rail),\($0.balls),\($0.cue)" } ?? "")"
@@ -343,18 +346,21 @@ enum HeroArt {
       await MainActor.run {
         guard self.key == k else { return }
         self.parts = (built.d, built.run, built.art, built.bp, dress)
-        self.replay()
+        if self.held { self.t0 = CACurrentMediaTime(); self.done = false; self.tick() } else { self.replay() }
       }
     }
   }
   func replay() { t0 = CACurrentMediaTime(); done = false; if Prefs.reduceMotion { t0 -= 10; tick() } }
+  /* the landing: the shot starts from the frame held */
+  func release() { guard held else { return }; held = false; replay() }
   func tick() {
     guard let p = parts, !done else { return }
-    let t = (CACurrentMediaTime() - t0) * 1000
+    let t = held ? 0 : (CACurrentMediaTime() - t0) * 1000
     let x = Canvas2D(width: p.art.W, height: p.art.H)
     HeroArt.draw(t, p.d, p.run, p.art, x, bp: p.bp, dress: p.dress)
     frame = x.image()
-    if t >= HeroArt.CUE_MS + HeroArt.ROLL_MS { done = true }
+    if let f = frame { onFrame?(f) }
+    if held || t >= HeroArt.CUE_MS + HeroArt.ROLL_MS { done = true }
   }
 }
 
@@ -362,6 +368,12 @@ struct HeroView: View {
   let game: TableGame
   var txt = 0.0
   var dress: Dress? = nil
+  /* the home card's morph (6m): the first frame held until the landing (morphHolds), the card's art under the hero
+     until that frame is made (heroUnder, its first frame fading in over it), each frame handed on (morphClose's copy) */
+  var hold = false
+  var under: CGImage? = nil
+  var underScale: CGFloat = 3
+  var onFrame: ((CGImage) -> Void)? = nil
   @State private var hero = HeroModel()
   var body: some View {
     GeometryReader { g in
@@ -369,10 +381,13 @@ struct HeroView: View {
         ZStack {
           Color(rgb: 11, 11, 12)
           if let f = hero.frame { Image(decorative: f, scale: HeroArt.DPR).resizable().frame(width: g.size.width, height: g.size.height) }
+          else if let u = under { Image(decorative: u, scale: underScale).resizable().scaledToFill().frame(width: g.size.width, height: g.size.height).clipped() }
         }
+        .animation(under != nil ? .easeOut(duration: 0.18) : nil, value: hero.frame == nil)
         .onChange(of: tl.date) { _, _ in hero.tick() }
       }
-      .onAppear { hero.build(game, size: g.size, txt: txt, dress: dress) }
+      .onAppear { hero.held = hold; hero.onFrame = onFrame; hero.build(game, size: g.size, txt: txt, dress: dress) }
+      .onChange(of: hold) { _, h in if !h { hero.release() } }
       .onChange(of: g.size) { _, s in hero.build(game, size: s, txt: txt, dress: dress) }
       .contentShape(Rectangle())
       .onTapGesture { hero.replay() }

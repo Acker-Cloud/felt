@@ -82,9 +82,22 @@ struct Home: View {
     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
   }
   @State private var art = HomeArtStore()
+  /* 6m: the cards' morphs into their pages */
+  @State private var mo = Morph()
+  private func face(_ g: TableGame) -> Morph.Face { Morph.Face(game: g, art: art.img[g.rawValue], scale: art.scale) }
+  static let GLOW: [String: (Double, Double, Double)] = ["mode-career": (242, 201, 76), "mode-tourney": (242, 201, 76), "mode-exhibit": (246, 244, 236), "mode-party": (38, 150, 104)]
+  /* a mode card: its page pushed under the morph */
+  private func modeCard<L: View>(_ id: String, _ push: @escaping () -> Void, @ViewBuilder label: () -> L) -> some View {
+    Button { mo.zoom = Double(textSize) / 100; mo.open(id, Morph.Face(glow: Self.GLOW[id]!), push: push) } label: {
+      label().onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo.cards[id, default: .init()].rect = $0 }
+    }
+    .accessibilityIdentifier(id)
+  }
+  private func modeBack(_ id: String, _ pop: @escaping () -> Void) -> MorphBack { MorphBack { mo.close(id, Morph.Face(glow: Self.GLOW[id]!), pop: pop) } }
   /* a .tile: the game's rack art under its name and line (bottom left); a tap opens its setup */
   private func gameCard(_ g: TableGame) -> some View {
-    NavigationLink { GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) }) } label: {
+    let id = "game-\(g.rawValue)"
+    return Button { mo.zoom = Double(textSize) / 100; mo.open(id, face(g)) { setupGame = g } } label: {
       Color.clear.aspectRatio(oneCol ? nil : 1.7, contentMode: .fit)
         .frame(maxWidth: .infinity).frame(height: oneCol ? 84 : nil)
         .overlay {
@@ -95,7 +108,10 @@ struct Home: View {
               if let img = art.img[g.rawValue] { Image(decorative: img, scale: art.scale).resizable().transition(.opacity) }
               VStack(alignment: .leading, spacing: 2) {
                 Text(g.rawValue).font(.system(size: narrow ? 16 : 17, weight: .semibold)).kerning(-0.2)
+                  .opacity(mo.cardTitleHidden == id ? 0 : 1)
+                  .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo.cards[id, default: .init()].title = $0; mo.cards[id]?.narrow = narrow }
                 Text(HomeArt.line(g)).font(.system(size: narrow ? 12 : 13)).foregroundStyle(.white.opacity(0.74))
+                  .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo.cards[id, default: .init()].line = $0 }
               }
               .lineLimit(1).foregroundStyle(.white)
               .padding(.horizontal, narrow ? 12 : 14).padding(.bottom, narrow ? 12 : 13)
@@ -109,6 +125,7 @@ struct Home: View {
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.13), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.5), radius: 14, y: 8)
         .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo.cards[id, default: .init()].rect = $0 }
     }
     .buttonStyle(Press())
     .accessibilityLabel("\(g.rawValue), \(HomeArt.line(g))")
@@ -156,30 +173,26 @@ struct Home: View {
           gameCard(.heyball).padding(.top, 12)
           HomeSect(title: "Modes", top: 26)
           LazyVGrid(columns: cols, spacing: 12) {
-            NavigationLink { CareerView(store: career) } label: {
-              ModeCard(name: "Career", line: career.loaded ? "\(career.E.S["profile"]?["name"]?.str ?? "Career"), season \(career.E.season)" : "Your player, 300 rivals", glow: (242, 201, 76)) {
+            modeCard("mode-career", { showCareer = true }) {
+              ModeCard(name: "Career", line: career.loaded ? "\(career.E.S["profile"]?["name"]?.str ?? "Career"), season \(career.E.season)" : "Your player, 300 rivals", glow: Self.GLOW["mode-career"]!) {
                 Image(systemName: "person.crop.circle.fill").font(.system(size: 22)).foregroundStyle(Color(rgb: 0xf2, 0xc9, 0x4c))
               }
             }
-            .accessibilityIdentifier("mode-career")
-            NavigationLink { TourneyView(store: store) { store.markLive(); playingTourney = true } } label: {
-              ModeCard(name: "Quick Tournament", line: store.tour.map { $0.done ? "Finished: \(TourneyView.placeWords($0.place ?? 0))" : "In progress, \(TourneyView.kindName($0.kind))" } ?? "Bracket of 4, 8 or 16", glow: (242, 201, 76)) {
+            modeCard("mode-tourney", { modePath = "tour" }) {
+              ModeCard(name: "Quick Tournament", line: store.tour.map { $0.done ? "Finished: \(TourneyView.placeWords($0.place ?? 0))" : "In progress, \(TourneyView.kindName($0.kind))" } ?? "Bracket of 4, 8 or 16", glow: Self.GLOW["mode-tourney"]!) {
                 Image(systemName: "trophy.fill").font(.system(size: 19)).foregroundStyle(Color(rgb: 0xf2, 0xc9, 0x4c))
               }
             }
-            .accessibilityIdentifier("mode-tourney")
-            NavigationLink { ExhibitionSetup { exhibit = $0 } } label: {
-              ModeCard(name: "AI Exhibition", line: "Watch two CPUs play", glow: (246, 244, 236)) {
+            modeCard("mode-exhibit", { modePath = "ex" }) {
+              ModeCard(name: "AI Exhibition", line: "Watch two CPUs play", glow: Self.GLOW["mode-exhibit"]!) {
                 ZStack { Circle().fill(Color(white: 0.96)).frame(width: 11, height: 11).offset(x: -4, y: 3); Circle().fill(Color(rgb: 0xf2, 0xc9, 0x4c)).frame(width: 9, height: 9).offset(x: 5, y: -4) }
               }
             }
-            .accessibilityIdentifier("mode-exhibit")
-            NavigationLink { PartySetup { party = $0 } } label: {
-              ModeCard(name: "Party", line: "2 to 4 players", glow: (38, 150, 104)) {
+            modeCard("mode-party", { modePath = "party" }) {
+              ModeCard(name: "Party", line: "2 to 4 players", glow: Self.GLOW["mode-party"]!) {
                 Image(systemName: "person.2.fill").font(.system(size: 16)).foregroundStyle(.white)
               }
             }
-            .accessibilityIdentifier("mode-party")
           }
           .buttonStyle(Press())
           HomeSect(title: "Solo", top: 26)
@@ -195,12 +208,12 @@ struct Home: View {
       }
       .toolbar(.hidden, for: .navigationBar)
       .navigationTitle("").navigationBarTitleDisplayMode(.inline)
-      .navigationDestination(isPresented: $showCareer) { CareerView(store: career) }
+      .navigationDestination(isPresented: $showCareer) { CareerView(store: career).modifier(modeBack("mode-career") { showCareer = false }) }
       .navigationDestination(isPresented: $prefsOpen) { SettingsView() }
       .navigationDestination(item: $modePath) { m in
-        if m == "ex" { ExhibitionSetup { exhibit = $0 } }
-        else if m == "party" { PartySetup { party = $0 } }
-        else { TourneyView(store: store) { store.markLive(); playingTourney = true } }
+        if m == "ex" { ExhibitionSetup { exhibit = $0 }.modifier(modeBack("mode-exhibit") { modePath = nil }) }
+        else if m == "party" { PartySetup { party = $0 }.modifier(modeBack("mode-party") { modePath = nil }) }
+        else { TourneyView(store: store) { store.markLive(); playingTourney = true }.modifier(modeBack("mode-tourney") { modePath = nil }) }
       }
       .navigationDestination(item: $helpPath) { p in
         if p == "drills" { DrillsList { drilling = PracticeGo(layout: $0) } }
@@ -208,12 +221,17 @@ struct Home: View {
         else { HelpView(acts: helpActs) }
       }
       .navigationDestination(item: $statsPath) { k in if k == "all" { StatsView() } else { StatsKindPage(kind: k, rec: Rec.load()) } }
-      .navigationDestination(item: $setupGame) { g in GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) }) }
+      .navigationDestination(item: $setupGame) { g in
+        GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) })
+          .modifier(MorphBack { mo.close("game-\(g.rawValue)", face(g)) { setupGame = nil } })
+      }
       .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { store.markLive(); playingTourney = true } }
       .tint(.primary)
     }
+    .environment(mo)
     /* Text Size: Large and Larger zoom everything but the table (a cover of its own, outside this transform) */
     .modifier(Zoomed(z: CGFloat(textSize) / 100))
+    .overlay { MorphLayer(mo: mo) }
     /* a test hook, like the page's window.felt: `-felt-game "9-Ball"` opens that table */
     .onAppear {
       let a = ProcessInfo.processInfo.arguments
@@ -232,6 +250,8 @@ struct Home: View {
       if let i = a.firstIndex(of: "-felt-mode"), i + 1 < a.count { modePath = a[i + 1] }
       /* `-felt-lesson`: the lesson */
       if a.contains("-felt-lesson") { lessoning = true }
+
+
       /* `-felt-tutorial id`: that tutorial (`-felt-tutshow` plays each step's Show me) */
       if let i = a.firstIndex(of: "-felt-tutorial"), i + 1 < a.count { tutoring = PracticeGo(layout: a[i + 1]) }
       /* `-felt-drill id`: that drill (`-felt-drillshots` plays its solutions) */
@@ -2119,6 +2139,8 @@ struct GameSetup: View {
   @State private var formContent = 0.0
   @State private var names = Prefs.names
   @State private var showRules = false
+  /* the home card's morph (6m), when a card opened this setup */
+  @Environment(Morph.self) private var mo: Morph?
   /* #rulesPop: its title, the ruleset's name, the words; following the choices live */
   var rulesPop: some View {
     let I = RulesInfo.of(kind, title: game.rawValue)
@@ -2149,11 +2171,16 @@ struct GameSetup: View {
       VStack(spacing: 0) {
         /* heroFit: the room the form leaves (each row 44 pt, the groups' gaps, Break's bar), 20% to 50% of the sheet */
         let formH = (formContent > 0 ? formContent : Double(rows) * 55 + 44) + 70 + g.safeAreaInsets.bottom
-        HeroView(game: game, txt: 104).frame(height: min(g.size.height * 0.5, max(g.size.height * 0.2, g.size.height + g.safeAreaInsets.top - formH)))
+        HeroView(game: game, txt: 104, hold: mo?.heroHold ?? false, under: mo?.under, underScale: mo?.underScale ?? 3, onFrame: mo.map { m in { m.heroFrame = $0 } })
+          .opacity(mo?.hideHero == true ? 0 : 1)
+          .frame(height: min(g.size.height * 0.5, max(g.size.height * 0.2, g.size.height + g.safeAreaInsets.top - formH)))
+          .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo?.heroRect = $0 }
           .overlay(alignment: .bottomLeading) {
             VStack(alignment: .leading, spacing: 4) {
               HStack(alignment: .center) {
                 Text(game.rawValue).font(.largeTitle.bold()).foregroundStyle(.white)
+                  .opacity(mo?.hideTitle == true ? 0 : 1)
+                  .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo?.titleRect = $0 }
                 Spacer()
                 /* #rulesInfo: the (i) at the title's trailing end, the rules' words in a popover */
                 Button { showRules = true } label: { Image(systemName: "info.circle").font(.title2).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).frame(width: 44, height: 44) }
@@ -2170,6 +2197,7 @@ struct GameSetup: View {
               .frame(width: 40, height: 40).padding(.top, g.safeAreaInsets.top + 12).padding(.trailing, 16).accessibilityHidden(true)
           }
           .id(setupKey)
+          .onChange(of: setupKey) { _, _ in mo?.under = nil }
         form
         Button { if let k = tutKind, learn != nil, TutStore.offer(k) { offer = true } else { go() } } label: { Text("Break").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black).padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 12)
@@ -2896,7 +2924,6 @@ struct ModeCard<Mark: View>: View {
   let name: String, line: String, glow: (Double, Double, Double)
   @ViewBuilder let mark: () -> Mark
   var body: some View {
-    let c = Color(red: glow.0 / 255, green: glow.1 / 255, blue: glow.2 / 255)
     VStack(alignment: .leading, spacing: 0) {
       mark().frame(width: 36, height: 36).background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color.white.opacity(0.08)))
         .padding(.top, 10).padding(.leading, 12).accessibilityHidden(true)
@@ -2911,20 +2938,26 @@ struct ModeCard<Mark: View>: View {
     .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
     /* one card to a row: no fixed aspect, the card its minimum (--cc-min) */
     .modifier(CardAspect(on: !HomeLayout.oneCol()))
-    .background {
-      GeometryReader { g in
-        ZStack {
-          Color(rgb: 0x17, 0x17, 0x1a)
-          EllipticalGradient(colors: [c.opacity(0.15), c.opacity(0)], center: UnitPoint(x: 0.85, y: 0), startRadiusFraction: 0, endRadiusFraction: 0.6)
-            .frame(width: g.size.width * 1.2 * 2, height: g.size.height * 0.9 * 2).position(x: g.size.width * 0.85, y: 0)
-        }
-      }
-    }
+    .background { ModeFace(glow: glow) }
     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.13), lineWidth: 0.5))
     .shadow(color: .black.opacity(0.5), radius: 14, y: 8)
     .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     .accessibilityElement(children: .combine)
+  }
+}
+/* a .mode card's face without its words: the ground and the glow (the morph's window carries it, 6m) */
+struct ModeFace: View {
+  let glow: (Double, Double, Double)
+  var body: some View {
+    let c = Color(red: glow.0 / 255, green: glow.1 / 255, blue: glow.2 / 255)
+    GeometryReader { g in
+      ZStack {
+        Color(rgb: 0x17, 0x17, 0x1a)
+        EllipticalGradient(colors: [c.opacity(0.15), c.opacity(0)], center: UnitPoint(x: 0.85, y: 0), startRadiusFraction: 0, endRadiusFraction: 0.6)
+          .frame(width: g.size.width * 1.2 * 2, height: g.size.height * 0.9 * 2).position(x: g.size.width * 0.85, y: 0)
+      }
+    }
   }
 }
 /* .solo: a row of the Solo list: its icon (or the daily's calendar leaf), name and line, a count, a chevron; hairlines
