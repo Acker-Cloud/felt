@@ -667,7 +667,7 @@ struct TableCanvas: View {
     /* a party of three or four (chipCount, .many): a seat per player in turn order, each inlaid like the two-player
        seats (the shooter lit, the others dimmed), the race left to the pause menu */
     let nSeats = model.g.map { SeatWords.seats(party: model.party?.names.count, mode: $0.mode) } ?? 2, many = nSeats > 2
-    guard let g = model.g, g.winner == nil, many || (model.party?.names.count ?? 2) <= 2 else { if !model.railAX.isEmpty { model.railAX = [] }; model.railReplay = nil; return }
+    guard let g = model.g, g.winner == nil, many || (model.party?.names.count ?? 2) <= 2 else { if !model.railAX.isEmpty { model.railAX = [] }; model.railReplay = nil; model.rplShown = [:]; return }
     let s = model.sim, T = model.potGeometry(m), band = T.railBand
     let ink = Color(.sRGB, red: 0xef / 255.0, green: 0xe7 / 255.0, blue: 0xda / 255.0), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85)
     let mid = -(band.co + band.rail) / 2   /* the band's middle, metres out from the nose */
@@ -882,12 +882,19 @@ struct TableCanvas: View {
     model.railReplay = nil
     var rplAX: [TableModel.SeatAX] = []
     let glow = Color(.sRGB, red: 1, green: 236 / 255, blue: 190 / 255, opacity: 0.75)
+    /* rplIn: each item fades and grows in from when it is shown (Reduce Motion: there at once) */
+    model.rplShown = model.rplShown.filter { rplIds.contains($0.key) }
+    for id in rplIds where model.rplShown[id] == nil { model.rplShown[id] = model.now }
     for (i, id) in rplIds.enumerated() {
       guard let x = rplX[i] else { continue }
       let c = at(x), words = id == "replayBadge" && model.replaySlow && !rplBare
       let spanW = (words ? rpl[i].w : gl + 5) - 1, left = Double(c.x) - spanW / 2, k = gl / 24, o = CGPoint(x: left + 2, y: Double(c.y) - gl / 2)
       let col = id == "replayBtn" && model.offer?.notable != nil ? Color(rgb: 0xf0, 0xcc, 0x6e) : ink
-      var e = ctx
+      let fade = RailPulse.rplIn(model.now - (model.rplShown[id] ?? model.now), reduce: model.reduceMotion)
+      var base = ctx
+      base.opacity *= fade.opacity
+      base.translateBy(x: c.x, y: c.y); base.scaleBy(x: fade.scale, y: fade.scale); base.translateBy(x: -c.x, y: -c.y)
+      var e = base
       e.addFilter(.shadow(color: edge, radius: 0.7)); e.addFilter(.shadow(color: edge, radius: 0.7)); e.addFilter(.shadow(color: glow, radius: 3))
       func V(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: o.x + x * k, y: o.y + y * k) }
       if id == "replaySkip" {
@@ -904,7 +911,7 @@ struct TableCanvas: View {
         p.move(to: V(3, 4)); p.addLine(to: V(3, 9)); p.addLine(to: V(8, 9))
         e.stroke(p, with: .color(col), style: StrokeStyle(lineWidth: 2.4 * k, lineCap: .round, lineJoin: .round))
         if words {
-          var t = ctx; t.addFilter(.shadow(color: edge, radius: 0.7))
+          var t = base; t.addFilter(.shadow(color: edge, radius: 0.7))
           t.draw(Text("Slow motion").font(.system(size: rf, weight: .bold)).foregroundColor(ink), at: CGPoint(x: left + 2 + gl + 5, y: Double(c.y)), anchor: .leading)
         }
       }

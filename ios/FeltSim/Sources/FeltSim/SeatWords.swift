@@ -313,6 +313,14 @@ public enum RailPulse {
     return ((ay * s + by) * s + cy) * s
   }
   public static func easeInOut(_ x: Double) -> Double { bezier(x, 0.42, 0, 0.58, 1) }
+  /* rplIn (.rpl, 5r): a replay item comes in over 0.2s ease-out (cubic-bezier(0, 0, .58, 1)) from opacity 0 and scale .94
+     about its middle, from when it is shown (its hidden attribute dropped). Reduce Motion: none. t: seconds since then */
+  public static let RPL_IN = 0.2
+  public static func rplIn(_ t: Double, reduce: Bool = false) -> (opacity: Double, scale: Double) {
+    if reduce || t >= RPL_IN { return (1, 1) }
+    let p = bezier(Swift.max(0, t) / RPL_IN, 0, 0, 0.58, 1)
+    return (p, 0.94 + 0.06 * p)
+  }
   /* the seat's opacity t seconds into the pulse (base: the seat's own, 1 when lit) */
   public static func opacity(_ t: Double, base: Double = 1, reduce: Bool = false) -> Double {
     if reduce || t < 0 { return base }

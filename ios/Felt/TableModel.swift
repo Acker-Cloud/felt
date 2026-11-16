@@ -702,6 +702,8 @@ final class TableModel {
   @ObservationIgnored var railSwitch: CGPoint?
   /* the rail's replay offer (#replayBtn): its centre on the stage as last drawn (nil: not shown) */
   @ObservationIgnored var railReplay: CGPoint?
+  /* rplIn: when each replay item (replayBtn, replaySkip, replayBadge) was last shown, its fade in running from there */
+  @ObservationIgnored var rplShown: [String: TimeInterval] = [:]
   /* #viewBtn's tap: 3D on or off, kept as the setting */
   /* v3Sync: the Table View setting changed elsewhere (Settings, from the pause menu): the next frame draws it */
   func syncView(_ on: Bool) {

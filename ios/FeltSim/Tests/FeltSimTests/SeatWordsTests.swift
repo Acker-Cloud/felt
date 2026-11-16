@@ -162,6 +162,21 @@ import Testing
     #expect(RailPulse.easeInOut(0.5) == 0.5)
   }
 
+  /* .rpl's rplIn (0.2s ease-out from opacity 0, scale .94) on #replayBtn just shown: the computed opacity and transform
+     Chromium gives the page's own rules (getAnimations()[0] paused, currentTime set; 6 significant digits) */
+  @Test func replayIn() {
+    let ts = [0, 0.01, 0.025, 0.05, 0.08, 0.1, 0.13, 0.16, 0.19, 0.2]
+    let op = [0, 0.0822422, 0.19858, 0.378138, 0.57088, 0.684643, 0.829833, 0.937718, 0.995525, 1]
+    let sc = [0.94, 0.944935, 0.951915, 0.962688, 0.974253, 0.981079, 0.98979, 0.996263, 0.999732, 1]
+    for (i, t) in ts.enumerated() {
+      let r = RailPulse.rplIn(t)
+      #expect(abs(r.opacity - op[i]) < 1e-6 && abs(r.scale - sc[i]) < 1e-6, "t \(t): \(r) vs \(op[i]), \(sc[i])")
+    }
+    /* Reduce Motion (prefers-reduced-motion: .rpl { animation: none }): there at once */
+    #expect(RailPulse.rplIn(0, reduce: true) == (1, 1))
+    #expect(RailPulse.rplIn(0.5) == (1, 1))
+  }
+
   @Test func potted() {
     #expect(SeatWords.potted([]) == "")
     #expect(SeatWords.potted([1, 3, 9]) == "Potted: 1, 3, 9")
