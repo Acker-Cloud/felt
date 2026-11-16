@@ -664,9 +664,10 @@ struct TableCanvas: View {
   /* row: the 3D view's (placeRail when V3.live): the stage's bottom row (V3_PIN_B up from its foot), its gaps the stage's
      width less every pocket (hole, jaws) and sight as the camera projects them */
   func drawRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter, row: (y: Double, width: Double, C: V3.Cam, box: V3.Box)? = nil) {
-    /* a party of three or four: the cards in the pause menu and the handoff carry the scores (the rail's .many chips are
-       not ported) */
-    guard let g = model.g, g.winner == nil, (model.party?.names.count ?? 2) <= 2 else { if !model.railAX.isEmpty { model.railAX = [] }; return }
+    /* a party of three or four (chipCount, .many): a seat per player in turn order, for VoiceOver only; the cards in the
+       pause menu and the handoff carry the scores (the rail's .many inlays are not drawn yet) */
+    let nSeats = model.g.map { SeatWords.seats(party: model.party?.names.count, mode: $0.mode) } ?? 2, many = nSeats > 2
+    guard let g = model.g, g.winner == nil, many || (model.party?.names.count ?? 2) <= 2 else { if !model.railAX.isEmpty { model.railAX = [] }; return }
     let s = model.sim, T = model.potGeometry(m), band = T.railBand
     let ink = Color(.sRGB, red: 0xef / 255.0, green: 0xe7 / 255.0, blue: 0xda / 255.0), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85)
     let mid = -(band.co + band.rail) / 2   /* the band's middle, metres out from the nose */
@@ -680,7 +681,7 @@ struct TableCanvas: View {
     /* the gaps: the rail's span less every pocket (hole, jaws) and sight, with their pads */
     let len = row?.width ?? (m.upright ? s.TW : s.TL)
     var spans: [[Double]] = row != nil ? [[6, len - 6]] : [[0, len]]
-    var holes: [[Double]] = []
+    var holes: [[Double]] = [], pocketHoles: [[Double]] = [], farHoles: [[Double]] = []
     if let r = row {
       /* railHoles through the camera: each pocket's box at the bed (RAIL_PAD 4), each sight's at the cushion tops
          (SIGHT_PAD 1), those reaching the row (22 either side of its middle) */
@@ -697,24 +698,30 @@ struct TableCanvas: View {
         if s.MOUTHS.indices.contains(i) { for j in s.MOUTHS[i] { pts.append(j.p); pts.append(j.e) } }
         box(pts, 0, 4)
       }
+      pocketHoles = holes
       for q in T.railSights() { box([[q[0] - q[2], q[1] - q[3]], [q[0] + q[2], q[1] - q[3]], [q[0] + q[2], q[1] + q[3]], [q[0] - q[2], q[1] + q[3]]], s.BALL_R * (1 + NOSE_S), 1) }
     } else {
+    /* the far rail's too (a party's seats carry on along it) */
     for (i, p) in s.POCKETS.enumerated() {
       let near = m.upright ? p[0] < s.TL / 2 : p[1] > s.TW / 2
-      if !near { continue }
       let r = s.POCKET_R[i] + 4 / m.k, c = m.upright ? p[1] : p[0]
       var lo = c - r, hi = c + r
       for j in s.MOUTHS.indices.contains(i) ? s.MOUTHS[i] : [] { for q in [j.p, j.e] { let v = m.upright ? q[1] : q[0]; lo = Swift.min(lo, v - 4 / m.k); hi = Swift.max(hi, v + 4 / m.k) } }
-      holes.append([lo, hi])
+      if near { holes.append([lo, hi]) } else { farHoles.append([lo, hi]) }
     }
+    pocketHoles = holes
     for q in T.railSights() {
-      let onRail = m.upright ? q[0] < 0 : q[1] > s.TW
-      if !onRail { continue }
+      let onRail = m.upright ? q[0] < 0 : q[1] > s.TW, onFar = m.upright ? q[0] > s.TL : q[1] < 0
+      if !onRail && !onFar { continue }
       let c = m.upright ? q[1] : q[0], h = (m.upright ? q[3] : q[2]) + 1 / m.k
-      holes.append([c - h, c + h])
+      if onRail { holes.append([c - h, c + h]) } else { farHoles.append([c - h, c + h]) }
     }
     }
-    for h in holes { spans = spans.flatMap { [[$0[0], Swift.min($0[1], h[0])], [Swift.max($0[0], h[1]), $0[1]]] }.filter { $0[1] - $0[0] > 0.01 } }
+    let span0 = spans
+    func cut(_ hs: [[Double]]) -> [[Double]] {
+      hs.reduce(span0) { sp, h in sp.flatMap { [[$0[0], Swift.min($0[1], h[0])], [Swift.max($0[0], h[1]), $0[1]]] }.filter { $0[1] - $0[0] > 0.01 } }
+    }
+    spans = cut(holes)
     /* placeRail: the row's items placed in the gaps (rail units: metres top-down, points in 3D), each kept RAIL_GAP (6 pt)
        from the others: the seats first (player 1 the gap nearest the rail's middle on its left, player 2 on its right; a
        gap across the middle gives each its half, the two meeting at the middle), snooker's scoreboard beside the player
@@ -746,9 +753,10 @@ struct TableCanvas: View {
        shot of how many ("Shot 2/4") */
     let soloNum: String? = g.mode == "trick" ? model.trick.map { String($0.attempts + (model.trickRes == nil ? 1 : 0)) }
       : g.mode == "drill" ? model.drill.flatMap { D in drillById(D.id).map { "\(min(D.js.count + (D.beat || model.drillRes != nil ? 0 : 1), $0.shots))/\($0.shots)" } } : nil
-    let seatList: [Int] = g.mode == "practice" || model.tut != nil ? [] : soloNum != nil ? [0] : [0, 1]
+    let seatList: [Int] = many ? Array(0..<nSeats) : g.mode == "practice" || model.tut != nil ? [] : soloNum != nil ? [0] : [0, 1]
     let next = model.railNext()
-    let font = Font.system(size: Swift.max(11, Swift.min(13, ph * 0.62)), weight: .bold, design: .rounded).monospacedDigit()
+    /* .many: Caption 2 (11 px), set closer, the race (.of) left to the pause menu */
+    let font = Font.system(size: many ? 11 : Swift.max(11, Swift.min(13, ph * 0.62)), weight: .bold, design: .rounded).monospacedDigit()
     /* each seat's items (chipOf) and their widths (pt) */
     var seatItems: [Int: [(kind: String, n: Int, text: String)]] = [:], seatW: [Int: [Double]] = [:]
     for p in seatList {
@@ -778,12 +786,30 @@ struct TableCanvas: View {
         } else if let nx { items.append(("ball", nx, "")) }
       }
       }
+      if many { items.removeAll { $0.kind == "of" } }
       if items.isEmpty { items.append(("pip", 0, "")) }
       seatItems[p] = items
       seatW[p] = items.map { it -> Double in it.kind == "num" || it.kind == "of" ? Double(ctx.resolve(Text(it.text).font(font)).measure(in: CGSize(width: 200, height: 100)).width) : it.kind == "ball" ? ph : it.kind == "dot" ? Swift.min(10, ph - 3) : Swift.min(10, ph - 3) - 2 }
     }
-    let ig = 4.0
+    let ig = many ? 3.0 : 4.0
     func total(_ p: Int) -> Double { let w = seatW[p] ?? []; return w.reduce(0, +) + ig * Double(Swift.max(0, w.count - 1)) + 4 }
+    if many {
+      /* placeRail's group() (.many): the seats packed in turn order along the bottom rail's gaps, too many for it the
+         last ones along the far rail's (top-down); no room even so: the gaps between the pockets alone (the score keeper
+         never gives way). Each a group read from its words (seatWords), the ball to play on the shooter's */
+      let k = 1 / unit, ws = seatList.map { total($0) }, px = { (sp: [[Double]]) in sp.map { $0.map { $0 * k } } }
+      let far = row != nil ? nil : px(cut(farHoles))
+      let place = RailRow.party(ws, near: px(spans), far: far, mid: rmid * k) ?? RailRow.party(ws, near: px(cut(pocketHoles)), far: far, mid: rmid * k)
+      var ax: [TableModel.SeatAX] = []
+      for (i, p) in seatList.enumerated() {
+        guard let q = place?[i] else { continue }
+        let u = q.x / k, c0 = q.far ? (m.upright ? m.pt(s.TL - mid, u) : m.pt(u, mid)) : at(u), w = Swift.max(44, ws[i])
+        let words = SeatWords.seat(g, p, name: Words.nameOf(p), next: p == g.turn ? next : nil, tally: model.rackTally(p))
+        ax.append(.init(id: "seat\(p)", rect: CGRect(x: c0.x - w / 2, y: c0.y - 22, width: w, height: 44), words: words))
+      }
+      if model.railAX != ax { model.railAX = ax }
+      return
+    }
     var seatX: [Int: Double] = [:]
     for p in seatList {
       let w = total(p) * unit

@@ -69,4 +69,55 @@ public enum SeatWords {
     while j < rest.endIndex, rest[j].isWhitespace { j = rest.index(after: j) }
     return String(t[..<r.lowerBound]) + String(rest[j...])
   }
+  /* chipCount: a seat per player in a party of three or four (in turn order, seat i player i) playing a game; else two */
+  public static func seats(party n: Int?, mode: String?) -> Int { (n ?? 2) > 2 && mode == nil ? n! : 2 }
+}
+
+/* 6b2's placeRail for a party of three or four (chipCount > 2): the seats packed in order along the bottom rail's gaps
+   (pack), and with too many for it the first ones there and the rest along the far rail's (top-down only). Units:
+   screen px (the page's CSS px), RAIL_GAP between items. */
+public enum RailRow {
+  public static let GAP = 6.0
+  /* pack: items ws wide laid in order into the gaps gs ([a, b], left to right), a gap each run (never back to an earlier
+     gap), each run centred in its gap; of every way that fits, the one scored least by how far their middle is from the
+     rail's (mid), how many gaps they take (12 a gap) and how far apart they spread (a quarter); the first found on a tie.
+     Their centres, or nil */
+  public static func pack(_ ws: [Double], _ gs: [[Double]], mid: Double, gap: Double = GAP) -> [Double]? {
+    if ws.isEmpty { return [] }
+    var best: (pos: [Double], score: Double)? = nil
+    var idx = [Int](repeating: 0, count: ws.count)
+    func walk(_ i: Int, _ g0: Int) {
+      if i == ws.count {
+        /* the runs in first-seen order (the page's Map), each gap's items */
+        var order: [Int] = [], runs: [Int: [Int]] = [:]
+        for (j, g) in idx.enumerated() { if runs[g] == nil { order.append(g); runs[g] = [] }; runs[g]!.append(j) }
+        var pos = [Double](repeating: 0, count: ws.count)
+        for g in order {
+          let r = runs[g]!, len = r.reduce(0.0) { $0 + ws[$1] } + gap * Double(r.count - 1)
+          if len > gs[g][1] - gs[g][0] { return }
+          var x = (gs[g][0] + gs[g][1]) / 2 - len / 2
+          for j in r { pos[j] = x + ws[j] / 2; x += ws[j] + gap }
+        }
+        let score = abs(pos.reduce(0, +) / Double(pos.count) - mid) + 12 * Double(order.count) + 0.25 * (pos.max()! - pos.min()!)
+        if best == nil || score < best!.score { best = (pos, score) }
+        return
+      }
+      var g = g0
+      while g < gs.count { idx[i] = g; walk(i + 1, g); g += 1 }
+    }
+    walk(0, 0)
+    return best?.pos
+  }
+  /* group() for the party's seats: all on the bottom rail (near) if they pack, else the first n there and the rest on
+     the far rail (far: top-down's; nil in 3D), n from the most down to 1. Each seat's centre and whether on the far rail */
+  public static func party(_ ws: [Double], near: [[Double]], far: [[Double]]?, mid: Double) -> [(x: Double, far: Bool)]? {
+    if let pos = pack(ws, near, mid: mid) { return pos.map { ($0, false) } }
+    guard let far else { return nil }
+    var n = ws.count - 1
+    while n >= 1 {
+      if let a = pack(Array(ws[0..<n]), near, mid: mid), let b = pack(Array(ws[n...]), far, mid: mid) { return a.map { ($0, false) } + b.map { ($0, true) } }
+      n -= 1
+    }
+    return nil
+  }
 }
