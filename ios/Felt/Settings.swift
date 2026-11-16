@@ -112,6 +112,7 @@ struct SettingsView: View {
   @AppStorage("felt.settings.hcAim") private var hcAim = false
   @AppStorage("felt.settings.marks") private var marks = false
   @AppStorage("felt.settings.text") private var text = 100
+  @AppStorage("felt.settings.keyShoot") private var keyShoot = false
   @AppStorage("felt.settings.bar") private var bar = "mid"
   /* the list (prefsList): a row per page (PREF_PAGES), its icon, name and line, pushed from the right. The page's
      Accessibility page is not here: none of its settings (ball marks, high-contrast aim, text size, Space on the bar)
@@ -219,6 +220,10 @@ struct SettingsView: View {
       Picker("Text Size", selection: $text) { Text("Default").tag(100); Text("Large").tag(115); Text("Larger").tag(130) }.pickerStyle(.segmented).labelsHidden()
         .accessibilityIdentifier("textSize")
     } header: { Text("Text Size") } footer: { Text("Menus, sheets, banners and the call bar grow; the table keeps its size.") }
+    /* settings.keyShoot (audit F7): off, no key ever shoots */
+    Section {
+      Toggle("Space Drives the Power Bar", isOn: $keyShoot)
+    } header: { Text("Keyboard") } footer: { Text("For keyboard and switch players. Up and down set the bar's mark, then Space or Enter: the bar pulls to the mark and lets go, as a finger would. Any other key stops it. Off, no key ever shoots.") }
   }
   /* ppAbout: felt, and the sound credits (CREDITS.md) */
   @ViewBuilder private var about: some View {

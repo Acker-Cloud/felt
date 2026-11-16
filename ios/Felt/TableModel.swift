@@ -1023,6 +1023,65 @@ final class TableModel {
   static let aimBench = ProcessInfo.processInfo.arguments.contains("-felt-aimbench")
   static let touchBench = ProcessInfo.processInfo.arguments.contains("-felt-touchbench") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-hand") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-slow")
   @ObservationIgnored private var bench: (t0: Double, prev: Double, n: Int, worst: Double)?
+  /* keyboard (page 5's keydown, for a hardware keyboard): left and right aim (Shift coarse 0.03, Alt or Ctrl one ridge
+     of the fine wheel, FINE_STEP, else 0.004 rad); R centres the english; B (bumper) takes the next striker; up and
+     down move the bar's mark (Shift 0.1, else 0.02); M carries the cue ball in hand, the arrows move it (Shift 5 cm,
+     else 1 cm) until M, Space or Enter; Space or Enter on the bar drives it (keyDrive, only with settings.keyShoot).
+     No key ever shoots otherwise. Any key during a drive stops it. Returns whether the key was the game's. */
+  static let FINE_STEP = 4 * 0.02 * Double.pi / 180, KEY_PULL_MS = 0.9
+  @ObservationIgnored private var keyPull: (t0: TimeInterval, to: Double)?
+  @ObservationIgnored private(set) var keyMove = false
+  var keyMsg = ""
+  var human: Bool { !cpuTurn && g?.winner == nil && rolling == nil && stroke == nil }
+  func key(_ k: String, shift: Bool, alt: Bool) -> Bool {
+    if keyPull != nil { cancelKeyPull(); return true }
+    if k == "escape" { paused.toggle(); return true }
+    guard !paused, human, trickRes == nil else { return false }
+    let dx = k == "right" ? 1.0 : k == "left" ? -1.0 : 0, dy = k == "up" ? 1.0 : k == "down" ? -1.0 : 0
+    if keyMove {
+      if dx != 0 || dy != 0, let c = cue {
+        let st = shift ? 0.05 : 0.01, at = placeAt ?? (c.x, c.y)
+        /* on screen: right is +x, up is -y (upright: the table's long side runs up the screen) */
+        let (tx, ty) = uprightView ? (at.0 + dy * st, at.1 + dx * st) : (at.0 + dx * st, at.1 - dy * st)
+        place(tx, ty); return true
+      }
+      if k == "m" || k == "space" || k == "return" { keyMove = false; placeEnd(); return true }
+      return false
+    }
+    switch k {
+    case "r": if spinOk { spin = spinOf(x: 0, y: 0, e: spin.e) }; return true
+    case "b":
+      if game == .bumper, let gm = g { let list = engine.bumperStrikers(gm); if list.count > 1, let i = list.firstIndex(of: cueN) { _ = pickBall(list[(i + 1) % list.count]) } }
+      return true
+    case "m": if inHand { keyMove = true; return true }; return false
+    case "space", "return": keyDrive(); return true
+    case "up", "down":
+      markPower = min(1, max(0.02, ((markPower + dy * (shift ? 0.1 : 0.02)) * 100).rounded() / 100)); power = 0
+      keyMsg = "Mark \(Int((markPower * 100).rounded()))%"
+      return true
+    case "left", "right":
+      takeAim()
+      aim = AimFeel.wrap(aim + dx * (shift ? 0.03 : alt ? TableModel.FINE_STEP : 0.004))
+      return true
+    default: return false
+    }
+  }
+  func keyDrive() {
+    guard keyPull == nil, human else { return }
+    if !Prefs.bool("keyShoot", false) { keyMsg = "Space on the power bar is off. Turn on Space drives the power bar in Settings, Accessibility."; return }
+    if !callReady { keyMsg = "Call your shot: tap a ball, then a pocket, or play a safety."; callMenu = true; return }
+    takeAim()
+    keyPull = (now, min(1, max(0.02, markPower))); power = 0
+    keyMsg = "The bar pulls to \(Int((keyPull!.to * 100).rounded()))% and lets go. Any key stops it."
+  }
+  private func stepKeyPull() {
+    guard let k = keyPull else { return }
+    if !human { cancelKeyPull(); return }
+    let u = min(1, max(0, (now - k.t0) / (TableModel.KEY_PULL_MS * max(0.35, k.to))))
+    power = k.to * u
+    if u >= 1 { keyPull = nil; keyMsg = ""; shoot() }
+  }
+  func cancelKeyPull() { guard keyPull != nil else { return }; keyPull = nil; power = 0; keyMsg = "" }
   /* the display's frame interval, as the ticks measure it (1/60 until known) */
   @ObservationIgnored private(set) var frameGap = 1.0 / 60
   @ObservationIgnored private var tickPrev: TimeInterval?
@@ -1047,6 +1106,7 @@ final class TableModel {
     stepAutoAim()
     stepPlaceBack()
     liftStep(now)
+    stepKeyPull()
     if lesson != nil { lessonCheck() }
     if let o = offer, now > o.until || rolling != nil || stroke != nil { offer = nil }
     if rp != nil { if let f = flashDue { banner = (f.0, f.1, now + f.2); flashDue = nil }; pots.removeAll { now - $0.t >= potMs }; replayStep(now); return }

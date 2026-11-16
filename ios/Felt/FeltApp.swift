@@ -309,6 +309,8 @@ struct TableScreen: View {
   /* the drag's working state: a plain object, not observed, so a touch event (120 a second) never rebuilds the screen */
   final class Touch { var placing = false, picking = false, eating = false, gest: AimGesture? = nil, pinch0: Double? = nil }
   @State private var tch = Touch()
+  /* a hardware keyboard (page 5's keydown): the table takes the keys while it is up */
+  @FocusState private var keys: Bool
   @Environment(\.displayScale) private var scale
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   /* the window's interface orientation, read as the size changes (a turn) */
@@ -378,6 +380,47 @@ struct TableScreen: View {
     }
     .tint(.primary)
     .statusBarHidden()
+    .focusable().focusEffectDisabled().focused($keys)
+    .onAppear { keys = true }
+    /* `-felt-keybench`: keys through model.key (10 right, 2 up, Space with keyShoot, then the result printed) */
+    .task {
+      guard ProcessInfo.processInfo.arguments.contains("-felt-keybench") else { return }
+      try? await Task.sleep(for: .seconds(2))
+      let a0 = model.aim, m0 = model.markPower
+      for _ in 0..<10 { _ = model.key("right", shift: false, alt: false) }
+      _ = model.key("right", shift: false, alt: true)
+      for _ in 0..<2 { _ = model.key("up", shift: false, alt: false) }
+      let a1 = model.aim, m1 = model.markPower
+      UserDefaults.standard.set(false, forKey: "felt.settings.keyShoot"); _ = model.key("space", shift: false, alt: false)
+      let off = model.keyMsg
+      try? await Task.sleep(for: .milliseconds(300))
+      UserDefaults.standard.set(true, forKey: "felt.settings.keyShoot"); _ = model.key("space", shift: false, alt: false)
+      try? await Task.sleep(for: .milliseconds(1200))
+      UserDefaults.standard.removeObject(forKey: "felt.settings.keyShoot")
+      print(String(format: "felt-keybench aim %+.5f (expected %+.5f), mark %.2f -> %.2f, off: %@, rolling %d", a1 - a0, 10 * 0.004 + TableModel.FINE_STEP, m0, m1, off, model.rolling != nil ? 1 : 0))
+    }
+    .onKeyPress(phases: .down) { press in
+      let k: String
+      switch press.key {
+      case .leftArrow: k = "left"
+      case .rightArrow: k = "right"
+      case .upArrow: k = "up"
+      case .downArrow: k = "down"
+      case .space: k = "space"
+      case .return: k = "return"
+      case .escape: k = "escape"
+      default: k = press.characters.lowercased()
+      }
+      return model.key(k, shift: press.modifiers.contains(.shift), alt: press.modifiers.contains(.option) || press.modifiers.contains(.control)) ? .handled : .ignored
+    }
+    /* the keyboard's words (the page's status line): the drive, the mark, why Space does nothing */
+    .overlay(alignment: .top) {
+      if !model.keyMsg.isEmpty {
+        Text(model.keyMsg).font(.system(size: 15)).padding(.horizontal, 14).padding(.vertical, 8)
+          .background(.regularMaterial, in: Capsule()).padding(.top, 54).accessibilityAddTraits(.updatesFrequently)
+          .task(id: model.keyMsg) { try? await Task.sleep(for: .seconds(4)); if !model.keyMsg.hasPrefix("The bar pulls") { model.keyMsg = "" } }
+      }
+    }
   }
 
   /* #ui: padding max(2, the insets), max(4) at the foot; upright the stage over one 56 pt strip (#ctl), 4 apart, the
