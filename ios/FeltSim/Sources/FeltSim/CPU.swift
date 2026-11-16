@@ -120,6 +120,8 @@ final class CPULine {
    onto `to`, (1 - (1 - u / .6)^3) of the way by u .6, then draws back to the power, power x (1 - (1 - (u - .6) / .4)^2);
    pull nil until u passes .6 (the page's pull is null: the cue at rest). u is clamped to 0...1 */
 public let CPU_ANIM_MS = 900.0
+/* F8: after a tap on the CPU's turn (cpuSkip) the turn and pull take 250 ms (over the speed) */
+public let CPU_SKIP_MS = 250.0
 public func cpuAnim(_ u0: Double, from: Double, to: Double, power: Double) -> (aim: Double, pull: Double?) {
   let u = Swift.min(1, Swift.max(0, u0))
   var d = to - from
@@ -131,16 +133,19 @@ public func cpuAnim(_ u0: Double, from: Double, to: Double, power: Double) -> (a
 /* page 5's think wait (F8: cpuThinkMs, counted from the turn's start) on the frame clock: el, the time run, grows by each
    frame's step (never backwards, at most 0.1 s, as cpuAnim's) and not at all while held (the pause menu, the handoff, a
    replay: the page moves cpuT0 on by them); a held frame leaves last nil, so the frame after adds nothing. The plan goes
-   once el reaches the hold over the speed */
+   once el reaches the hold over the speed, or at once after a tap (skip, the page's cpuSkip: the wait cut, never the
+   search) */
 public struct CPUThinkClock {
-  public var el = 0.0, last: Double? = nil
+  public var el = 0.0, last: Double? = nil, skip = false
   public init() {}
   public mutating func step(_ now: Double, held: Bool) {
     if held { last = nil; return }
     if let l = last { el += Swift.min(0.1, Swift.max(0, now - l)) }
     last = now
   }
-  public func due(_ holdMs: Double, speed: Double) -> Bool { el >= holdMs / 1000 / speed }
+  public func due(_ holdMs: Double, speed: Double) -> Bool { skip || el >= holdMs / 1000 / speed }
+  /* the turn and pull's length in seconds: 900 ms, 250 after a tap */
+  public func animS(speed: Double) -> Double { (skip ? CPU_SKIP_MS : CPU_ANIM_MS) / 1000 / speed }
 }
 
 /* JS's ToUint32 of an integer-valued double (rng's seed >>> 0) */

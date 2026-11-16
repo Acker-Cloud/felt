@@ -60,6 +60,26 @@ final class PlayTests: XCTestCase {
     if (ProcessInfo.processInfo.environment["FELT_ARGS"] ?? "").contains("3d") { table.pinch(withScale: 0.6, velocity: -0.8); sleep(1) }
   }
 
+  /* F8 by real touch: in an exhibition (both players the CPU) a tap on the table during the break's think hurries it (the
+     page's cpuSkip): the wait cut, the cue's turn and pull 250 ms, so the break is rolling well inside the unhurried
+     think (at least 900 x 0.85 ms) and swing (900 ms). The stroke's think and skip are read from the cpu-probe
+     (-felt-aimprobe); the log (-felt-touchlog) records the tap ("cpuskip") and the stroke ("cpustroke think <s> skip 1") */
+  @MainActor func testCpuSkip() throws {
+    let app = XCUIApplication()
+    app.launchArguments = ["-felt-exhibit", "8-Ball", "-felt-touchlog", "-felt-aimprobe"]
+    app.launch()
+    let table = app.otherElements["table"], probe = app.staticTexts["cpu-probe"]
+    XCTAssertTrue(table.waitForExistence(timeout: 10))
+    table.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
+    expectation(for: NSPredicate(format: "value BEGINSWITH %@", "think"), evaluatedWith: probe)
+    waitForExpectations(timeout: 10)
+    let v = probe.value as? String ?? ""
+    let note = XCTAttachment(string: v); note.name = "cpu-skip"; note.lifetime = .keepAlways; add(note)
+    XCTAssertTrue(v.hasSuffix("skip 1"), "the tap hurried the CPU's break: \(v)")
+    /* hurried: the think cut and the swing 250 ms, inside the unhurried break's least (765 ms think, 900 ms swing) */
+    XCTAssertLessThan(Double(v.split(separator: " ")[1]) ?? 9, 1.665)
+  }
+
   /* the cue ball in hand carried in 3D (4o, v3Table): the press on the ball as the camera draws it, a carry, the let-go.
      The camera sits behind the ball at the default pitch and distance (forced: a string in the argument domain reads as
      unset), so the ball is at the stage's middle across and, down, at the angle between the pitch and the line to the

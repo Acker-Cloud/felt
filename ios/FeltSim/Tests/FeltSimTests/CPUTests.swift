@@ -93,4 +93,12 @@ import Testing
     c.step(30, held: false)
     #expect(abs(c.el - (0.6 + 10.0 / 60)) < 1e-9, "never backwards")
   }
+  /* F8: a tap (cpuSkip) makes the think due at once and the turn and pull 250 ms, both over the speed */
+  @Test func thinkSkip() {
+    var c = CPUThinkClock()
+    c.step(1, held: false); c.step(1.1, held: false)
+    #expect(!c.due(900, speed: 1) && c.animS(speed: 1) == 0.9 && c.animS(speed: 2) == 0.45)
+    c.skip = true
+    #expect(CPU_SKIP_MS == 250 && c.due(3500, speed: 1) && c.animS(speed: 1) == 0.25 && c.animS(speed: 4) == 0.0625)
+  }
 }

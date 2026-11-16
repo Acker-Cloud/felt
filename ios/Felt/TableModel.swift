@@ -737,6 +737,9 @@ final class TableModel {
   /* the search's answer and its think time (the page's cpuReady, .hold), held until the think clock runs past it */
   @ObservationIgnored private var cpuReady: (shot: CPUShot, gm: Game, hold: Double)? = nil
   @ObservationIgnored private(set) var cpuClock = CPUThinkClock()
+  /* the last CPU stroke's think, run from the turn's start to the stroke, and whether a tap hurried it (the page's
+     felt.lastThink, for the UI tests' cpu-probe) */
+  @ObservationIgnored private(set) var lastThink = ""
 
   /* practice (page 5s): the session's layout and seed, the undo stack (UNDO_MAX), its numbers, editing and the tools strip */
   struct Practice { var layout: String, seed: UInt32, undo: [Game] = [], shots = 0, pots = 0, potting = 0, edit: Bool, tools = false }
@@ -1517,16 +1520,24 @@ final class TableModel {
       cpuPlan = nil; cpuBusy = false; cpuThinking = false; power = 0; return
     }
     P.el += min(0.1, max(0, now - P.last)); P.last = now; cpuPlan = P
-    let u = P.el / (CPU_ANIM_MS / 1000 / speed), a = cpuAnim(u, from: P.from, to: P.angle, power: P.power)
+    let u = P.el / cpuClock.animS(speed: speed), a = cpuAnim(u, from: P.from, to: P.angle, power: P.power)
     aim = a.aim
     if let p = a.pull { power = p }
     if u >= 1 {
+      lastThink = String(format: "think %.3f skip %d", cpuClock.el, cpuClock.skip ? 1 : 0); TouchLog.add("cpustroke " + lastThink)
       cpuPlan = nil
       cpuThinking = false
       power = P.power; markPower = P.power
       stroke = (P.power, nil)
       cpuBusy = false
     }
+  }
+  /* F8 (the page's cpuSkip): a tap on the table during the CPU's turn hurries it, the wait and the cue's swing; never the
+     search. Returns whether it was the CPU's turn (the press is then eaten whole) */
+  func cpuSkip() -> Bool {
+    guard cpuTurn, rolling == nil, stroke == nil, rp == nil else { return false }
+    if cpuThinking { cpuClock.skip = true }
+    return true
   }
   /* cpuThinkMs: short on the break or an easy pot, longer on a hard one, longest on a safety or kick */
   private func cpuThinkMs(_ gm: Game, _ shot: CPUShot, _ seed: Double) -> Double {

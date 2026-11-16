@@ -650,6 +650,8 @@ struct TableScreen: View {
             let _ = model.frame
             Text("probe").font(.system(size: 1)).opacity(0.02).allowsHitTesting(false)
               .accessibilityIdentifier("aim-probe").accessibilityValue(String(format: "%@ %.4f", model.aimHeld ? "held" : "free", model.aim))
+            Text("probe").font(.system(size: 1)).opacity(0.02).allowsHitTesting(false)
+              .accessibilityIdentifier("cpu-probe").accessibilityValue(model.lastThink)
           }
         }
         .onContinuousHover { phase in
@@ -780,6 +782,9 @@ struct TableScreen: View {
     if tch.eating { return }
     /* the rail's 3D switch: a 44 pt target round its glyph; the tap is the switch's, the rest of it eaten */
     if began, let c = model.railSwitch, abs(at.x - c.x) < 22, abs(at.y - c.y) < 22 { model.toggleView(); tch.eating = true; return }
+    /* F8: a press on the CPU's turn hurries its think (cpuSkip) and is eaten whole: it never aims, tilts or picks (the
+       page's pointerdown returns while !human()) */
+    if began, model.cpuSkip() { tch.eating = true; TouchLog.add("cpuskip"); return }
     if began { model.hideOffer() }
     let s = model.sim, m = model.camView(Mapper(size: size, TL: s.TL, TW: s.TW)), tm = TouchMap(model, m)
     model.uprightView = m.upright
