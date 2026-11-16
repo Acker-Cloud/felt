@@ -2660,8 +2660,9 @@ struct SoloRow: View {
          beside them keeps to one line */
       .lineLimit(Prefs.int("text", 100) > 100 ? nil : 1)
       .fixedSize(horizontal: false, vertical: Prefs.int("text", 100) > 100)
+      /* .tt flex: 1 in a 14 px gap: the words fill the row (a Spacer between was a second 14 pt gap) */
+      .frame(maxWidth: .infinity, alignment: .leading)
       .layoutPriority(1)
-      Spacer(minLength: 4)
       if let acc {
         HStack(spacing: 5) {
           if let accIcon { Image(systemName: accIcon).font(.system(size: 13)).foregroundStyle(accTint) }
