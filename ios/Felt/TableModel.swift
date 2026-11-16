@@ -180,10 +180,11 @@ final class TableModel {
      (rp.tab, drawn instead of the live one): the cue's run-up (REPLAY_LEAD), real speed slowed to REPLAY_SLOW round the
      first contact and the first object ball's drop. The live game holds still (the CPU waits) until it ends; any touch
      ends it */
-  struct ShotRec { let balls: [Ball], angle: Double, power: Double, spin: Spin, ball: Int, g: Game?, orient: [Int: Mat3] }
-  struct Replay { let rec: ShotRec, tab: Tab; var lead: Double, struck = false, acc = 0.0, hold = 0.0, end = false, shotAt = 0.0; let moments: [Double], keepOrient: [Int: Mat3] }
+  struct ShotRec { let balls: [Ball], angle: Double, power: Double, spin: Spin, ball: Int, g: Game?, orient: [Int: Mat3], id: Int }
+  struct Replay { let rec: ShotRec, tab: Tab; var lead: Double, struck = false, acc = 0.0, hold = 0.0, end = false, shotAt = 0.0, camT: Double; let moments: [Double], keepOrient: [Int: Mat3], plan: Cam.Plan }
   static let REPLAY_OFFER_MS = 3.5, REPLAY_NOTABLE_MS = 6.5, REPLAY_LEAD = 0.5, REPLAY_SLOW = 0.35, SLOW_IN = 0.09, SLOW_OUT = 0.12, SLOW_RAMP = 0.06
   @ObservationIgnored var lastShot: ShotRec? = nil
+  @ObservationIgnored private var shotN = 0
   private(set) var offer: (notable: String?, until: TimeInterval)? = nil
   private(set) var rp: Replay? = nil
   func hideOffer() { if offer != nil { offer = nil } }
@@ -199,19 +200,17 @@ final class TableModel {
     offer = (nb, now + (nb != nil ? TableModel.REPLAY_NOTABLE_MS : TableModel.REPLAY_OFFER_MS))
   }
   private static func ease(_ a: Double, _ b: Double, _ u: Double) -> Double { let t = min(1, max(0, (u - a) / (b - a))); return t * t * (3 - 2 * t) }
-  /* startReplay: the record's moments found by playing it through first (the first contact, the first object ball's drop) */
+  /* startReplay: the record's whole roll (its prediction, camPredict, run to the end): the moments (the first contact,
+     the first object ball's drop) and the camera's plan in close (CAM_REPLAY) on the cue ball and the first ball it hits */
   func startReplay() {
     guard rp == nil, let rec = lastShot, rolling == nil, stroke == nil else { return }
     hideOffer()
-    let pre = sim.newTable(rec.balls.map { $0.copy() }, cue: rec.ball)
-    sim.strike(pre, rec.angle, rec.power, rec.spin)
-    var first: Double? = nil, drop: Double? = nil, heardN = 0
-    while sim.stepTable(pre) {
-      if first == nil, pre.hits[heardN...].contains(where: { $0.kind == "ball" }) { first = pre.t }
-      heardN = pre.hits.count
-      if drop == nil, pre.pocketOf.keys.contains(where: { $0 != rec.ball }) { drop = pre.t }
-    }
-    rp = Replay(rec: rec, tab: sim.newTable(rec.balls.map { $0.copy() }, cue: rec.ball), lead: -TableModel.REPLAY_LEAD, moments: [first, drop].compactMap { $0 }, keepOrient: orient)
+    let P = camPred.flatMap { $0.id == rec.id ? $0 : nil } ?? Cam.predict(sim, id: rec.id, balls: rec.balls, ball: rec.ball, angle: rec.angle, power: rec.power, spin: rec.spin)
+    while !Cam.step(sim, P, 1) {}
+    let tr = P.tr, ci = rec.balls.firstIndex { $0.n == rec.ball } ?? -1, oi = tr.first.flatMap { f in rec.balls.firstIndex { $0.n == f.n } } ?? -1
+    let drop = tr.pots.first { $0.n != rec.ball }, moments = [tr.first?.t, drop?.t].compactMap { $0 }
+    let plan = Cam.plan(tr, Cam.REPLAY, rec.balls.indices.map { $0 == ci || $0 == oi }, lead: TableModel.REPLAY_LEAD, TL: sim.TL, TW: sim.TW, RAIL: camRail, POCKETS: sim.POCKETS)
+    rp = Replay(rec: rec, tab: sim.newTable(rec.balls.map { $0.copy() }, cue: rec.ball), lead: -TableModel.REPLAY_LEAD, camT: -TableModel.REPLAY_LEAD, moments: moments, keepOrient: orient, plan: plan)
     orient = rec.orient; pots = []; effects = []
   }
   /* endReplay: the live table back exactly as it was */
@@ -250,8 +249,42 @@ final class TableModel {
       }
       if !live { R.end = true }
     } else if R.end { R.hold += dt }
+    R.camT = R.struck ? R.tab.t + R.hold : R.lead
     rp = R
-    if R.end && R.hold >= 0.4 { endReplay() }
+    if R.end && (R.hold >= 1.5 || (R.hold >= 0.4 && abs(cam.z - 1) < 0.01)) { endReplay() }
+  }
+  /* 3b, the camera (Camera.swift): its state, and the prediction of the shot last struck (camPred) */
+  @ObservationIgnored private(set) var cam = (z: 1.0, x: 0.0, y: 0.0, vz: 0.0, vx: 0.0, vy: 0.0)
+  @ObservationIgnored private var camPred: Cam.Pred?
+  @ObservationIgnored private var camLast: TimeInterval?
+  /* the view's rail (RAIL), for camPlan's framing */
+  private var camRail: Double { Mapper(size: stageSize, TL: sim.TL, TW: sim.TW).rail }
+  /* the fitted view under the camera (camView) */
+  func camView(_ m: Mapper) -> Mapper { m.cam(cam.z, cam.x, cam.y) }
+  /* camStep: once a frame, the camera toward where the shot, the replay or the turn wants it. The prediction is stepped
+     only with Follow on (the replay finishes one itself), so Fixed costs the frame nothing */
+  private func camStep(_ now: TimeInterval) {
+    let dtMs = min(50, max(0, (now - (camLast ?? now)) * 1000))
+    camLast = now
+    let follow = Prefs.camera == "auto"
+    if follow, let P = camPred, !P.done { Cam.step(sim, P, 0.004) }
+    if let P = camPred, P.done, P.plan == nil { P.plan = Cam.plan(P.tr, Cam.LIVE, nil, TL: sim.TL, TW: sim.TW, RAIL: camRail, POCKETS: sim.POCKETS) }
+    var want: [Double]? = nil
+    if !follow { want = nil }
+    else if let R = rp { want = Cam.at(R.plan, R.camT) }
+    else if let tab = rolling, let P = camPred, let pl = P.plan, P.id == lastShot?.id { want = Cam.at(pl, tab.t) }
+    else if rolling != nil || stroke != nil { want = [1, cam.x, cam.y] }
+    if want == nil {
+      /* off, or a turn: z = 1 (what is left after a shot's tail is under 3%: let it go) */
+      if !follow || abs(cam.z - 1) < 0.03 { cam = (1, cam.x, cam.y, 0, 0, 0); return }
+      want = [1, cam.x, cam.y]
+    }
+    let w = want!, dt = min(50, dtMs) / 1000 * speed, W = rp != nil ? Cam.W * 1.2 : Cam.W
+    (cam.z, cam.vz) = Cam.spring(cam.z, cam.vz, w[0], W, dt)
+    (cam.x, cam.vx) = Cam.spring(cam.x, cam.vx, w[1], W, dt)
+    (cam.y, cam.vy) = Cam.spring(cam.y, cam.vy, w[2], W, dt)
+    if cam.z < 1 { cam.z = 1; cam.vz = max(0, cam.vz) }
+    if w[0] == 1 && abs(cam.z - 1) < 1e-4 && abs(cam.vz) < 1e-3 { cam.z = 1; cam.vz = 0 }
   }
   /* the cue in a replay: at address, drawn back by the power, through the ball, then the follow-through fade */
   var replayCue: (x: Double, y: Double, ang: Double, gap: Double, alpha: Double)? {
@@ -1028,7 +1061,9 @@ final class TableModel {
     /* shotRecord: what the shot needs to be played again, and the game as it stood (notableOf) */
     /* a career match without simulation purity: the skills' execution jitter (6d, careerExec) */
     let ex = careerExec(aim, pw, spin)
-    lastShot = ShotRec(balls: balls.map { $0.copy() }, angle: ex.angle, power: ex.power, spin: ex.spin, ball: cueN, g: g, orient: orient); offer = nil
+    shotN += 1
+    lastShot = ShotRec(balls: balls.map { $0.copy() }, angle: ex.angle, power: ex.power, spin: ex.spin, ball: cueN, g: g, orient: orient, id: shotN); offer = nil
+    camPred = Cam.predict(sim, id: shotN, balls: balls, ball: cueN, angle: ex.angle, power: ex.power, spin: ex.spin)
     let tab = sim.newTable(balls, cue: cueN)
     if let c = cue { lastCue = (c.x, c.y, aim) }
     sim.strike(tab, ex.angle, ex.power, ex.spin)
@@ -1125,8 +1160,9 @@ final class TableModel {
     let tt0 = CACurrentMediaTime()
     defer { if TableModel.fpsOn { let d = CACurrentMediaTime() - tt0; if d > 0.1 { print(String(format: "felt-fps slow tick %.0f ms", d * 1000)) } } }
     defer { frame &+= 1 }
-    if paused { lastT = nil; return }
+    if paused { lastT = nil; camLast = nil; return }
     self.now = now
+    defer { camStep(now) }
     stepAutoAim()
     stepPlaceBack()
     liftStep(now)

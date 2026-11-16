@@ -47,6 +47,9 @@ enum Prefs {
   }
   /* After the Shot (settings.viewAfter): 'pull' to the overview, 'top' the roll top-down, 'stay' the aiming pose */
   static var viewAfter: String { str("viewAfter", "pull") }
+  /* Camera (settings.camera, 3b): 'auto' Follow, 'off' Fixed. The follow camera is opt-in (it gave players vertigo): a
+     choice is kept only with camV 2, which its control writes with it */
+  static var camera: String { let c = str("camera", "off"); return int("camV", 0) == 2 && ["auto", "off"].contains(c) ? c : "off" }
   static var viewPitch: Double { min(V3.PITCH[1], max(V3.PITCH[0], d.object(forKey: "felt.settings.viewPitch") as? Double ?? V3.PITCH0)) }
   static var viewDist: Double { min(V3.DIST[1], max(V3.DIST[0], d.object(forKey: "felt.settings.viewDist") as? Double ?? V3.DIST0)) }
   static func mine(_ slot: String) -> String { str("look." + slot, LOOK_DEFAULT[slot]!) }
@@ -97,6 +100,8 @@ struct SettingsView: View {
   @AppStorage("felt.settings.view") private var tableView = "top"
   @AppStorage("felt.settings.intro") private var intro = true
   @AppStorage("felt.settings.viewAfter") private var viewAfter = "pull"
+  @AppStorage("felt.settings.camera") private var camera = "off"
+  @AppStorage("felt.settings.camV") private var camV = 0
   @AppStorage("felt.settings.look.cloth") private var lookCloth = "green"
   @AppStorage("felt.settings.look.cue") private var lookCue = "house"
   @AppStorage("felt.settings.look.chalk") private var lookChalk = "blue"
@@ -187,6 +192,10 @@ struct SettingsView: View {
     Section {
       Picker("After the Shot", selection: $viewAfter) { Text("Pull Back").tag("pull"); Text("Top Down").tag("top"); Text("Stay").tag("stay") }.pickerStyle(.segmented).labelsHidden()
     } header: { Text("After the Shot") } footer: { Text("In 3D, once the cue strikes. Pull Back rises smoothly to a view of the whole table, holds it while the balls roll, then comes back down behind the cue ball. Top Down shows the roll on the flat table. Stay keeps your aiming view. Your pitch and distance are always kept.") }
+    /* #camAuto, #camOff: the choice saved with camV 2 (loadSettings keeps no other) */
+    Section {
+      Picker("Camera", selection: Binding(get: { camV == 2 && ["auto", "off"].contains(camera) ? camera : "off" }, set: { camV = 2; camera = $0 })) { Text("Follow").tag("auto"); Text("Fixed").tag("off") }.pickerStyle(.segmented).labelsHidden()
+    } header: { Text("Camera") } footer: { Text("Follow moves in a little on the action while the balls roll, and close on replays. Aiming always shows the whole table.") }
     Section {
       Picker("Replays", selection: $replays) { Text("Offer").tag(true); Text("Never").tag(false) }.pickerStyle(.segmented).labelsHidden()
     } header: { Text("Replays") } footer: { Text("Offer puts a Replay pill over the table after a shot. Never keeps the table clear after every shot.") }

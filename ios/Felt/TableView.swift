@@ -59,7 +59,10 @@ func ballColor(_ n: Int) -> (Int, Int, Int) {
    bed and its rails (RAIL from railFor), centred. Upright on a phone held upright, the head string at
    the foot of the screen. */
 struct Mapper {
-  let k: Double, ox: Double, oy: Double, upright: Bool, TL: Double, TW: Double, rail: Double
+  private(set) var k: Double, ox: Double, oy: Double
+  let upright: Bool, TL: Double, TW: Double, rail: Double
+  /* the camera's zoom (3b, view.z): 1 for the fitted view */
+  private(set) var z = 1.0
   /* tableExt: how far the rails (never the bed) may run past the stage into a safe-area inset on each side (the status
      bar or the island; never the controls' side or the foot). The stage's canvas is drawn that much bigger on those sides,
      so its coordinates start at the inset's edge: the safe stage begins at (l, t). */
@@ -124,6 +127,20 @@ struct Mapper {
   }
   /* a table angle as a screen angle */
   func screenAngle(_ a: Double) -> Double { upright ? atan2(-cos(a), sin(a)) : a }
+  /* camRect (3b): the window the camera shows, the table's footprint at z = 1 (the rail's outer edge) */
+  var camRect: CGRect {
+    let a = pt(-rail, -rail), b = pt(TL + rail, TW + rail)
+    return CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
+  }
+  /* camView (3b): this (fitted) view at zoom z about table point (x, y), the centre clamped so the table covers camRect */
+  func cam(_ z: Double, _ x: Double, _ y: Double) -> Mapper {
+    guard z > 1 else { return self }
+    let R = camRect, hw = Double(R.width) / 2, hh = Double(R.height) / 2, f = pt(x, y)
+    let fx = clamp(Double(f.x), Double(R.minX) + hw / z, Double(R.maxX) - hw / z), fy = clamp(Double(f.y), Double(R.minY) + hh / z, Double(R.maxY) - hh / z)
+    var m = self
+    m.k = k * z; m.ox = Double(R.minX) + hw + z * (ox - fx); m.oy = Double(R.minY) + hh + z * (oy - fy); m.z = z
+    return m
+  }
 }
 
 struct TableCanvas: View {
@@ -139,10 +156,16 @@ struct TableCanvas: View {
       defer { if TableModel.aimBench || TableModel.touchBench { Bench.draw(CACurrentMediaTime() - dt0) } }
       _ = model.frame
       TouchLog.add(String(format: "draw aim %.5f cue %.4f %.4f", model.aim, model.cue?.x ?? -1, model.cue?.y ?? -1))
-      let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW)
+      let s = model.sim, base = Mapper(size: size, TL: s.TL, TW: s.TW), m = model.camView(base)
       /* the last baked table, even for another size while this one bakes (never a blank frame) */
       if let img = model.tableImage {
         ctx.draw(Image(decorative: img.image, scale: img.scale), in: CGRect(origin: .zero, size: size))
+        /* zoomed (3b, camTable): the table again under the camera (the fitted image scaled up), and everything after
+           clipped to its window */
+        if m.z > 1 {
+          ctx.clip(to: Path(base.camRect))
+          ctx.draw(Image(decorative: img.image, scale: img.scale), in: CGRect(x: m.ox - m.z * base.ox, y: m.oy - m.z * base.oy, width: Double(size.width) * m.z, height: Double(size.height) * m.z))
+        }
       }
       /* drawCast's shadows, then the balls (4b), each composited from its own image at device px */
       let sc = Double(scale), bp = model.ballPainter(upright: m.upright, scale: scale), rb = s.BALL_R * m.k * sc
@@ -175,8 +198,10 @@ struct TableCanvas: View {
       drawFx(&ctx, m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       ctx.scaleBy(x: sc, y: sc)
-      drawPotRail(&ctx, m, bp)
-      drawRail(&ctx, m, bp)
+      /* the rail row and the potted windows sit on the fitted view (the page's DOM over the canvas); the windows hide
+         while zoomed (potTick: cam.z > 1.02) */
+      if m.z <= 1.02 { drawPotRail(&ctx, base, bp) }
+      drawRail(&ctx, base, bp)
       drawCall(&ctx, m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       /* the cue (4f): pulled back by power while aiming, driven through during the stroke, carried a

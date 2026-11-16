@@ -555,7 +555,7 @@ struct TableScreen: View {
     /* the rail's 3D switch: a 44 pt target round its glyph; the tap is the switch's, the rest of it eaten */
     if began, let c = model.railSwitch, abs(at.x - c.x) < 22, abs(at.y - c.y) < 22 { model.toggleView(); tch.eating = true; return }
     if began { model.hideOffer() }
-    let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW), tm = TouchMap(model, m)
+    let s = model.sim, m = model.camView(Mapper(size: size, TL: s.TL, TW: s.TW)), tm = TouchMap(model, m)
     model.uprightView = m.upright
     let (x, y) = tm.table(at)
     /* bumper pool: a touch on one of the shooter's own balls strikes that one from now on (pickBall) */
@@ -643,7 +643,7 @@ struct TableScreen: View {
   /* the let-go: a tap aims at the spot (an object ball's centre within tapReach), a sweep may restore its lift jitter */
   private func touchEnd(_ at: CGPoint, _ time: TimeInterval, _ size: CGSize) {
     guard var g = tch.gest, !tch.placing, !tch.picking, model.rolling == nil, let c = model.cue else { return }
-    let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW), tm = TouchMap(model, m), t = time * 1000
+    let s = model.sim, m = model.camView(Mapper(size: size, TL: s.TL, TW: s.TW)), tm = TouchMap(model, m), t = time * 1000
     /* in 3D (v3Drag) a let-go that neither swept nor tilted is a tap, read through the camera (v3Table) */
     if tm.cam != nil ? (!g.sweep && !g.held) : (!g.sweep || (!g.held && g.far <= AimFeel.TAP_SLOP && t - g.t0 < AimFeel.TAP_MS)) {
       let p = g.p0, (x, y) = tm.table(p)
