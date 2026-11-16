@@ -457,8 +457,9 @@ struct TableScreen: View {
           screen(W: W, H: H, ins: ins, upright: H > W)
             .frame(width: W, height: H)
         }
-        /* the call's menu and the elevation sheet, placed in the window by their controls' frames */
-        PopLayer(model: model, W: W, H: H, turn: side ? (ccw ? -1 : 1) : 0)
+        /* the elevation sheet and its tip, placed in the window by the pad's frame (the call's menu is over everything:
+           the last overlay) */
+        PopLayer(model: model, W: W, H: H, turn: side ? (ccw ? -1 : 1) : 0, call: false)
       }
       .offset(x: -ins.leading, y: -ins.top)
     }
@@ -467,7 +468,7 @@ struct TableScreen: View {
     .onChange(of: reduceMotion) { _, v in model.reduceMotion = v || Prefs.reduceMotion }
     .overlay(alignment: .topTrailing) { if model.prac != nil && !model.paused { PracticeTools(model: model).padding(.top, 8).padding(.trailing, 12) } }
     .onChange(of: model.spinOk) { _, ok in if !ok { model.elevOpen = false; model.hideElevTip() } }
-    .onChange(of: model.paused) { _, p in if p { model.hideElevTip() } }
+    .onChange(of: model.paused) { _, p in if p { model.hideElevTip(); model.callMenu = false } }
     .onChange(of: tableView) { _, v in model.syncView(v == "3d") }
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
     .overlay(alignment: .top) { CalloutView(model: model).padding(.top, 0) }
@@ -491,6 +492,16 @@ struct TableScreen: View {
       if model.exhib != nil && !model.paused {
         Picker("Speed", selection: Binding(get: { model.speed }, set: { model.speed = $0 })) { Text("1x").tag(1.0); Text("2x").tag(2.0); Text("4x").tag(4.0) }
           .pickerStyle(.segmented).frame(width: 180).padding(.top, 54).accessibilityIdentifier("exhibit-speed")
+      }
+    }
+    /* the call's menu (#callBar, a .seg.pop.open: z-index 60) over every other table overlay: the strip and the rail row,
+       the tools, the coach card, the callout, the replay pill, the elevation sheet; placed in the window by the bar's frame */
+    .overlay {
+      GeometryReader { geo in
+        let ins = geo.safeAreaInsets, W = geo.size.width + ins.leading + ins.trailing, H = geo.size.height + ins.top + ins.bottom
+        let side = W > H && H < 600, ccw = side && (ins.leading != ins.trailing ? ins.leading > ins.trailing : interface != .landscapeLeft)
+        PopLayer(model: model, W: W, H: H, turn: side ? (ccw ? -1 : 1) : 0, call: true)
+          .offset(x: -ins.leading, y: -ins.top)
       }
     }
     .tint(.primary)
@@ -927,6 +938,8 @@ struct TableScreen: View {
 struct PopLayer: View {
   let model: TableModel
   let W: CGFloat, H: CGFloat, turn: Int
+  /* which: the call's menu (drawn over every other overlay), or the elevation sheet and its tip */
+  let call: Bool
   @State private var menuH: CGFloat = 0
   @State private var elevSize = CGSize.zero
   @State private var tipSize = CGSize.zero
@@ -936,7 +949,7 @@ struct PopLayer: View {
   private var up: Int { turn != 0 || H > W ? 1 : 0 }
   var body: some View {
     ZStack(alignment: .topLeading) {
-      if model.elevOpen && model.spinOk && !model.paused {
+      if !call && model.elevOpen && model.spinOk && !model.paused {
         Color.black.opacity(0.001).onTapGesture { model.elevOpen = false }
         let at = padAt(elevSize)
         ElevPop(model: model).fixedSize()
@@ -948,7 +961,7 @@ struct PopLayer: View {
           .padding(.leading, at.x).padding(.top, at.y)
       }
       /* #elevTip: by the pad as the elevation sheet stands, 12 from it (placeElevTip), once ever */
-      if model.elevTip && !model.elevOpen && !model.paused {
+      if !call && model.elevTip && !model.elevOpen && !model.paused {
         let at = padAt(tipSize, gap: 12)
         ElevTip(model: model).frame(width: min(300, W - 32))
           .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { f in
@@ -958,7 +971,8 @@ struct PopLayer: View {
           .opacity(tipSize == .zero ? 0 : 1)
           .padding(.leading, at.x).padding(.top, at.y)
       }
-      if model.callMenu && model.callMenuOffered {
+      /* never over the pause menu or the handoff (the page's hudCall closes it when the turn is not the player's to aim) */
+      if call && model.callMenu && model.callMenuOffered && !model.paused && model.handoff == nil {
         Color.black.opacity(0.001).onTapGesture { model.callMenu = false }
         let at = menuAt()
         CallMenu(model: model, maxH: H - 16, natural: $menuH)
