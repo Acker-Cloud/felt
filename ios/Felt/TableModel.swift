@@ -1231,6 +1231,11 @@ final class TableModel {
   @ObservationIgnored private(set) var keyMove = false
   var keyMsg = ""
   var human: Bool { !cpuTurn && g?.winner == nil && rolling == nil && stroke == nil }
+  /* the page's state as hudControls reads it (BarWords): the shot under way, the CPU's turn, a choice, the aim */
+  var barState: BarWords.State {
+    guard let gm = g, gm.winner == nil else { return .over }
+    return stroke != nil ? .stroke : rolling != nil ? .rolling : cpuTurn ? .thinking : gm.option != nil ? .choose : .aim
+  }
   func key(_ k: String, shift: Bool, alt: Bool) -> Bool {
     if keyPull != nil { cancelKeyPull(); return true }
     /* Esc lets a held pointer aim go before it pauses */

@@ -1158,7 +1158,8 @@ struct FineWheel: View {
       }
       .clipShape(RoundedRectangle(cornerRadius: 12))
       .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(live ? Color(rgb: 0xec, 0xec, 0xee) : Color(rgb: 0x6b, 0x6b, 0x74), lineWidth: 1))
-      .opacity(model.rolling != nil ? 0.5 : 1)
+      /* #fineWheel.off: dimmed whenever the turn is not the player's to aim, and through a replay */
+      .opacity(BarWords.wheelOff(model.barState, human: model.human, replay: model.rp != nil) ? 0.5 : 1)
       .frame(minWidth: upright ? 44 : 64, maxWidth: upright ? 96 : .infinity, minHeight: upright ? 56 : 112, maxHeight: upright ? .infinity : 200)
       .layoutPriority(upright ? 0 : 1)
       .contentShape(Rectangle())
@@ -1342,7 +1343,11 @@ struct PowerBar: View {
   var body: some View {
     let _ = Bench.hit("PowerBar")
     GeometryReader { g in
-      let len = upright ? g.size.width : g.size.height, p = CGFloat(model.power), live = p > 0
+      /* live: the player's own pull (the page's pull); the CPU's draw-back and a stroke under way leave the bar empty */
+      let live = model.power > 0 && model.barState == .aim && model.human, len = upright ? g.size.width : g.size.height, p = live ? CGFloat(model.power) : 0
+      /* hudControls' label (BarWords): aimMe the player's aim, not pulled, no replay */
+      let aimMe = model.rp == nil && !live && model.barState == .aim && model.human
+      let lab = BarWords.lab(model.barState, human: model.human, replay: model.rp != nil, live: live, pct: Int((p * 100).rounded()), call: aimMe ? model.callLab(upright: upright) : nil, ready: model.callReady)
       let fill: [Gradient.Stop] = p > 0.85 ? [.init(color: Color(rgb: 0xcf, 0xc6, 0xb2), location: 0), .init(color: Color(rgb: 0xec, 0xe4, 0xd2), location: 0.6), .init(color: Color(rgb: 0xc0, 0x39, 0x2b), location: 1)]
         : [.init(color: Color(rgb: 0xcf, 0xc6, 0xb2), location: 0), .init(color: Color(rgb: 0xec, 0xe4, 0xd2), location: 1)]
       ZStack(alignment: upright ? .leading : .top) {
@@ -1362,15 +1367,16 @@ struct PowerBar: View {
         if live {
           Text("\(Int((p * 100).rounded()))%").font(.system(size: 13, weight: .bold)).monospacedDigit().foregroundStyle(Color(rgb: 0xec, 0xec, 0xee))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: upright ? .trailing : .bottom).padding(upright ? .trailing : .bottom, 10)
-        } else if model.rolling == nil, !model.cpuTurn, let lab = model.callLab(upright: upright) ?? (model.callReady ? nil : "Call your shot") {
+        } else if aimMe, !BarWords.idle(lab) {
           /* the call is the bar's own label (callLab): "10 · Top Left", "Safety", "Push Out", or Call your shot */
           HStack(spacing: 6) {
             Text(lab).font(.system(size: 15, weight: .semibold)).lineLimit(1).truncationMode(.tail)
               .foregroundStyle(model.callReady ? Color(rgb: 0xec, 0xec, 0xee) : Color(rgb: 0xff, 0xd5, 0x8a))
           }
           .padding(.leading, 12).padding(.trailing, model.callMenuOffered ? 26 : 12).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        } else if model.rolling != nil || model.rp != nil {
-          Text(model.rp != nil ? "Replay" : "Rolling").font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if !BarWords.idle(lab) {
+          /* the turn's words where they inform: Replay, Rolling, CPU thinking, Your choice (nothing once the game is over) */
+          Text(lab).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
           TimelineView(.animation(minimumInterval: 1 / 30, paused: still || model.paused)) { tl in
             /* pullShimmer: 2.6 s, a band 35% long from -60% to 160% over the first 70%, ease-in-out */
@@ -1430,7 +1436,14 @@ struct PowerBar: View {
     .accessibilityLabel("Power")
     .accessibilityIdentifier("power")
     /* aria-valuetext: the call's words with the percentage while a call is open (callSay) */
-    .accessibilityValue(model.rolling != nil ? "Rolling" : model.callMenuOffered ? "\(model.callLab(upright: upright) ?? "Call your shot"), \(model.callWarnNow.isEmpty ? "" : model.callWarnNow + ", ")\(Int(model.power * 100)) percent" : "\(Int(model.power * 100)) percent")
+    .accessibilityValue(barWords ?? (model.callMenuOffered ? "\(model.callLab(upright: upright) ?? "Call your shot"), \(model.callWarnNow.isEmpty ? "" : model.callWarnNow + ", ")\(Int(model.power * 100)) percent" : "\(Int(model.power * 100)) percent"))
+  }
+  /* the bar's words for VoiceOver off the player's aim (powerLab's text): Replay, Rolling, CPU thinking, Your choice */
+  private var barWords: String? {
+    let st = model.barState
+    guard !(model.power > 0 && st == .aim && model.human) else { return nil }
+    let l = BarWords.lab(st, human: model.human, replay: model.rp != nil, live: false, pct: 0, call: nil, ready: true)
+    return [BarWords.REPLAY, BarWords.ROLL, BarWords.THINK, BarWords.CHOOSE].contains(l) ? l : nil
   }
 }
 

@@ -19,8 +19,9 @@ final class PlayTests: XCTestCase {
     start.press(forDuration: 0.1, thenDragTo: bar.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)))
     XCTAssertTrue(NSPredicate(format: "value == %@", "Rolling").evaluate(with: bar), "the bar's release shoots: \(String(describing: bar.value))")
     let mid = XCTAttachment(screenshot: app.screenshot()); mid.name = "break-rolling"; mid.lifetime = .keepAlways; add(mid)
-    /* the break comes to rest within the sim's 60 s */
-    expectation(for: NSPredicate(format: "value == %@", "0 percent"), evaluatedWith: bar)
+    /* the break comes to rest within the sim's 60 s: the player's bar again, or the CPU's turn after a dry break (the bar
+       reads CPU thinking, hudControls) */
+    expectation(for: NSPredicate(format: "value IN %@", ["0 percent", "CPU thinking"]), evaluatedWith: bar)
     waitForExpectations(timeout: 65)
     let end = XCTAttachment(screenshot: app.screenshot()); end.name = "break-rest"; end.lifetime = .keepAlways; add(end)
   }
@@ -54,7 +55,25 @@ final class PlayTests: XCTestCase {
     table.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
     expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: skip)
     waitForExpectations(timeout: 3)
-    XCTAssertEqual(bar.value as? String, "0 percent")
+    /* the bar is the turn's again: the CPU's after a dry break (its think held), else the player's */
+    XCTAssertTrue(["CPU thinking", "0 percent"].contains(bar.value as? String ?? ""), String(describing: bar.value))
+  }
+
+  /* hudControls on the CPU's turn (T7.170): while the CPU thinks the bar is not idle, it says CPU thinking (VoiceOver
+     reads the words), and a real pull on it is never the player's: it still reads the CPU's words. An exhibition's
+     break, its think held (-felt-cputhink 8000) so every read lands in it */
+  @MainActor func testCpuThinkingBar() throws {
+    let app = XCUIApplication()
+    app.launchArguments = ["-felt-exhibit", "8-Ball", "-felt-cputhink", "8000"]
+    app.launch()
+    let table = app.otherElements["table"], bar = app.otherElements["power"]
+    XCTAssertTrue(table.waitForExistence(timeout: 10))
+    XCTAssertTrue(bar.waitForExistence(timeout: 5))
+    expectation(for: NSPredicate(format: "value == %@", "CPU thinking"), evaluatedWith: bar)
+    waitForExpectations(timeout: 5)
+    let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "cpu-thinking"; shot.lifetime = .keepAlways; add(shot)
+    bar.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)).press(forDuration: 0.1, thenDragTo: bar.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.5)), withVelocity: 300, thenHoldForDuration: 0.3)
+    XCTAssertEqual(bar.value as? String, "CPU thinking")
   }
 
   /* 5c at 10-ball past the break: the bar says Call your shot and does not arm; a tap on it opens the call's menu with
