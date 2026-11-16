@@ -64,6 +64,48 @@ public enum PotRail {
     return Plan(sides: sides, s: sz, ball: ball, up: up, k: Bk, half: M.max(0.3, wk / 2 - 1) / Bk)
   }
 
+  /* potGame: the windows (and #potSay) at all: 8, 9, 10-ball and Chinese 8-ball, a game with no mode or practice; never
+     a trick shot, a drill, the lesson or a tutorial */
+  public static let KINDS = ["8", "9", "10", "heyball"]
+  public static func on(kind: String, mode: String?, tutorial: Bool, lesson: Bool) -> Bool {
+    KINDS.contains(kind) && !tutorial && !lesson && (mode == nil || mode == "practice")
+  }
+  /* potTick's pw.order: the balls down (off) in pot order: one back on the table leaves it, the new ones join at the end
+     (two in one look by number) */
+  public static func order(_ prev: [Int], off: [Int]) -> [Int] {
+    var o = prev.filter { off.contains($0) }
+    for n in off.filter({ !o.contains($0) }).sorted() { o.append(n) }
+    return o
+  }
+  /* potSeats: which window each ball down goes in, (n, side, index) in pot order. counts: each side's slots. 8-ball
+     (is8): solids up the left, stripes up the right, the 8 up its potter's group's side (eightRight: stripes); else
+     in pot order up the left, then the right. A ball with no slot left has no window (its number is still read) */
+  public static func seats(_ order: [Int], eight: Bool, eightRight: Bool, counts: [Int]) -> [(n: Int, side: Int, i: Int)] {
+    var out: [(n: Int, side: Int, i: Int)] = []
+    if eight {
+      var n8 = [0, 0]
+      for n in order {
+        let side = n == 8 ? (eightRight ? 1 : 0) : n > 8 ? 1 : 0
+        if n8[side] < counts[side] { out.append((n, side, n8[side])); n8[side] += 1 }
+      }
+    } else {
+      for (i, n) in order.enumerated() {
+        if i < counts[0] { out.append((n, 0, i)) } else if i - counts[0] < counts[1] { out.append((n, 1, i - counts[0])) }
+      }
+    }
+    return out
+  }
+  /* #potSay's place for VoiceOver ([x0, y0, x1, y1], nil: nowhere to put it). The page's is visually hidden and holds
+     every ball down whatever the windows show (zoomed, a ball still dropping, a window faded or off the stage); here an
+     element needs a frame: the windows shown on the first side showing any (never across the table between the rails),
+     else where the balls' windows are planned (the fitted view's slots: zoomed, still dropping) */
+  public static func sayBox(shown: [[[Double]]], planned: [[[Double]]]) -> [Double]? {
+    for list in [shown[0], shown[1], planned[0], planned[1]] where !list.isEmpty {
+      return list.dropFirst().reduce(list[0]) { [M.min($0[0], $1[0]), M.min($0[1], $1[1]), M.max($0[2], $1[2]), M.max($0[3], $1[3])] }
+    }
+    return nil
+  }
+
   /* the roll in (potTick's animate): over POT_SLIDE_MS on the screen's clock the ball comes up the rail from the window
      below and its number round to the front, both on cubic-bezier(.25, .8, .35, 1), while the window's opacity goes 0
      to 1 by 35% of the way (linear). ms since the window first showed; e the eased progress (the ball's offset is

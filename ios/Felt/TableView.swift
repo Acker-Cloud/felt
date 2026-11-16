@@ -933,6 +933,22 @@ struct TableCanvas: View {
     }
   }
 
+  /* potPlan and potSeats (6b3): the slots for this view (live: 3D's long rails laid out upright) and each ball down's
+     slot, in pot order */
+  func potSeats(_ m: Mapper, live: Bool) -> (PotRail.Plan, [(Int, PotRail.Slot, Int)]) {
+    let T = model.potGeometry(m), band = T.railBand
+    /* potPlan: the slots, packed for POT_PER_RAIL between the holes (RAIL_PAD) and sights (POT_SIGHT_PAD) */
+    let P = PotRail.plan(model.sim, k: m.k, ox: m.ox, oy: m.oy, portrait: m.upright, live: live, rail: band.rail, co: band.co, sights: T.railSights())
+    let eightRight = model.g.map { $0.groups[model.potBy[8] ?? 0] == "stripes" } ?? false
+    let seats = PotRail.seats(model.potOrder, eight: is8(model.g?.kind ?? ""), eightRight: eightRight, counts: P.sides.map(\.count))
+    return (P, seats.map { ($0.n, P.sides[$0.side][$0.i], $0.side) })
+  }
+  /* #potSay's element: the words of every ball down, over box (sayBox), else at the fitted table's left rail */
+  func potSay(_ m: Mapper, _ box: [Double]?) {
+    let r = box.map { CGRect(x: $0[0], y: $0[1], width: $0[2] - $0[0], height: $0[3] - $0[1]) } ?? CGRect(x: m.camRect.minX, y: m.camRect.midY - 22, width: 44, height: 44)
+    let ax = TableModel.SeatAX(id: "potted", rect: r, words: SeatWords.potted(model.potOrder))
+    if model.potAX != ax { model.potAX = ax }
+  }
   /* 6b3: the potted balls, each in a window of its own in the wood of the rails at the screen's left and right
      (potPlan's slots: the gaps between the holes and sights, packed for POT_PER_RAIL, filling from the foot), 8-ball's
      solids up the left and stripes up the right, the 8 up its potter's group's side; 9 and 10-ball in pot order up the
@@ -941,46 +957,28 @@ struct TableCanvas: View {
      windows on the long rails, each its slot on the rail top projected, none on the row or off the stage, faded where
      the cue, the loupe or a ball lies over it (potCovered). */
   func drawPotRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter, live: (C: V3.Cam, box: V3.Box, rowTop: Double)? = nil) {
-    /* potGame: a game with no mode, or practice; never a trick shot or a drill */
-    guard let g = model.g, !model.potOrder.isEmpty, g.mode == nil || g.mode == "practice", model.tut == nil else { if model.potAX != nil { model.potAX = nil }; return }
-    let s = model.sim, T = model.potGeometry(m), band = T.railBand
-    /* potPlan: the slots, packed for POT_PER_RAIL between the holes (RAIL_PAD) and sights (POT_SIGHT_PAD) */
-    let P = PotRail.plan(s, k: m.k, ox: m.ox, oy: m.oy, portrait: m.upright, live: live != nil, rail: band.rail, co: band.co, sights: T.railSights())
-    let sides = P.sides
-    /* potSeats */
-    var seats: [(Int, PotRail.Slot, Int)] = []
-    if is8(g.kind) {
-      var n8 = [0, 0]
-      for n in model.potOrder {
-        var side = n > 8 ? 1 : 0
-        if n == 8 { side = g.groups[model.potBy[8] ?? 0] == "stripes" ? 1 : 0 }
-        if n8[side] < sides[side].count { seats.append((n, sides[side][n8[side]], side)); n8[side] += 1 }
-      }
-    } else {
-      for (i, n) in model.potOrder.enumerated() {
-        if i < sides[0].count { seats.append((n, sides[0][i], 0)) } else if i - sides[0].count < sides[1].count { seats.append((n, sides[1][i - sides[0].count], 1)) }
-      }
-    }
-    /* VoiceOver (#potSay, issue #4): "Potted: 1, 3, 9", in pot order, one element over the windows of the first side
-       showing any (never the table between the rails) */
-    var shown: [[CGRect]] = [[], []]
-    defer {
-      let r = (shown[0].isEmpty ? shown[1] : shown[0]).reduce(CGRect.null) { $0.union($1) }
-      let ax = r.isNull ? nil : TableModel.SeatAX(id: "potted", rect: r, words: SeatWords.potted(model.potOrder))
-      if model.potAX != ax { model.potAX = ax }
-    }
+    /* potGame: a game with no mode, or practice; never a trick shot, a drill, the lesson or a tutorial */
+    guard model.potOn, !model.potOrder.isEmpty else { if model.potAX != nil { model.potAX = nil }; return }
+    let s = model.sim, (P, seats) = potSeats(m, live: live != nil)
+    /* VoiceOver (#potSay, issue #4): every ball down, "Potted: 1, 3, 9" in pot order, whichever windows show (shown, else
+       planned: a ball still dropping, a window faded or off the stage) */
+    var shown: [[[Double]]] = [[], []], planned: [[[Double]]] = [[], []]
+    defer { potSay(m, PotRail.sayBox(shown: shown, planned: planned)) }
     /* 3D: what may lie over a window (the cue as last drawn, the loupe while shown, the balls on the table) */
     let cueLen = CueGeo.of(game: model.game.table.2).len, now = model.now
     let lp = model.loupeA > 0.02 ? model.loupe.map { (x: $0.x, y: $0.y, r: $0.r) } : nil
     let onTable = live == nil ? [] : (model.rolling?.balls ?? model.balls).filter { $0.on }.map { (x: $0.x, y: $0.y, z: $0.z ?? 0) }
     let recess = Color(rgb: 16, 11, 8), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85), f = model.scaleFactor
     for (n, slot, side) in seats {
+      let fit = live.flatMap { PotRail.place(P, slot, $0.C, $0.box, z: s.cushionTop()) }
+      if live == nil { planned[side].append([slot.x - P.s / 2, slot.y - P.s / 2, slot.x + P.s / 2, slot.y + P.s / 2]) }
+      else if let f = fit { planned[side].append([f[0] - f[2] / 2, f[1] - f[2] / 2, f[0] + f[2] / 2, f[1] + f[2] / 2]) }
       if let t = model.potAt[n], model.now < t { continue }   /* still dropping into its pocket */
       var c = CGPoint(x: slot.x, y: slot.y), sz = P.s, ballD = P.ball, ctx = ctx
       /* the roll in starts the first time the window shows (one with no place then never rolls in) */
       let due = model.potSlideDue.remove(n) != nil
       if let L = live {
-        guard let f = PotRail.place(P, slot, L.C, L.box, z: s.cushionTop()) else { model.potHid[n] = nil; continue }
+        guard let f = fit else { model.potHid[n] = nil; continue }
         c = CGPoint(x: f[0], y: f[1]); sz = f[2]; ballD = Swift.max(5, (sz * P.ball / P.s).rounded())
         let r = sz / 2, cut = f[1] + r > L.rowTop - 2 || f[0] - r < 0 || f[0] + r > L.box.width || f[1] - r < 0
         let hid = cut || PotRail.covered(f[0], f[1], r, loupe: lp, cue: model.potCue, cueLen: cueLen, balls: onTable, L.C, L.box, R: s.BALL_R)
@@ -1008,7 +1006,7 @@ struct TableCanvas: View {
         ctx.opacity = sl.a   /* the animation's opacity stands in for .hid's while it runs */
       } else { model.potSlideT[n] = nil }
       let rr = CGRect(x: c.x - sz / 2, y: c.y - sz / 2, width: sz, height: sz)
-      shown[side].append(rr)
+      shown[side].append([rr.minX, rr.minY, rr.maxX, rr.maxY])
       ctx.fill(Path(ellipseIn: rr), with: .color(recess))
       ctx.stroke(Path(ellipseIn: rr), with: .color(edge), lineWidth: 1)
       if sl != nil { ctx.clip(to: Path(ellipseIn: rr)) }

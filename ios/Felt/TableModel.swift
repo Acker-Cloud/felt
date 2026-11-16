@@ -1889,15 +1889,18 @@ final class TableModel {
   @ObservationIgnored var potSlideDue: Set<Int> = []
   @ObservationIgnored var potSlideT: [Int: TimeInterval] = [:]
   @ObservationIgnored private var potTracking = false
+  /* potGame: the windows and their words at all (never a trick shot, a drill, the lesson or a tutorial) */
+  var potOn: Bool { g.map { PotRail.on(kind: $0.kind, mode: $0.mode, tutorial: tut != nil, lesson: lesson != nil) } ?? false }
   private func potTrack() {
     guard let gm = g, ["8", "9", "10", "heyball"].contains(gm.kind) else { potOrder = []; potTracking = false; potSlideDue = []; potSlideT = [:]; return }
     let src = rolling?.balls.map { ($0.n, $0.on) } ?? gm.balls.map { ($0.n, $0.on) }
     let off = src.filter { !$0.1 && $0.0 >= 1 && $0.0 <= 15 }.map { $0.0 }
     let fresh = !potTracking
     potTracking = true
-    potOrder = potOrder.filter { off.contains($0) }
-    for n in off.filter({ !potOrder.contains($0) }).sorted() {
-      potOrder.append(n); potBy[n] = gm.turn; potAt[n] = rolling != nil ? now + potMs : 0
+    let o = PotRail.order(potOrder, off: off), was = potOrder
+    potOrder = o
+    for n in o where !was.contains(n) {
+      potBy[n] = gm.turn; potAt[n] = rolling != nil ? now + potMs : 0
       potSlideT[n] = nil
       if !reduceMotion && !fresh { potSlideDue.insert(n) } else { potSlideDue.remove(n) }
     }
