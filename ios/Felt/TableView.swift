@@ -138,6 +138,7 @@ struct TableCanvas: View {
       defer { if TableModel.fpsOn { let d = CACurrentMediaTime() - dt0; if d > 0.1 { print(String(format: "felt-fps slow draw %.0f ms", d * 1000)) } } }
       defer { if TableModel.aimBench || TableModel.touchBench { Bench.draw(CACurrentMediaTime() - dt0) } }
       _ = model.frame
+      TouchLog.add(String(format: "draw aim %.5f cue %.4f %.4f", model.aim, model.cue?.x ?? -1, model.cue?.y ?? -1))
       let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW)
       /* the last baked table, even for another size while this one bakes (never a blank frame) */
       if let img = model.tableImage {

@@ -45,4 +45,17 @@ final class PlayTests: XCTestCase {
     XCTAssertTrue(pk.waitForExistence(timeout: 3), "a pull the call refuses opens the menu")
     XCTAssertEqual(bar.value as? String, "Call your shot, 0 percent", "and never shoots")
   }
+
+  /* real touch through the table's gesture, logged (-felt-touchlog): a slow aiming drag, then one carrying the cue
+     ball in hand on the break. The log is read from the app's tmp by the harness */
+  @MainActor func testTouchLog() throws {
+    let app = XCUIApplication()
+    app.launchArguments = ["-felt-game", "8-Ball", "-felt-touchlog"] + (ProcessInfo.processInfo.environment["FELT_ARGS"].map { $0.split(separator: " ").map(String.init) } ?? [])
+    app.launch()
+    let table = app.otherElements["table"]
+    XCTAssertTrue(table.waitForExistence(timeout: 10))
+    sleep(1)
+    table.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.3)).press(forDuration: 0.05, thenDragTo: table.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.35)), withVelocity: 150, thenHoldForDuration: 0.3)
+    sleep(1)
+  }
 }

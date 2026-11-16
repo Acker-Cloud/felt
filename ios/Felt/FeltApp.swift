@@ -12,7 +12,7 @@ struct FeltApp: App {
       Home().preferredColorScheme(.dark).statusBarHidden()
         /* at a table, an edge swipe takes two (the first only lights the home bar): set at the window's root too, where
            UIKit asks; the bar stays shown (a hidden bar is not deferred) */
-        .defersSystemGestures(on: Chrome.shared.atTable > 0 ? .all : [])
+        .defersSystemGestures(on: Chrome.shared.atTable > 0 && !Chrome.noDefer ? .all : [])
     }
   }
 }
@@ -394,8 +394,8 @@ struct TableScreen: View {
     .tint(.primary)
     .statusBarHidden()
     /* a swipe from an edge takes two at the table (the first only shows the home bar), as games do */
-    .defersSystemGestures(on: .all)
-    .focusable().focusEffectDisabled().focused($keys)
+    .defersSystemGestures(on: Chrome.noDefer ? [] : .all)
+    .focusable(!Chrome.noFocus).focusEffectDisabled().focused($keys)
     .onAppear { keys = true }
     /* `-felt-keybench`: keys through model.key (10 right, 2 up, Space with keyShoot, then the result printed) */
     .task {
@@ -469,13 +469,14 @@ struct TableScreen: View {
         .onAppear { model.bake(tg.size, scale: scale) }
         .onChange(of: tg.size) { _, s in model.bake(s, scale: scale) }
         .contentShape(Rectangle())
-        /* v3Pinch: two fingers move the 3D camera in or out (its distance by their spread, kept) */
+        /* v3Pinch: two fingers move the 3D camera in or out (its distance by their spread, kept). Only in 3D: a pinch
+           waiting to begin held back every event of the table's drag until the lift (measured on POSEIDON, -felt-touchlog) */
         .simultaneousGesture(MagnifyGesture().onChanged { v in
           guard model.view3d else { return }
           if tch.pinch0 == nil { tch.pinch0 = model.v3Dist; tch.gest = nil }
           model.v3Dist = min(V3.DIST[1], max(V3.DIST[0], tch.pinch0! / Double(v.magnification)))
-        }.onEnded { _ in tch.pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist") })
-        .gesture(DragGesture(minimumDistance: 0).onChanged { v in model.touching = true; if tch.pinch0 == nil { touch(v.location, v.time.timeIntervalSinceReferenceDate, tg.size, began: tch.gest == nil && !tch.eating && !tch.picking && !tch.placing) } }
+        }.onEnded { _ in tch.pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist") }, including: model.view3d && !Chrome.noMag ? .all : .subviews)
+        .gesture(DragGesture(minimumDistance: 0).onChanged { v in TouchLog.add(String(format: "ev %.4f %.1f %.1f", v.time.timeIntervalSinceReferenceDate, v.location.x, v.location.y)); model.touching = true; if tch.pinch0 == nil { touch(v.location, v.time.timeIntervalSinceReferenceDate, tg.size, began: tch.gest == nil && !tch.eating && !tch.picking && !tch.placing) } }
           .onEnded { v in lift(v.location, v.time.timeIntervalSinceReferenceDate, tg.size) })
         /* a test hook: `-felt-touchbench` sweeps a synthetic finger through touch() at 120 Hz (a press, an arc, a lift, every 2 s) */
         .task(id: tg.size) { if TableModel.touchBench { await touchBench(tg.size) } }
@@ -496,6 +497,7 @@ struct TableScreen: View {
   private func lift(_ at: CGPoint, _ time: TimeInterval, _ size: CGSize) {
     let tt0 = CACurrentMediaTime()
     defer { if TableModel.touchBench { let d = (CACurrentMediaTime() - tt0) * 1000; if d > 8 { print(String(format: "felt-bench slow lift %.1f ms", d)) } } }
+    TouchLog.add("lift"); defer { TouchLog.flush() }
     if tch.eating { tch.eating = false } else { touchEnd(at, time, size) }
     tch.placing = false; tch.picking = false; tch.gest = nil; model.touching = false; model.placeEnd()
   }
@@ -595,6 +597,7 @@ struct TableScreen: View {
     if t - g.t0 >= AimFeel.HOLD_MS && g.far > AimFeel.HOLD_SLOP { g.held = true }
     if g.sweep { if !g.shown { model.takeAim() }; g.shown = true; turnTo(&g, b, t, m, c) }
     tch.gest = g
+    TouchLog.add(String(format: "aim %.5f sweep %d", model.aim, g.sweep ? 1 : 0))
   }
   /* v3Drag: across turns the aim (rate by finger speed, 0.02 to 0.3 deg a point), up and down tilts (0.25 deg a point) */
   private func drag3d(_ g: inout AimGesture, _ b: CGPoint, _ t: Double) {
@@ -2793,6 +2796,9 @@ struct LinkTimeline<Content: View>: View {
 @MainActor @Observable final class Chrome {
   static let shared = Chrome()
   var atTable = 0
+  static let noMag = ProcessInfo.processInfo.arguments.contains("-felt-nomag")
+  static let noFocus = ProcessInfo.processInfo.arguments.contains("-felt-nofocus")
+  static let noDefer = ProcessInfo.processInfo.arguments.contains("-felt-nodefer")
   /* UIKit re-reads the edges only when told: tell every controller from the root to the table's cover */
   static func refresh() {
     guard var vc = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first?.rootViewController else { return }
@@ -2807,5 +2813,21 @@ struct LinkTimeline<Content: View>: View {
     var out = ["root \(vc.preferredScreenEdgesDeferringSystemGestures.rawValue) hidden \(vc.prefersHomeIndicatorAutoHidden)"]
     while let p = vc.presentedViewController { vc = p; out.append("presented \(type(of: p)) \(p.preferredScreenEdgesDeferringSystemGestures.rawValue) hidden \(p.prefersHomeIndicatorAutoHidden)") }
     print("felt-edges " + out.joined(separator: "; "))
+  }
+}
+
+/* a test hook: `-felt-touchlog` writes the real gesture's events, the aim after each, and each drawn frame's aim and
+   cue ball to tmp/touchlog.txt (read back by the UI tests) */
+@MainActor enum TouchLog {
+  static let on = ProcessInfo.processInfo.arguments.contains("-felt-touchlog")
+  static var lines: [String] = []
+  static func add(_ l: @autoclosure () -> String) {
+    guard on else { return }
+    lines.append(String(format: "%.4f ", Date.timeIntervalSinceReferenceDate) + l())
+    if lines.count % 50 == 0 { flush() }
+  }
+  static func flush() {
+    guard on else { return }
+    try? lines.joined(separator: "\n").write(to: FileManager.default.temporaryDirectory.appendingPathComponent("touchlog.txt"), atomically: true, encoding: .utf8)
   }
 }
