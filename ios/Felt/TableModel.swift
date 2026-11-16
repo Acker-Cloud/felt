@@ -697,6 +697,12 @@ final class TableModel {
   /* the rail's 3D switch: its centre on the stage as last drawn (nil: not shown) */
   @ObservationIgnored var railSwitch: CGPoint?
   /* #viewBtn's tap: 3D on or off, kept as the setting */
+  /* v3Sync: the Table View setting changed elsewhere (Settings, from the pause menu): the next frame draws it */
+  func syncView(_ on: Bool) {
+    guard on != view3d else { return }
+    view3d = on
+    frame &+= 1
+  }
   func toggleView() {
     view3d.toggle()
     UserDefaults.standard.set(view3d ? "3d" : "top", forKey: "felt.settings.view")
@@ -721,6 +727,8 @@ final class TableModel {
   var handoff: (p: Int, first: Bool)? = nil
   @ObservationIgnored private var cpuBusy = false
   private(set) var cpuThinking = false
+  /* the CPU's shot found and its line shown while it thinks on (the page's cpuPlan): the 3D view cuts to it and draws the cue */
+  private(set) var cpuPlanned = false
 
   /* practice (page 5s): the session's layout and seed, the undo stack (UNDO_MAX), its numbers, editing and the tools strip */
   struct Practice { var layout: String, seed: UInt32, undo: [Game] = [], shots = 0, pots = 0, potting = 0, edit: Bool, tools = false }
@@ -1450,7 +1458,7 @@ final class TableModel {
   func cpuStep() {
     guard cpuTurn, !cpuBusy, rolling == nil, stroke == nil, let gm = g, let level = actingLevel else { return }
     let arch = actingArch, hill = actingHill
-    cpuBusy = true; cpuThinking = true
+    cpuBusy = true; cpuThinking = true; cpuPlanned = false
     let t0 = now, spec = spec, seed = Double(Int.random(in: 1...1_000_000))
     if gm.option != nil {
       let c = CPU(engine: engine); c.arch = arch; c.hill = hill
@@ -1474,7 +1482,7 @@ final class TableModel {
     if let p = shot.place { g0 = engine.placeCue(g0, p[0], p[1]) }
     if gm.kind == "bumper", let b = shot.ball { g0.striker = b }
     g0.call = shot.call; g = g0; syncBalls()
-    aim = shot.angle; spin = shot.spin
+    aim = shot.angle; spin = shot.spin; cpuPlanned = true
     let think = cpuThinkMs(gm, shot, seed) / 1000 / speed, wait = max(0, think - (now - t0))
     Task { @MainActor in
       try? await Task.sleep(for: .milliseconds(Int(wait * 1000)))

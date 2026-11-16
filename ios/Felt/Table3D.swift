@@ -222,10 +222,12 @@ struct BallU {
         /* the cue ball carried in hand (or sliding back): the camera holds still, and cuts on the let-go */
         if model.placeAt == nil {
           let moved = abs(c.x - px) > 1e-9 || abs(c.y - py) > 1e-9 || !px.isFinite
-          if !seatSet || moved || seatShot != model.shotAt || seatTurn != (model.g?.turn ?? 0) || seatPlan != nil { cutTo = model.aim } else { yaw = model.aim }
+          /* auto aim swinging the cue: a cut to where it lands, never followed frame by frame */
+          if !seatSet || moved || seatShot != model.shotAt || seatTurn != (model.g?.turn ?? 0) || seatPlan != nil { cutTo = model.aimAnim.map { $0.from + $0.d } ?? model.aim }
+          else if model.aimAnim == nil { yaw = model.aim }
           seatShot = model.shotAt; seatTurn = model.g?.turn ?? 0; seatPlan = nil
         }
-      } else if model.stroke != nil || !model.cpuThinking {
+      } else if model.stroke != nil || !model.cpuThinking || model.cpuPlanned {
         if seatPlan != model.aim { seatPlan = model.aim; cutTo = model.aim }
       } else if !seatSet { cutTo = model.aim }
       if let a = cutTo { px = c.x; py = c.y; yaw = a; seatSet = true; cut(now) }
@@ -621,11 +623,11 @@ struct BallU {
       e.setDepthStencilState(depthOn)
     }
     /* the cue: behind the ball on the aim, raised a little at least (it clears the rails), pulled back by power */
-    if full, model.rolling == nil, !model.cpuThinking, carried == nil || ghostOk, let c = model.cue, let cb = cue3() {
+    if full, model.rolling == nil, !model.cpuThinking || model.cpuPlanned, carried == nil || ghostOk, let c = model.cue, let cb = cue3() {
       let rest = R + 0.012, back = 0.27
       var gap = rest + back * min(1, max(0, model.power))
       if let st = model.stroke {
-        let u = min(1, max(0, (st.t0.map { model.now - $0 } ?? 0) / TableModel.STROKE_MS)), g0 = rest + back * min(1, max(0, st.power))
+        let u = min(1, max(0, (st.t0.map { model.now - $0 } ?? 0) * model.speed / TableModel.STROKE_MS)), g0 = rest + back * min(1, max(0, st.power))
         gap = g0 + (R - g0) * u * u
       }
       /* the tip on the cue ball at its height in the air (v3Air) */

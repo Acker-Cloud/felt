@@ -100,7 +100,7 @@ struct Home: View {
     let ar = side ? cardAr : 1.7, row = rowMin > 0 ? rowMin : nil
     return LazyVGrid(columns: cols, spacing: gap) {
       modeCard("mode-career", { showCareer = true }) {
-        ModeCard(name: "Career", line: career.loaded ? "\(career.E.S["profile"]?["name"]?.str ?? "Career"), season \(career.E.season)" : "Your player, 300 rivals", glow: Self.GLOW["mode-career"]!, ar: ar) {
+        ModeCard(name: "Career", line: career.loaded ? "\(career.E.S["profile"]?["name"]?.str ?? "Career"), season \(career.E.season)" : "Your player, 300 rivals", glow: Self.GLOW["mode-career"]!, ar: ar, cc: true) {
           Image(systemName: "person.crop.circle.fill").font(.system(size: 22)).foregroundStyle(Color(rgb: 0xf2, 0xc9, 0x4c))
         }
       }
@@ -134,7 +134,7 @@ struct Home: View {
         .frame(maxWidth: .infinity).frame(height: oneCol ? 84 : nil)
         .overlay {
           GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height, narrow = w <= 184, low: Double = narrow ? 48 : 52
+            let narrow = geo.size.width <= 184
             /* on its side the ninth is a strip: its name and line on one row, in the middle of it */
             let words = strip ? AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
             ZStack(alignment: strip ? .leading : .bottomLeading) {
@@ -151,8 +151,9 @@ struct Home: View {
               .lineLimit(1).foregroundStyle(.white)
               .padding(.horizontal, narrow ? 12 : 14).padding(.bottom, strip ? 0 : narrow ? 12 : 13)
             }
-            .onAppear { art.want(g, w, h, low) }
-            .onChange(of: geo.size) { _, n in art.want(g, n.width, n.height, low) }
+            /* every size the card takes, from the first (onChange(of: geo.size) missed the last one of a turn on its side:
+               the art painted for a passing 87x70 and stretched over the 201x118 card), its words' height with it */
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { n in art.want(g, n.width, n.height, n.width <= 184 ? 48 : 52) }
           }
         }
         .frame(height: strip ? 48 : g == .heyball && !oneCol ? art.rowH : nil)
@@ -267,7 +268,8 @@ struct Home: View {
         }
         /* on its side: --gut 24 (or the safe area's inset, which the scroll view already gives), the header 22 under the
            top, at most 1100 wide */
-        .padding(.horizontal, side ? 0 : 20).padding(.top, side ? 22 : 0).padding(.bottom, 24)
+        /* upright the gutter is #menu's 20, outside the Larger Text zoom (the page zooms .sheet.home inside it): 20 / z here */
+        .padding(.horizontal, side ? 0 : 20 * 100 / CGFloat(textSize)).padding(.top, side ? 22 : 0).padding(.bottom, 24)
         .coordinateSpace(.named("homeC"))
         .frame(maxWidth: side ? 1100 : 560)
         .padding(.leading, side ? max(0, 24 - safeL) : 0).padding(.trailing, side ? max(0, 24 - safeR) : 0)
@@ -420,6 +422,8 @@ struct TableScreen: View {
   /* the drag's working state: a plain object, not observed, so a touch event (120 a second) never rebuilds the screen */
   final class Touch { var placing = false, picking = false, eating = false, gest: AimGesture? = nil, pinch0: Double? = nil }
   @State private var tch = Touch()
+  /* Table View changed in Settings mid-game (the pause menu's): applied at once, as the page's applyPrefs/v3Sync */
+  @AppStorage("felt.settings.view") private var tableView = "top"
   /* a hardware keyboard (page 5's keydown): the table takes the keys while it is up */
   @FocusState private var keys: Bool
   @Environment(\.displayScale) private var scale
@@ -463,6 +467,7 @@ struct TableScreen: View {
     .overlay(alignment: .topTrailing) { if model.prac != nil && !model.paused { PracticeTools(model: model).padding(.top, 8).padding(.trailing, 12) } }
     .onChange(of: model.spinOk) { _, ok in if !ok { model.elevOpen = false; model.hideElevTip() } }
     .onChange(of: model.paused) { _, p in if p { model.hideElevTip() } }
+    .onChange(of: tableView) { _, v in model.syncView(v == "3d") }
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
     .overlay(alignment: .top) { CalloutView(model: model).padding(.top, 0) }
     .overlay(alignment: .bottom) { ReplayPill(model: model).padding(.bottom, 92) }
@@ -615,9 +620,13 @@ struct TableScreen: View {
            the lift (measured on POSEIDON, -felt-touchlog) */
         .gesture(PinchRecognizer(on: model.view3d) { st, scale in
           switch st {
-          case .began: tch.pinch0 = model.v3Dist; tch.gest = nil
+          /* a second finger kills the drag in progress and puts the aim and the tilt back to the press's (the page's g.a0,
+             g.p0); the rest of the drag is eaten (mode 'dead') */
+          case .began:
+            if let g = tch.gest, !tch.placing, !tch.picking, model.rolling == nil { model.aim = g.a0; model.v3Pitch = g.pitch0 }
+            tch.pinch0 = model.v3Dist; tch.gest = nil; tch.eating = true
           case .changed: if let p0 = tch.pinch0 { model.v3Dist = min(V3.DIST[1], max(V3.DIST[0], p0 / Double(scale))); TouchLog.add(String(format: "pinch dist %.3f", model.v3Dist)) }
-          default: tch.pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist"); TouchLog.flush()
+          default: tch.pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist"); UserDefaults.standard.set(model.v3Pitch, forKey: "felt.settings.viewPitch"); TouchLog.flush()
           }
         })
         .gesture(DragGesture(minimumDistance: 0).onChanged { v in TouchLog.add(String(format: "ev %.4f %.1f %.1f", v.time.timeIntervalSinceReferenceDate, v.location.x, v.location.y)); model.touching = true; if tch.pinch0 == nil { touch(v.location, v.time.timeIntervalSinceReferenceDate, tg.size, began: tch.gest == nil && !tch.eating && !tch.picking && !tch.placing) } }
@@ -791,7 +800,7 @@ struct TableScreen: View {
     }
     let t = time * 1000, b = at
     if began {
-      tch.gest = AimGesture(t0: t, p0: b, last: b, tLast: t, at: b, trail: [(t, model.aim, Double(b.x), Double(b.y))])
+      tch.gest = AimGesture(t0: t, p0: b, last: b, tLast: t, at: b, trail: [(t, model.aim, Double(b.x), Double(b.y))], a0: model.aim, pitch0: model.v3Pitch)
       /* ball in hand: a press within grabR (30 pt or 2.5 ball radii) moves it, relative to where it was */
       if model.inHand, let c = model.cue {
         let q = tm.pt(c.x, c.y)
@@ -830,6 +839,7 @@ struct TableScreen: View {
     if g.sweep, model.rolling == nil {
       let slow = 0.02 * Double.pi / 180, fast = 0.3 * Double.pi / 180
       model.aim += Double(b.x - g.at.x) * (slow + (fast - slow) * AimFeel.smooth01(((g.v ?? 0) - AimFeel.V_SLOW) / (AimFeel.V_FAST - AimFeel.V_SLOW)))
+      AimFeel.push(&g.trail, t, model.aim, b)
     } else if g.held {
       model.v3Pitch = min(V3.PITCH[1], max(V3.PITCH[0], model.v3Pitch + Double(b.y - g.at.y) * 0.25))
       UserDefaults.standard.set(model.v3Pitch, forKey: "felt.settings.viewPitch")
@@ -873,8 +883,8 @@ struct TableScreen: View {
       if mouse { model.holdAim() } else { model.aimLock = .free; model.keepAim() }
       return
     }
-    if tm.cam != nil { return }
-    turnTo(&g, at, t, m, c)
+    /* in 3D a tilt is kept as it went (drag3d); a sweep restores its lift jitter as top-down (the trail is drag3d's) */
+    if tm.cam != nil { if g.held { return } } else { turnTo(&g, at, t, m, c) }
     /* the finger lifting off is not aiming: put back the aim it rested on (a pointer's let-go is still) */
     if !mouse, let r = AimFeel.liftAim(g.trail, t) { model.aim = r }
     if mouse { model.hov?.x = at.x; model.hov?.y = at.y; model.holdAim() } else { model.lockAim() }
@@ -3211,20 +3221,27 @@ struct ModeCard<Mark: View>: View {
   let name: String, line: String, glow: (Double, Double, Double)
   /* --card-ar (homeCards on its side) */
   var ar: CGFloat = 1.7
+  /* the career's card (the page's .cc): its container is inside its 14 pt padding, so it steps down at 212 pt */
+  var cc = false
   @ViewBuilder let mark: () -> Mark
+  /* the card's width: at 184 pt or less the words a size down (the page's @container (max-width: 184px)); a .mode
+     keeps 12 pt round them then, the .cc its padding */
+  @State private var w: CGFloat = 0
   var body: some View {
+    let narrow = w > 0 && w <= (cc ? 212 : 184)
     VStack(alignment: .leading, spacing: 0) {
       mark().frame(width: 36, height: 36).background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color.white.opacity(0.08)))
         .padding(.top, 10).padding(.leading, 12).accessibilityHidden(true)
       Spacer(minLength: 4)
       VStack(alignment: .leading, spacing: 2) {
-        Text(name).font(.system(size: 17, weight: .semibold)).kerning(-0.2)
-        Text(line).font(.system(size: 13)).foregroundStyle(.white.opacity(0.74))
+        Text(name).font(.system(size: narrow ? 16 : 17, weight: .semibold)).kerning(-0.2)
+        Text(line).font(.system(size: narrow ? 12 : 13)).foregroundStyle(.white.opacity(0.74))
       }
-      .lineLimit(1).padding(.horizontal, 14).padding(.bottom, 12)
+      .lineLimit(1).padding(.horizontal, narrow && !cc ? 12 : 14).padding(.bottom, 12)
     }
     .foregroundStyle(.white)
     .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { w = $0 }
     /* one card to a row: no fixed aspect, the card its minimum (--cc-min) */
     .modifier(CardAspect(on: !HomeLayout.oneCol(), ar: ar))
     .background { ModeFace(glow: glow) }

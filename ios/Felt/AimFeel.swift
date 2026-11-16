@@ -59,6 +59,8 @@ struct AimGesture {
   var t0: Double, p0: CGPoint, last: CGPoint, tLast: Double, at: CGPoint
   var v: Double? = nil, far = 0.0, sweep = false, held = false, shown = false
   var trail: AimFeel.Trail = []
+  /* the aim and the 3D camera's pitch at the press (g.a0, g.p0): a second finger puts them back */
+  var a0 = 0.0, pitch0 = 0.0
   /* a cue ball in hand grabbed: the offset from the finger to the ball (table metres), live once past GRAB_SLOP */
   var grab: (dx: Double, dy: Double)? = nil, moving = false
 }

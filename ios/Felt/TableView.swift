@@ -218,7 +218,7 @@ struct TableCanvas: View {
       } else if model.rolling == nil, let c = model.cue {
         var gap = rest + back * min(1, max(0, model.power))
         if let st = model.stroke {
-          let u = min(1, max(0, (st.t0.map { model.now - $0 } ?? 0) / TableModel.STROKE_MS)), g0 = rest + back * min(1, max(0, st.power))
+          let u = min(1, max(0, (st.t0.map { model.now - $0 } ?? 0) * model.speed / TableModel.STROKE_MS)), g0 = rest + back * min(1, max(0, st.power))
           gap = g0 + (R - g0) * u * u
         }
         drawCue(&ctx, m, game: g, dress: model.dress, cx: c.x, cy: c.y, ang: model.aim, gap: gap)
