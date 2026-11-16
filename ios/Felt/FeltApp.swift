@@ -2034,6 +2034,7 @@ struct Handoff: View {
         Button { model.handoffGo() } label: { Text("\(Words.nameOf(p)): ready").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("handoff-ready")
       }
+      .buttonStyle(MenuTick())
       .padding(24).frame(maxWidth: 400)
     }
     .accessibilityElement(children: .contain).accessibilityIdentifier("handoff")
@@ -2321,7 +2322,7 @@ struct Overlays: View {
       .sheet(item: Binding(get: { sheet.map { SheetID(id: $0) } }, set: { sheet = $0?.id }), onDismiss: { model.syncCallPrefs() }) { s in
         NavigationStack {
           Group { if s.id == "prefs" { SettingsView(locked: model.g?.rules.locked == true) } else { HelpView(acts: HelpActions(lesson: {}, tutorial: { _ in }, modes: {}, drills: {}, career: {})) } }
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { sheet = nil }.foregroundStyle(.primary) } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { Sound.shared.cue("tap"); sheet = nil }.foregroundStyle(.primary) } }
         }
       }
     } else if let g = model.g, g.winner != nil, model.rolling == nil, model.tut == nil {
@@ -2423,7 +2424,7 @@ struct Overlays: View {
   private func card<C: View>(maxW: CGFloat = 440, short: Bool = false, @ViewBuilder _ c: () -> C) -> some View {
     ZStack {
       Color(.sRGB, red: 8 / 255, green: 8 / 255, blue: 9 / 255, opacity: 0.74).ignoresSafeArea()
-      let inner = VStack(spacing: 12, content: c).padding(.horizontal, 20).padding(.top, short ? 18 : 22).padding(.bottom, short ? 18 : 20)
+      let inner = VStack(spacing: 12, content: c).padding(.horizontal, 20).padding(.top, short ? 18 : 22).padding(.bottom, short ? 18 : 20).buttonStyle(MenuTick())
       ViewThatFits(in: .vertical) { inner; ScrollView { inner }.scrollBounceBehavior(.basedOnSize) }
         .frame(maxWidth: maxW)
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color(rgb: 0x1b, 0x1b, 0x1d)))
@@ -2930,6 +2931,7 @@ struct TrickResult: View {
         }
       }
       .foregroundStyle(.primary)
+      .buttonStyle(MenuTick())
       .padding(20)
       .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
       /* #trickRes .sheet: 600 at most above 600 pt wide */
@@ -3036,6 +3038,7 @@ struct DrillResultView: View {
           .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("drillAgain")
         Button(model.onDrillDone != nil ? "Back to Career" : "Back to Drills", action: back).frame(maxWidth: .infinity, minHeight: 44).foregroundStyle(.primary)
       }
+      .buttonStyle(MenuTick())
       .padding(20)
       .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
       .pageCap(600).padding(.horizontal, 12).padding(.bottom, 12)
@@ -3084,6 +3087,7 @@ struct TutDoneView: View {
         }
       }
       .foregroundStyle(.white)
+      .buttonStyle(MenuTick())
       .padding(20)
       .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
       .pageCap(440).padding(.horizontal, 12).padding(.bottom, 12)
@@ -3136,6 +3140,7 @@ struct LessonDoneView: View {
         }
       }
       .foregroundStyle(.white)
+      .buttonStyle(MenuTick())
       .padding(20)
       .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
       .pageCap(440).padding(.horizontal, 12).padding(.bottom, 12)
@@ -3316,6 +3321,13 @@ struct NavDot: View {
 struct Press: ButtonStyle {
   func makeBody(configuration c: Configuration) -> some View {
     c.label.scaleEffect(c.isPressed ? 0.97 : 1).animation(c.isPressed ? .easeOut(duration: 0.12) : .spring(response: 0.3, dampingFraction: 0.55), value: c.isPressed)
+  }
+}
+/* the page's soft tick on the buttons of the menus and sheets (a click on any .overlay button: sfx('tap', 1), sound on
+   only, quiet): set on an overlay, every button in it plays the tap before its action and keeps the default look */
+struct MenuTick: PrimitiveButtonStyle {
+  func makeBody(configuration c: Configuration) -> some View {
+    Button(role: c.role) { Sound.shared.cue("tap"); c.trigger() } label: { c.label }.buttonStyle(.automatic)
   }
 }
 struct RowPress: ButtonStyle {
