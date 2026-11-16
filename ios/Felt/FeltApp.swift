@@ -54,24 +54,24 @@ struct Home: View {
     lessonOffer = true
   }
   /* Solo: Learn to Play (the lesson), Practice (#pracSheet, 5s), Trick Shots, Daily Shot, Drills */
-  private var soloSection: some View {
+  private func soloSection(_ side: Bool) -> some View {
     let day = Rec.today(), st = DailyStore.streak(day), done = DailyStore.done(day), dt = dailyTrick(day)
     return VStack(spacing: 0) {
-      Button { lessoning = true } label: { SoloRow(icon: "graduationcap", name: "Learn to Play", line: "A 30 second lesson") }
+      Button { lessoning = true } label: { SoloRow(icon: "graduationcap", name: "Learn to Play", line: "A 30 second lesson", side: side) }
         .accessibilityIdentifier("solo-lesson")
-      NavigationLink { PracticePicker { practicing = PracticeGo(layout: $0) } } label: { SoloRow(icon: "scope", name: "Practice", line: "Free play on any rack") }
+      NavigationLink { PracticePicker { practicing = PracticeGo(layout: $0) } } label: { SoloRow(icon: "scope", name: "Practice", line: "Free play on any rack", side: side) }
         .accessibilityIdentifier("solo-practice")
       NavigationLink { DrillsList { drilling = PracticeGo(layout: $0) } } label: {
-        SoloRow(icon: "chart.bar.fill", name: "Drills", line: "\(DRILL_LIB.count) drills, scored", acc: "\(DrillStore.medals) of \(DRILL_LIB.count * 3)", accIcon: "medal.fill", accTint: Color(rgb: 0xf2, 0xc9, 0x4c))
+        SoloRow(icon: "chart.bar.fill", name: "Drills", line: "\(DRILL_LIB.count) drills, scored", acc: "\(DrillStore.medals) of \(DRILL_LIB.count * 3)", accIcon: "medal.fill", accTint: Color(rgb: 0xf2, 0xc9, 0x4c), side: side)
       }
       .accessibilityIdentifier("solo-drills")
       NavigationLink { TricksList { tricking = PracticeGo(layout: $0) } } label: {
-        SoloRow(icon: "sparkles", name: "Trick Shots", line: "\(TRICKS.count) challenges", acc: "\(programTotal(TrickStore.score.pts)) of \(programMax())", accIcon: "star.fill")
+        SoloRow(icon: "sparkles", name: "Trick Shots", line: "\(TRICKS.count) challenges", acc: "\(programTotal(TrickStore.score.pts)) of \(programMax())", accIcon: "star.fill", side: side)
       }
       .accessibilityIdentifier("solo-tricks")
       /* #dailyBtn: the day's number on a calendar leaf, today's shot, the streak (or Done today) */
       Button { tricking = PracticeGo(layout: "daily") } label: {
-        SoloRow(icon: nil, day: Int(day.suffix(2)) ?? 1, name: "Daily Shot", line: dt.title, acc: done ? "Done today" : st > 0 ? "\(st)" : nil, accIcon: done ? "checkmark" : st > 0 ? "flame.fill" : nil)
+        SoloRow(icon: nil, day: Int(day.suffix(2)) ?? 1, name: "Daily Shot", line: dt.title, acc: done ? "Done today" : st > 0 ? "\(st)" : nil, accIcon: done ? "checkmark" : st > 0 ? "flame.fill" : nil, side: side)
       }
       .accessibilityLabel("Daily Shot, \(DrillStore.dayWords(day)): \(dt.title). " + (done ? "Played today, day streak \(st)." : st > 0 ? "Day streak \(st): play today to keep it." : "A new shot every day."))
       .accessibilityIdentifier("solo-daily")
@@ -94,33 +94,68 @@ struct Home: View {
     .accessibilityIdentifier(id)
   }
   private func modeBack(_ id: String, _ pop: @escaping () -> Void) -> MorphBack { MorphBack { mo.close(id, Morph.Face(glow: Self.GLOW[id]!), pop: pop) } }
+  /* #modeRow: the four modes, two to a row; rowMin, on its side, the height each row takes beside the solo list (each
+     card its own shape at the row's top) */
+  private func modesGrid(cols: [GridItem], gap: CGFloat, rowMin: CGFloat) -> some View {
+    let ar = side ? cardAr : 1.7, row = rowMin > 0 ? rowMin : nil
+    return LazyVGrid(columns: cols, spacing: gap) {
+      modeCard("mode-career", { showCareer = true }) {
+        ModeCard(name: "Career", line: career.loaded ? "\(career.E.S["profile"]?["name"]?.str ?? "Career"), season \(career.E.season)" : "Your player, 300 rivals", glow: Self.GLOW["mode-career"]!, ar: ar) {
+          Image(systemName: "person.crop.circle.fill").font(.system(size: 22)).foregroundStyle(Color(rgb: 0xf2, 0xc9, 0x4c))
+        }
+      }
+      .frame(minHeight: row, alignment: .top)
+      modeCard("mode-tourney", { modePath = "tour" }) {
+        ModeCard(name: "Quick Tournament", line: store.tour.map { $0.done ? "Finished: \(TourneyView.placeWords($0.place ?? 0))" : "In progress, \(TourneyView.kindName($0.kind))" } ?? "Bracket of 4, 8 or 16", glow: Self.GLOW["mode-tourney"]!, ar: ar) {
+          Image(systemName: "trophy.fill").font(.system(size: 19)).foregroundStyle(Color(rgb: 0xf2, 0xc9, 0x4c))
+        }
+      }
+      .frame(minHeight: row, alignment: .top)
+      modeCard("mode-exhibit", { modePath = "ex" }) {
+        ModeCard(name: "AI Exhibition", line: "Watch two CPUs play", glow: Self.GLOW["mode-exhibit"]!, ar: ar) {
+          ZStack { Circle().fill(Color(white: 0.96)).frame(width: 11, height: 11).offset(x: -4, y: 3); Circle().fill(Color(rgb: 0xf2, 0xc9, 0x4c)).frame(width: 9, height: 9).offset(x: 5, y: -4) }
+        }
+      }
+      .frame(minHeight: row, alignment: .top)
+      modeCard("mode-party", { modePath = "party" }) {
+        ModeCard(name: "Party", line: "2 to 4 players", glow: Self.GLOW["mode-party"]!, ar: ar) {
+          Image(systemName: "person.2.fill").font(.system(size: 16)).foregroundStyle(.white)
+        }
+      }
+      .frame(minHeight: row, alignment: .top)
+    }
+    .buttonStyle(Press())
+  }
   /* a .tile: the game's rack art under its name and line (bottom left); a tap opens its setup */
   private func gameCard(_ g: TableGame) -> some View {
-    let id = "game-\(g.rawValue)"
+    let id = "game-\(g.rawValue)", strip = side && g == .heyball
     return Button { mo.zoom = Double(textSize) / 100; mo.open(id, face(g)) { setupGame = g } } label: {
-      Color.clear.aspectRatio(oneCol ? nil : 1.7, contentMode: .fit)
+      Color.clear.aspectRatio(oneCol || strip ? nil : side ? cardAr : 1.7, contentMode: .fit)
         .frame(maxWidth: .infinity).frame(height: oneCol ? 84 : nil)
         .overlay {
           GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height, narrow = w <= 184, low: Double = narrow ? 48 : 52
-            ZStack(alignment: .bottomLeading) {
+            /* on its side the ninth is a strip: its name and line on one row, in the middle of it */
+            let words = strip ? AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            ZStack(alignment: strip ? .leading : .bottomLeading) {
               Color(rgb: 0x12, 0x12, 0x14)
               if let img = art.img[g.rawValue] { Image(decorative: img, scale: art.scale).resizable().transition(.opacity) }
-              VStack(alignment: .leading, spacing: 2) {
+              words {
                 Text(g.rawValue).font(.system(size: narrow ? 16 : 17, weight: .semibold)).kerning(-0.2)
                   .opacity(mo.cardTitleHidden == id ? 0 : 1)
                   .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo.cards[id, default: .init()].title = $0; mo.cards[id]?.narrow = narrow }
+                  .layoutPriority(strip ? 1 : 0)
                 Text(HomeArt.line(g)).font(.system(size: narrow ? 12 : 13)).foregroundStyle(.white.opacity(0.74))
                   .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo.cards[id, default: .init()].line = $0 }
               }
               .lineLimit(1).foregroundStyle(.white)
-              .padding(.horizontal, narrow ? 12 : 14).padding(.bottom, narrow ? 12 : 13)
+              .padding(.horizontal, narrow ? 12 : 14).padding(.bottom, strip ? 0 : narrow ? 12 : 13)
             }
             .onAppear { art.want(g, w, h, low) }
             .onChange(of: geo.size) { _, n in art.want(g, n.width, n.height, low) }
           }
         }
-        .frame(height: g == .heyball && !oneCol ? art.rowH : nil)
+        .frame(height: strip ? 48 : g == .heyball && !oneCol ? art.rowH : nil)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.13), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.5), radius: 14, y: 8)
@@ -136,6 +171,40 @@ struct Home: View {
   @State private var booted = false
   @AppStorage("felt.settings.text") private var textSize = 100
   private var oneCol: Bool { HomeLayout.oneCol(textSize) }
+  /* the window (points) and its safe area's top and foot: whether the home is on its side, and homeCards' foot */
+  @State private var win = HomeLayout.window()?.bounds.size ?? .zero
+  @State private var winTop: CGFloat = 0
+  @State private var winFoot: CGFloat = 0
+  @State private var safeL: CGFloat = 0
+  @State private var safeR: CGFloat = 0
+  private var side: Bool { HomeLayout.side(win) }
+  /* --card-ar: every card's shape, wider than 1.7 only on its side where the screen is short (homeCards) */
+  @State private var cardAr: CGFloat = 1.7
+  @State private var gridW: CGFloat = 0
+  @State private var stripY: CGFloat = 0
+  /* the solo list's height: the modes' two rows share the rest of the height beside it (a grid's stretched auto rows) */
+  @State private var soloH: CGFloat = 0
+  private func readWin() {
+    guard let w = HomeLayout.window() else { return }
+    if win != w.bounds.size { win = w.bounds.size }
+    if winTop != w.safeAreaInsets.top { winTop = w.safeAreaInsets.top }
+    if winFoot != w.safeAreaInsets.bottom { winFoot = w.safeAreaInsets.bottom }
+    if safeL != w.safeAreaInsets.left { safeL = w.safeAreaInsets.left }
+    if safeR != w.safeAreaInsets.right { safeR = w.safeAreaInsets.right }
+    homeCards()
+  }
+  /* homeCards(): on its side, where the cards at 1.7 would run the ninth's strip past the home indicator, every card,
+     games and modes, takes one wider shape just short enough (half a point spare), never under --tile-min (62); the
+     default text size only (Large and Larger scroll). From the layout as it stands: the strip's foot at 1.7 is its foot
+     now plus the two rows' growth back to 1.7 */
+  private func homeCards() {
+    var ar: CGFloat = 1.7
+    if side, textSize == 100, gridW > 0, stripY > 0 {
+      let tw = (gridW - 30) / 4, h0 = tw / 1.7, bottom = winTop + stripY + 2 * (h0 - tw / cardAr), foot = win.height - winFoot
+      if bottom > foot { ar = (tw / max(62, h0 - (bottom - foot + 0.5) / 2) * 1000).rounded(.up) / 1000 }
+    }
+    if abs(ar - cardAr) > 0.0005 { cardAr = ar }
+  }
   struct PartyGo: Identifiable { let game: TableGame, names: [String], ruleset: String; var id: String { ruleset + names.joined() } }
   struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var archs: [String] = ["allround", "allround"]; var id: String { game.rawValue + levels.joined() + archs.joined() } }
   var body: some View {
@@ -162,47 +231,51 @@ struct Home: View {
             }
             .buttonStyle(Press())
           }
-          .frame(minHeight: 44)
-          HomeSect(title: "Games", top: 18)
+          .frame(minHeight: 44).homeProbe("brand")
+          HomeSect(title: "Games", top: side ? 12 : 18, side: side).homeProbe("labGames")
           /* #playRow: the nine games as cards with their rack art, two to a row, the ninth a row wide */
           /* text size Large on a phone 400 pt wide or less, Larger on one 500 pt or less, upright: one card to a row */
-          let cols = oneCol ? [GridItem(.flexible(), spacing: 12)] : [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-          LazyVGrid(columns: cols, spacing: 12) {
+          /* on its side (landscape, 560 pt wide or more): four to a row, 10 apart, the ninth a 48 pt strip under them */
+          let cols = side ? Array(repeating: GridItem(.flexible(), spacing: 10), count: 4) : oneCol ? [GridItem(.flexible(), spacing: 12)] : [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+          LazyVGrid(columns: cols, spacing: side ? 10 : 12) {
             ForEach(HomeArt.ORDER.filter { $0 != .heyball }) { g in gameCard(g) }
           }
-          gameCard(.heyball).padding(.top, 12)
-          HomeSect(title: "Modes", top: 26)
-          LazyVGrid(columns: cols, spacing: 12) {
-            modeCard("mode-career", { showCareer = true }) {
-              ModeCard(name: "Career", line: career.loaded ? "\(career.E.S["profile"]?["name"]?.str ?? "Career"), season \(career.E.season)" : "Your player, 300 rivals", glow: Self.GLOW["mode-career"]!) {
-                Image(systemName: "person.crop.circle.fill").font(.system(size: 22)).foregroundStyle(Color(rgb: 0xf2, 0xc9, 0x4c))
+          .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { gridW = $0; homeCards() }
+          gameCard(.heyball).padding(.top, side ? 10 : 12)
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named("homeC")).maxY } action: { stripY = $0; homeCards() }
+          if side {
+            /* the modes beside the solo list, 16 apart */
+            HStack(alignment: .top, spacing: 16) {
+              VStack(alignment: .leading, spacing: 0) {
+                HomeSect(title: "Modes", top: 20, side: true).homeProbe("labModes")
+                modesGrid(cols: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], gap: 10, rowMin: max(0, (soloH - 10) / 2))
               }
-            }
-            modeCard("mode-tourney", { modePath = "tour" }) {
-              ModeCard(name: "Quick Tournament", line: store.tour.map { $0.done ? "Finished: \(TourneyView.placeWords($0.place ?? 0))" : "In progress, \(TourneyView.kindName($0.kind))" } ?? "Bracket of 4, 8 or 16", glow: Self.GLOW["mode-tourney"]!) {
-                Image(systemName: "trophy.fill").font(.system(size: 19)).foregroundStyle(Color(rgb: 0xf2, 0xc9, 0x4c))
+              .frame(maxWidth: .infinity, alignment: .leading)
+              VStack(alignment: .leading, spacing: 0) {
+                HomeSect(title: "Solo", top: 20, side: true).homeProbe("labSolo")
+                soloSection(true).id("homeEnd").homeProbe("solos")
+                  .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { soloH = $0 }
               }
+              .frame(maxWidth: .infinity, alignment: .leading)
             }
-            modeCard("mode-exhibit", { modePath = "ex" }) {
-              ModeCard(name: "AI Exhibition", line: "Watch two CPUs play", glow: Self.GLOW["mode-exhibit"]!) {
-                ZStack { Circle().fill(Color(white: 0.96)).frame(width: 11, height: 11).offset(x: -4, y: 3); Circle().fill(Color(rgb: 0xf2, 0xc9, 0x4c)).frame(width: 9, height: 9).offset(x: 5, y: -4) }
-              }
-            }
-            modeCard("mode-party", { modePath = "party" }) {
-              ModeCard(name: "Party", line: "2 to 4 players", glow: Self.GLOW["mode-party"]!) {
-                Image(systemName: "person.2.fill").font(.system(size: 16)).foregroundStyle(.white)
-              }
-            }
+          } else {
+            HomeSect(title: "Modes", top: 26).homeProbe("labModes")
+            modesGrid(cols: cols, gap: 12, rowMin: 0)
+            HomeSect(title: "Solo", top: 26).homeProbe("labSolo")
+            soloSection(false).id("homeEnd").homeProbe("solos")
           }
-          .buttonStyle(Press())
-          HomeSect(title: "Solo", top: 26)
-          soloSection.id("homeEnd")
         }
-        .padding(.horizontal, 20).padding(.bottom, 24)
-        .frame(maxWidth: 560).frame(maxWidth: .infinity)
+        /* on its side: --gut 24 (or the safe area's inset, which the scroll view already gives), the header 22 under the
+           top, at most 1100 wide */
+        .padding(.horizontal, side ? 0 : 20).padding(.top, side ? 22 : 0).padding(.bottom, 24)
+        .coordinateSpace(.named("homeC"))
+        .frame(maxWidth: side ? 1100 : 560)
+        .padding(.leading, side ? max(0, 24 - safeL) : 0).padding(.trailing, side ? max(0, 24 - safeR) : 0)
+        .frame(maxWidth: .infinity)
       }
       .background(Color(rgb: 0x09, 0x09, 0x0a))
       .scrollIndicators(.hidden)
+      .onGeometryChange(for: CGSize.self) { $0.size } action: { _ in readWin() }
       /* `-felt-homeend`: the home scrolled to its end (a test hook) */
       .task { if ProcessInfo.processInfo.arguments.contains("-felt-homeend") { try? await Task.sleep(for: .milliseconds(300)); sv.scrollTo("homeEnd", anchor: .bottom) } }
       }
@@ -292,6 +365,16 @@ struct Home: View {
         .accessibilityElement(children: .combine).accessibilityAddTraits(.updatesFrequently)
         .task { try? await Task.sleep(for: .seconds(12)); leftNote = false }
       }
+    }
+    .task {
+      guard HomeLayout.probeOn else { return }
+      try? await Task.sleep(for: .seconds(8))
+      let w = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
+      let f = { (r: CGRect) in [r.minX, r.minY, r.width, r.height].map { String(format: "%.1f", $0) }.joined(separator: ",") }
+      var out = ["window \(f(w?.bounds ?? .zero)) insets \(w.map { "\($0.safeAreaInsets)" } ?? "")"]
+      for (k, r) in HomeLayout.probe.sorted(by: { $0.key < $1.key }) { out.append("\(k) \(f(r))") }
+      for (k, c) in mo.cards.sorted(by: { $0.key < $1.key }) { out.append("\(k) \(f(c.rect)) title \(f(c.title)) line \(f(c.line))") }
+      try? out.joined(separator: "\n").write(to: FileManager.default.temporaryDirectory.appending(path: "homelayout.txt"), atomically: true, encoding: .utf8)
     }
     .task {
       guard !booted else { return }
@@ -2900,7 +2983,9 @@ struct OverHead: View {
 /* a section's title on the home (.newgame .sect) */
 struct HomeSect: View {
   let title: String, top: CGFloat
-  var body: some View { Text(title).font(.system(size: 22, weight: .bold)).kerning(-0.35).foregroundStyle(.white).padding(.top, top).padding(.bottom, 10).accessibilityAddTraits(.isHeader) }
+  /* on its side: 20 pt, 8 under it */
+  var side = false
+  var body: some View { Text(title).font(.system(size: side ? 20 : 22, weight: .bold)).kerning(side ? -0.32 : -0.35).foregroundStyle(.white).padding(.top, top).padding(.bottom, side ? 8 : 10).accessibilityAddTraits(.isHeader) }
 }
 /* .nav: a 44 pt round glass button */
 struct NavDot: View {
@@ -2922,6 +3007,8 @@ struct RowPress: ButtonStyle {
 /* .mode: a quiet dark card, a glow of its own colour in the corner, its mark top left, the name and line at the foot */
 struct ModeCard<Mark: View>: View {
   let name: String, line: String, glow: (Double, Double, Double)
+  /* --card-ar (homeCards on its side) */
+  var ar: CGFloat = 1.7
   @ViewBuilder let mark: () -> Mark
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -2937,7 +3024,7 @@ struct ModeCard<Mark: View>: View {
     .foregroundStyle(.white)
     .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
     /* one card to a row: no fixed aspect, the card its minimum (--cc-min) */
-    .modifier(CardAspect(on: !HomeLayout.oneCol()))
+    .modifier(CardAspect(on: !HomeLayout.oneCol(), ar: ar))
     .background { ModeFace(glow: glow) }
     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.13), lineWidth: 0.5))
@@ -2966,11 +3053,13 @@ struct SoloRow: View {
   var icon: String?, day: Int? = nil
   let name: String, line: String
   var acc: String? = nil, accIcon: String? = nil, accTint = Color(rgb: 0x3d, 0xdc, 0x84)
-  init(icon: String?, day: Int? = nil, name: String, line: String, acc: String? = nil, accIcon: String? = nil, accTint: Color = Color(rgb: 0x3d, 0xdc, 0x84)) {
-    self.icon = icon; self.day = day; self.name = name; self.line = line; self.acc = acc; self.accIcon = accIcon; self.accTint = accTint
+  /* on its side the rows are tighter: 52 pt, 12 apart, the words 16 and 12 */
+  var side = false
+  init(icon: String?, day: Int? = nil, name: String, line: String, acc: String? = nil, accIcon: String? = nil, accTint: Color = Color(rgb: 0x3d, 0xdc, 0x84), side: Bool = false) {
+    self.icon = icon; self.day = day; self.name = name; self.line = line; self.acc = acc; self.accIcon = accIcon; self.accTint = accTint; self.side = side
   }
   var body: some View {
-    HStack(spacing: 14) {
+    HStack(spacing: side ? 12 : 14) {
       Group {
         if let day {
           VStack(spacing: 0) {
@@ -2985,8 +3074,8 @@ struct SoloRow: View {
       }
       .frame(width: 32, height: 32).accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 1) {
-        Text(name).font(.system(size: 17, weight: .medium)).foregroundStyle(.white)
-        Text(line).font(.system(size: 13)).foregroundStyle(Color(white: 0.92).opacity(0.66))
+        Text(name).font(.system(size: side ? 16 : 17, weight: .medium)).foregroundStyle(.white)
+        Text(line).font(.system(size: side ? 12 : 13)).foregroundStyle(Color(white: 0.92).opacity(0.66))
       }
       /* Large and Larger text: the words wrap rather than cut off (.solo :is(b, small) white-space: normal); the count
          beside them keeps to one line */
@@ -3004,10 +3093,10 @@ struct SoloRow: View {
       }
       Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(white: 0.92).opacity(0.3))
     }
-    .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 8)
-    .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+    .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, side ? 6 : 8)
+    .frame(maxWidth: .infinity, minHeight: side ? 52 : 60, alignment: .leading)
     .contentShape(Rectangle())
-    .overlay(alignment: .top) { Color.white.opacity(0.16).frame(height: 0.5).padding(.leading, 62) }
+    .overlay(alignment: .top) { Color.white.opacity(0.16).frame(height: 0.5).padding(.leading, side ? 60 : 62) }
   }
 }
 
@@ -3032,10 +3121,22 @@ enum HomeLayout {
     let b = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds ?? .zero
     return b.height > b.width && ((text == 115 && b.width <= 400) || (text == 130 && b.width <= 500))
   }
+  /* @media (orientation: landscape) and (min-width: 560px): the home on its side, from the window's size in points */
+  static func side(_ s: CGSize) -> Bool { s.width > s.height && s.width >= 560 }
+  @MainActor static func window() -> UIWindow? { UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first }
+  /* `-felt-homelayout`: the home's frames printed once it has settled (a test hook, the page's getBoundingClientRect) */
+  static let probeOn = ProcessInfo.processInfo.arguments.contains("-felt-homelayout")
+  @MainActor static var probe: [String: CGRect] = [:]
+}
+extension View {
+  func homeProbe(_ k: String) -> some View {
+    onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { r in if HomeLayout.probeOn { HomeLayout.probe[k] = r } }
+  }
 }
 struct CardAspect: ViewModifier {
   let on: Bool
-  func body(content: Content) -> some View { if on { content.aspectRatio(1.7, contentMode: .fit) } else { content.frame(height: 92) } }
+  var ar: CGFloat = 1.7
+  func body(content: Content) -> some View { if on { content.aspectRatio(ar, contentMode: .fit) } else { content.frame(height: 92) } }
 }
 
 /* the table's frame clock: a CADisplayLink asking for the display's full rate (120 Hz on ProMotion; SwiftUI's
