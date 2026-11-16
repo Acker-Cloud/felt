@@ -64,6 +64,48 @@ public enum PotRail {
     return Plan(sides: sides, s: sz, ball: ball, up: up, k: Bk, half: M.max(0.3, wk / 2 - 1) / Bk)
   }
 
+  /* the roll in (potTick's animate): over POT_SLIDE_MS on the screen's clock the ball comes up the rail from the window
+     below and its number round to the front, both on cubic-bezier(.25, .8, .35, 1), while the window's opacity goes 0
+     to 1 by 35% of the way (linear). ms since the window first showed; e the eased progress (the ball's offset is
+     (1 - e) of the way back), a the window's opacity; nil once it is over */
+  public static let SLIDE_MS = 250.0
+  public static func slide(_ ms: Double) -> (e: Double, a: Double)? {
+    guard ms < SLIDE_MS else { return nil }
+    let t = M.max(0, ms) / SLIDE_MS
+    return (bezier(0.25, 0.8, 0.35, 1, t), M.min(1, t / 0.35))
+  }
+  /* CSS cubic-bezier(x1, y1, x2, y2) at progress x: the curve's parameter for x (Newton's method, then bisection, as
+     the browsers' UnitBezier), its y there */
+  public static func bezier(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, _ x: Double) -> Double {
+    if x <= 0 { return 0 }
+    if x >= 1 { return 1 }
+    let cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by
+    func sx(_ t: Double) -> Double { ((ax * t + bx) * t + cx) * t }
+    func sy(_ t: Double) -> Double { ((ay * t + by) * t + cy) * t }
+    func dx(_ t: Double) -> Double { (3 * ax * t + 2 * bx) * t + cx }
+    let eps = 1e-7
+    var t = x, found = false
+    for _ in 0..<8 {
+      let e = sx(t) - x
+      if abs(e) < eps { found = true; break }
+      let d = dx(t)
+      if abs(d) < 1e-6 { break }
+      t = t - e / d
+    }
+    if !found {
+      var lo = 0.0, hi = 1.0
+      t = x
+      while lo < hi {
+        let v = sx(t)
+        if abs(v - x) < eps { break }
+        if x > v { lo = t } else { hi = t }
+        t = (hi - lo) / 2 + lo
+        if hi - lo < 1e-12 { break }
+      }
+    }
+    return sy(t)
+  }
+
   /* potPlace in 3D: the slot on the rail's top (z, cushionTop) as the camera projects it, its share of the gap along the
      rail and the wood band across; [x, y, s] the largest circle the quad holds, nil when under 7 px or behind the eye */
   public static func place(_ P: Plan, _ slot: Slot, _ C: V3.Cam, _ box: V3.Box, z: Double) -> [Double]? {

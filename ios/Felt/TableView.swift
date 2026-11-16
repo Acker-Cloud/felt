@@ -204,7 +204,7 @@ struct TableCanvas: View {
       ctx.scaleBy(x: sc, y: sc)
       /* the rail row and the potted windows sit on the fitted view (the page's DOM over the canvas); the windows hide
          while zoomed (potTick: cam.z > 1.02) */
-      if m.z <= 1.02 { drawPotRail(&ctx, base, bp) }
+      if m.z <= 1.02 { drawPotRail(&ctx, base, bp) } else { model.potSlideDue = [] }   /* hidden: a pot then never rolls in */
       drawRail(&ctx, base, bp)
       drawCall(Sink2D(ctx: ctx, m: m), m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
@@ -882,7 +882,7 @@ struct TableCanvas: View {
   /* nextBallEl (.dot.nb): the ball to play as a true little ball, flat: the set's colour (a stripe's ivory caps, 21% top
      and bottom), cut dark round its edge with a soft shade at its foot, its number in heavy type (half its height) on the
      ivory circle (inset 19%; the potted windows' 21%); two digits drawn condensed (scaleX .8) to sit at the one-digit size */
-  func drawNB(_ ctx: inout GraphicsContext, _ bp: BallPainter, _ n: Int, _ c: CGPoint, _ d: Double, inset: Double, pot: Bool = false) {
+  func drawNB(_ ctx: inout GraphicsContext, _ bp: BallPainter, _ n: Int, _ c: CGPoint, _ d: Double, inset: Double, pot: Bool = false, numOff: CGSize = .zero, numSc: CGSize = CGSize(width: 1, height: 1)) {
     let (col, iv) = bp.flatOf(n), C = Color(rgb: Int(col[0]), Int(col[1]), Int(col[2])), I = css(iv)
     let r = CGRect(x: c.x - d / 2, y: c.y - d / 2, width: d, height: d), disc = Path(ellipseIn: r)
     var g = ctx
@@ -900,8 +900,13 @@ struct TableCanvas: View {
     /* .cb: with marks on, the mark's badge in place of the number's circle (dark or light, its words in the other) */
     let mk = bp.marks ? BallPainter.markOf(n) : nil
     let face = mk.map { $0.1 ? Color(rgb: 0x14, 0x14, 0x14) : I } ?? I, ink = mk.map { $0.1 ? I : Color(rgb: 0x14, 0x14, 0x14) } ?? Color(rgb: 0x14, 0x14, 0x14)
-    g.fill(Path(ellipseIn: ir), with: .color(face))
-    var t = g
+    /* the number's circle moved (the roll in: translate, then scale about its centre) */
+    var gn = g
+    if numOff != .zero || numSc != CGSize(width: 1, height: 1) {
+      gn.translateBy(x: c.x + numOff.width, y: c.y + numOff.height); gn.scaleBy(x: numSc.width, y: numSc.height); gn.translateBy(x: -c.x, y: -c.y)
+    }
+    gn.fill(Path(ellipseIn: ir), with: .color(face))
+    var t = gn
     let word = mk?.0 ?? String(n)
     if word.count > 1 { t.translateBy(x: c.x, y: c.y); t.scaleBy(x: 0.8, y: 1); t.translateBy(x: -c.x, y: -c.y) }
     t.draw(Text(word).font(.system(size: d * (pot ? 0.46 : 0.5), weight: .heavy)).foregroundColor(ink), at: c)
@@ -953,6 +958,8 @@ struct TableCanvas: View {
     for (n, slot) in seats {
       if let t = model.potAt[n], model.now < t { continue }   /* still dropping into its pocket */
       var c = CGPoint(x: slot.x, y: slot.y), sz = P.s, ballD = P.ball, ctx = ctx
+      /* the roll in starts the first time the window shows (one with no place then never rolls in) */
+      let due = model.potSlideDue.remove(n) != nil
       if let L = live {
         guard let f = PotRail.place(P, slot, L.C, L.box, z: s.cushionTop()) else { model.potHid[n] = nil; continue }
         c = CGPoint(x: f[0], y: f[1]); sz = f[2]; ballD = Swift.max(5, (sz * P.ball / P.s).rounded())
@@ -964,17 +971,35 @@ struct TableCanvas: View {
         if a <= 0.001 { continue }
         ctx.opacity = a
       }
+      if due { model.potSlideT[n] = now }
+      /* the roll in: up the rail from the window below (u the rail's up on the screen: top-down straight up, in 3D the
+         slot's up projected), its number coming round to the front, the window fading in; cut by the window */
+      var bc = c, numOff = CGSize.zero, numSc = CGSize(width: 1, height: 1)
+      let sl = model.potSlideT[n].flatMap { PotRail.slide((now - $0) * 1000) }
+      if let sl {
+        var u = [0.0, -1]
+        if let L = live, let a = V3.proj(L.C, L.box, slot.t[0], slot.t[1], s.cushionTop()), let b = V3.proj(L.C, L.box, slot.t[0] + P.up[0] * 0.05, slot.t[1] + P.up[1] * 0.05, s.cushionTop()) {
+          let h = hypot(b[0] - a[0], b[1] - a[1]), l = h != 0 ? h : 1
+          u = [(b[0] - a[0]) / l, (b[1] - a[1]) / l]
+        }
+        let k = 1 - sl.e, d = sz + PotRail.GAP, q = 1 - 0.45 * k
+        bc = CGPoint(x: c.x - u[0] * d * k, y: c.y - u[1] * d * k)
+        numOff = CGSize(width: -u[0] * ballD * 0.32 * k, height: -u[1] * ballD * 0.32 * k)
+        numSc = abs(u[0]) > 0.5 ? CGSize(width: q, height: 1) : CGSize(width: 1, height: q)
+        ctx.opacity = sl.a   /* the animation's opacity stands in for .hid's while it runs */
+      } else { model.potSlideT[n] = nil }
       let rr = CGRect(x: c.x - sz / 2, y: c.y - sz / 2, width: sz, height: sz)
       ctx.fill(Path(ellipseIn: rr), with: .color(recess))
       ctx.stroke(Path(ellipseIn: rr), with: .color(edge), lineWidth: 1)
-      drawNB(&ctx, bp, n, c, ballD, inset: 0.21, pot: true)
+      if sl != nil { ctx.clip(to: Path(ellipseIn: rr)) }
+      drawNB(&ctx, bp, n, bc, ballD, inset: 0.21, pot: true, numOff: numOff, numSc: numSc)
       /* a ball too dark for the recess (a solid under 3:1 on it) gets a rim of light */
       let col = ballColor(n), lum = { (v: Int) -> Double in let x = Double(v) / 255; return x <= 0.03928 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
       let L1 = 0.2126 * lum(col.0) + 0.7152 * lum(col.1) + 0.0722 * lum(col.2), L2 = 0.2126 * lum(16) + 0.7152 * lum(11) + 0.0722 * lum(8)
       if n < 9 && (max(L1, L2) + 0.05) / (min(L1, L2) + 0.05) < 3 {
         /* .rim: box-shadow 0 0 0 1px #77716b, a hairline of light just outside the ball */
         let br = ballD / 2 + 0.5
-        ctx.stroke(Path(ellipseIn: CGRect(x: c.x - br, y: c.y - br, width: 2 * br, height: 2 * br)), with: .color(Color(rgb: 0x77, 0x71, 0x6b)), lineWidth: 1)
+        ctx.stroke(Path(ellipseIn: CGRect(x: bc.x - br, y: bc.y - br, width: 2 * br, height: 2 * br)), with: .color(Color(rgb: 0x77, 0x71, 0x6b)), lineWidth: 1)
       }
     }
   }

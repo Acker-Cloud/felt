@@ -1757,13 +1757,22 @@ final class TableModel {
   @ObservationIgnored private(set) var potOrder: [Int] = []
   @ObservationIgnored private(set) var potBy: [Int: Int] = [:]
   @ObservationIgnored private(set) var potAt: [Int: TimeInterval] = [:]
+  /* the roll in (POT_SLIDE_MS): a pot to roll up into its window when it first shows (potSlideDue; never on the first
+     look at a game, nor under Reduce Motion), and when its roll began (potSlideT) */
+  @ObservationIgnored var potSlideDue: Set<Int> = []
+  @ObservationIgnored var potSlideT: [Int: TimeInterval] = [:]
+  @ObservationIgnored private var potTracking = false
   private func potTrack() {
-    guard let gm = g, ["8", "9", "10", "heyball"].contains(gm.kind) else { potOrder = []; return }
+    guard let gm = g, ["8", "9", "10", "heyball"].contains(gm.kind) else { potOrder = []; potTracking = false; potSlideDue = []; potSlideT = [:]; return }
     let src = rolling?.balls.map { ($0.n, $0.on) } ?? gm.balls.map { ($0.n, $0.on) }
     let off = src.filter { !$0.1 && $0.0 >= 1 && $0.0 <= 15 }.map { $0.0 }
+    let fresh = !potTracking
+    potTracking = true
     potOrder = potOrder.filter { off.contains($0) }
     for n in off.filter({ !potOrder.contains($0) }).sorted() {
-      potOrder.append(n); potBy[n] = gm.turn; potAt[n] = rolling != nil ? now + TableModel.POT_MS : 0
+      potOrder.append(n); potBy[n] = gm.turn; potAt[n] = rolling != nil ? now + potMs : 0
+      potSlideT[n] = nil
+      if !reduceMotion && !fresh { potSlideDue.insert(n) } else { potSlideDue.remove(n) }
     }
   }
 
