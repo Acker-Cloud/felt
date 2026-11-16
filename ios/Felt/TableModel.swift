@@ -1140,6 +1140,7 @@ final class TableModel {
     if !callReady { power = 0; callMenu = true; return }
     markPower = power
     stroke = (power, nil)
+    confirmCall(humanCall())
   }
   /* careerAssist (6d): a career match's assist, while the match is on and simulation purity is off */
   var careerAssist: JV? { guard let t = tmatch, t.career, !t.done, g?.mode == nil else { return nil }; return t.assist }
@@ -1543,6 +1544,7 @@ final class TableModel {
       cpuThinking = false
       power = P.power; markPower = P.power
       stroke = (P.power, nil)
+      confirmCall(g?.call)
       cpuBusy = false
     }
   }
@@ -1709,7 +1711,7 @@ final class TableModel {
   /* tourneyTerms: the tournament's rules (locked), who breaks (the lag's winner, then alternate breaks; carom the player) */
   private func tourneyGame(_ k: String) -> Game {
     let t = tmatch!, br = k == "carom" ? 0 : (t.lag + t.rack - 1) % 2
-    var c = CallConfig(); c.mode = Prefs.calls
+    var c = Prefs.callConfig
     if let cc = t.call { c = cc }
     if k == "snooker" { return engine.snookerGame(frames: 1, first: br) }
     if k == "carom" { return engine.caromGame(race: t.race, cushions: 3) }
@@ -1741,8 +1743,8 @@ final class TableModel {
   /* partyTerms: the ring ruleset for the party's players, the settings' calls; the break passed round (rack % n) */
   private func partyGame(_ k: String) -> Game {
     let P = party!
-    var c = CallConfig(); c.mode = Prefs.calls
-    var gm = engine.newGame(k, rules: makeRules(k, ruleset: P.ruleset, call: c, players: P.names.count))
+    let c = Prefs.callConfig
+    var gm = engine.newGame(k, rules: makeRules(k, ruleset: P.ruleset, call: c, locked: true, players: P.names.count))
     let b = P.rack % P.names.count
     if b > 0 { gm.turn = b; gm.breaker = b }
     handoff = (b, true)
@@ -1902,6 +1904,7 @@ final class TableModel {
     if callMan == nil || callMan!.ball != n {
       var c = ShotCall(); c.ball = n; c.pocket = callMan != nil && callMan!.ball == nil ? callMan!.pocket : nil; callMan = c
     }
+    callTick()
   }
   /* a tap on a pocket: the called pocket (the ball from the aim when none is picked yet) */
   func pickPocket(_ k: Int) {
@@ -1911,6 +1914,7 @@ final class TableModel {
       let t = engine.legalTargets(gm)
       var c = ShotCall(); c.ball = obviousCall()?.ball ?? (t.count == 1 ? t[0] : nil); c.pocket = k; callMan = c
     } else { callMan!.pocket = k }
+    callTick()
   }
   /* Change Call (or Clear): the aim's call goes, the player taps the ball and the pocket; a safety or push-out is undone */
   func changeCall() {
@@ -1919,14 +1923,37 @@ final class TableModel {
     if callSafe { callSafe = false; return }
     if callLocked { return }
     callMan = ShotCall(); callAutoOff = true
+    callTick()
   }
   func toggleFlag(_ f: String) {
     guard callOn, !callLocked else { return }
     if callMan == nil { var c = ShotCall(); if let h = humanCall(), h.ball != nil { c.ball = h.ball; c.pocket = h.pocket }; callMan = c }
     switch f { case "bank": callMan!.bank.toggle(); case "kick": callMan!.kick.toggle(); default: callMan!.combo.toggle() }
+    callTick()
   }
-  func toggleSafety() { guard callOn else { return }; callSafe.toggle(); callPushOn = false }
-  func togglePush() { guard pushOffer else { return }; callPushOn.toggle(); callSafe = false }
+  func toggleSafety() { guard callOn else { return }; callSafe.toggle(); callPushOn = false; callTick() }
+  func togglePush() { guard pushOffer else { return }; callPushOn.toggle(); callSafe = false; callTick() }
+  /* Called-Shot Sound (settings.calls.sound): a tap's tick for each pick */
+  func callTick() { if Prefs.callUI.sound { sound.cue("tap") } }
+  /* takeCall's confirmation (Show Declaration Confirmation): the call as committed, over the table a moment ("Called: 3
+     in top left corner"); the CPU's says whose */
+  func confirmCall(_ c: ShotCall?) {
+    guard let c, let gm = g, POCKET_KINDS.contains(gm.kind), gm.mode == nil, tut == nil, Prefs.callUI.confirm, c.ball != nil || c.safety || c.push else { return }
+    flashDue = (callName(c, words: { self.pocketWords($0, upright: self.uprightView) }).replacingOccurrences(of: "Calling: ", with: "Called: "), cpuTurn ? Words.nameOf(gm.turn) : "", 0.8)
+  }
+  /* Invalid-Shot Warnings (callSay's warnT): why the player's call cannot stand, "" when it can or the warnings are off */
+  var callWarnNow: String { g.map { engine.callWarn($0, humanCall(), on: Prefs.callUI.warn) } ?? "" }
+  /* hudCallHist (Declaration History): the pause menu's line on the calls so far, nil when off or none */
+  var callHist: String? {
+    guard Prefs.callUI.history, let gm = g, gm.mode == nil else { return nil }
+    return callHistWords(gm.calls, cpu: Words.cpuMode, words: { self.pocketWords($0, upright: self.uprightView) })
+  }
+  /* setSetting('calls.*'): a game in progress follows the new calls, unless an event locked its own */
+  func syncCallPrefs() {
+    guard var gm = g, !gm.rules.locked, POCKET_KINDS.contains(gm.kind) else { return }
+    let c = Prefs.callConfig
+    if gm.rules.call != c { gm.rules.call = c; g = gm; resetCall() }
+  }
   /* a pocket in words as the player sees the table (pocketWords): top-down from the screen, "top left corner", "right
      side"; in 3D from the player's camera (pocketFrame), "far left corner", "near side" */
   func pocketWords(_ k: Int, upright: Bool) -> String {

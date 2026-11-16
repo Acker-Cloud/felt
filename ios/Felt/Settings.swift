@@ -15,7 +15,15 @@ enum Prefs {
   static var rules8: String { str("rules8", DEFAULT_RULESET["8"]!) }
   static var rules9: String { str("rules9", DEFAULT_RULESET["9"]!) }
   static var rules10: String { str("rules10", DEFAULT_RULESET["10"]!) }
-  static var calls: String { str("calls", "official") }
+  /* settings.calls (sv 2): the called-shot configuration (makeCall, sim 1e) and the page's own switches (CALL_UI), a key
+     each, as the page names them (calls.mode, calls.detail, calls.safety, ...), each field checked as loadSettings does */
+  static func callsStored() -> [String: Any] {
+    var o: [String: Any] = [:]
+    for k in CALL_KEYS { if let v = d.object(forKey: "felt.settings.calls." + k) { o[k] = v } }
+    return o
+  }
+  static var callConfig: CallConfig { makeCall(callsStored()) }
+  static var callUI: CallUI { makeCallUI(callsStored()) }
   static var guide: String { str("guide", "full") }
   static var autoAim: Bool { bool("autoAim", true) }
   static var table: String { str("table", "7") }
@@ -28,6 +36,13 @@ enum Prefs {
     let s = UIScreen.main.bounds.size
     phone = min(s.width, s.height) < 700
     d.register(defaults: ["felt.settings.snookerTable": phone ? "compact" : "full", "felt.settings.race141": phone ? 50 : 100])
+    /* migrateSettings for the calls: an older build kept the mode alone at felt.settings.calls; it becomes calls.mode */
+    if let m = d.string(forKey: "felt.settings.calls") {
+      if d.object(forKey: "felt.settings.calls.mode") == nil, CALL_MODES.contains(m) { d.set(m, forKey: "felt.settings.calls.mode") }
+      d.removeObject(forKey: "felt.settings.calls")
+    }
+    /* loadSettings: a stored field it would not take is dropped, so the default stands (and the controls show it) */
+    for k in callsInvalid(callsStored()) { d.removeObject(forKey: "felt.settings.calls." + k) }
   }
   /* snooker's table: compact (10 ft) on a phone, full (12 ft) on a bigger screen, as loadSettings picks it */
   /* 14.1's race: 50 on a phone, 100 on a bigger screen, as loadSettings picks it */
@@ -79,9 +94,9 @@ enum Prefs {
     return Dress(cloth: pick("cloth"), cue: pick("cue"), chalk: pick("chalk"), rail: pick("rail"), balls: pick("balls"), room: "hall")
   }
   static var haptics: Bool { bool("haptics", true) }
-  /* rulesFor: the ruleset in settings for 8, 9 and 10-ball, the call mode for all */
+  /* rulesFor: the ruleset in settings for 8, 9 and 10-ball, the calls for all */
   static func rules(_ kind: String) -> RuleSet {
-    var c = CallConfig(); c.mode = calls
+    let c = callConfig
     let id = kind == "8" ? rules8 : kind == "9" ? rules9 : kind == "10" ? rules10 : nil
     var r = makeRules(kind, ruleset: id, call: c, race: kind == "straight" ? race141 : nil)
     /* the setup's Stalemate (8 and 9-ball): re-rack after STALEMATE_INNINGS dry innings each */
@@ -95,9 +110,22 @@ enum Prefs {
 }
 
 struct SettingsView: View {
+  /* rulesLocked: opened from the pause menu over an event's game (a career, tournament or party match), whose rules are
+     its own: the rules and the calls an event may lock are shown and not changed (#lockNote) */
+  var locked = false
   @AppStorage("felt.settings.rules8") private var rules8 = DEFAULT_RULESET["8"]!
   @AppStorage("felt.settings.rules9") private var rules9 = DEFAULT_RULESET["9"]!
-  @AppStorage("felt.settings.calls") private var calls = "official"
+  @AppStorage("felt.settings.calls.mode") private var callMode = "official"
+  @AppStorage("felt.settings.calls.detail") private var callDetail = "pocket"
+  @AppStorage("felt.settings.calls.obvious") private var callObvious = true
+  @AppStorage("felt.settings.calls.safety") private var callSafety = true
+  @AppStorage("felt.settings.calls.eight") private var callEight = false
+  @AppStorage("felt.settings.calls.change") private var callChange = true
+  @AppStorage("felt.settings.calls.highlight") private var callHighlight = true
+  @AppStorage("felt.settings.calls.confirm") private var callConfirm = true
+  @AppStorage("felt.settings.calls.sound") private var callSound = true
+  @AppStorage("felt.settings.calls.warn") private var callWarn = true
+  @AppStorage("felt.settings.calls.history") private var callHistory = true
   @AppStorage("felt.settings.guide") private var guide = "full"
   @AppStorage("felt.settings.autoAim") private var autoAim = true
   @AppStorage("felt.settings.race141") private var race141 = 50
@@ -128,13 +156,11 @@ struct SettingsView: View {
   @AppStorage("felt.settings.text") private var text = 100
   @AppStorage("felt.settings.keyShoot") private var keyShoot = false
   @AppStorage("felt.settings.bar") private var bar = "mid"
-  /* the list (prefsList): a row per page (PREF_PAGES), its icon, name and line, pushed from the right. The page's
-     Accessibility page is not here: none of its settings (ball marks, high-contrast aim, text size, Space on the bar)
-     are ported yet */
+  /* the list (prefsList): a row per page (PREF_PAGES), its icon, name and line, pushed from the right */
   var body: some View {
     CapList {
       Section {
-        NavigationLink { page("Gameplay") { gameplay } } label: { PrefRow(icon: "circle.grid.2x1.fill", name: "Gameplay", line: "Rules, called shots, races, aim guide") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+        NavigationLink { page("Gameplay") { gameplay } } label: { PrefRow(icon: "circle.grid.2x1.fill", name: "Gameplay", line: locked ? "Locked by event: this match plays its own rules" : "Rules, called shots, races, aim guide") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("Controls") { controls } } label: { PrefRow(icon: "switch.2", name: "Controls", line: "Auto aim, layout, power bar") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("Graphics") { graphics } } label: { PrefRow(icon: "photo", name: "Graphics", line: "Cloth, camera, replay, motion") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("Audio and Haptics") { audio } } label: { PrefRow(icon: "speaker.wave.2.fill", name: "Audio and Haptics", line: "Volume, table sounds, haptics") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
@@ -154,20 +180,43 @@ struct SettingsView: View {
   private func page<C: View>(_ title: String, @ViewBuilder _ c: () -> C) -> some View {
     CapList { c() }.navigationTitle(title).navigationBarTitleDisplayMode(.inline).tint(.primary)
   }
-  /* ppGame: Default Rules, Races, Called Shots, Aim Guide */
+  /* ppGame: Default Rules, Races, Called Shots, Aim Guide; under an event's rules the note over them (#lockNote) */
   @ViewBuilder private var gameplay: some View {
+    if locked {
+      Section { Text("Locked by event: this match plays its own rules, whatever is set here.").font(.footnote).foregroundStyle(.secondary) }
+        .accessibilityIdentifier("lockNote")
+    }
     Section {
       rules("8-Ball", "8", $rules8)
       rules("9-Ball", "9", $rules9)
       Toggle("House Re-Rack on a Stalemate (8 and 9-Ball)", isOn: $stalemate)
     } header: { Text("Default Rules") } footer: { Text("A new game starts on these. An event (a career match) brings its own.") }
+      .disabled(locked)
     Section {
       Picker("Straight Pool (14.1), Points", selection: $race141) { ForEach([25, 50, 100, 150], id: \.self) { Text("\($0)").tag($0) } }
       Picker("Three-Cushion, Points", selection: $caromRace) { Text("5").tag(5); Text("10").tag(10); Text("15").tag(15) }
       Picker("Snooker, Frames", selection: $snookerFrames) { Text("One Frame").tag(1); Text("Best of 3").tag(3) }
     } header: { Text("Races") }
+    /* the calls (settings.calls): the Call and Declaration pop-ups, then the switches (TOGS); an event locks those two and
+       the rules' four (LOCKABLE), never the page's own five */
     Section {
-      Picker("Call", selection: $calls) { Text("Off").tag("off"); Text("8-Ball Only").tag("eight"); Text("Official Rules").tag("official"); Text("All Shots").tag("all") }
+      Picker("Call", selection: $callMode) {
+        Text("Off").tag("off"); Text("8-Ball Only").tag("eight"); Text("Official Rules").tag("official"); Text("All Shots").tag("all"); Text("Career Rules").tag("career")
+      }.disabled(locked)
+      Picker("Declaration", selection: $callDetail) {
+        Text("Ball Only").tag("ball"); Text("Ball and Pocket").tag("pocket"); Text("Ball, Pocket and Rails (Custom)").tag("rails"); Text("Strict (Custom)").tag("strict")
+      }.disabled(locked)
+      Group {
+        Toggle("Auto-Call Obvious Shots", isOn: $callObvious)
+        Toggle("Require Safety Declarations", isOn: $callSafety)
+        Toggle("Require Called 8 Pocket", isOn: $callEight)
+        Toggle("Allow Changing the Call Before Striking", isOn: $callChange)
+      }.disabled(locked)
+      Toggle("Highlight Called Ball and Pocket", isOn: $callHighlight)
+      Toggle("Show Declaration Confirmation", isOn: $callConfirm)
+      Toggle("Called-Shot Sound", isOn: $callSound)
+      Toggle("Invalid-Shot Warnings", isOn: $callWarn)
+      Toggle("Declaration History", isOn: $callHistory)
     } header: { Text("Called Shots") } footer: { Text("Official rules: each game's own (8-ball WPA, 10-ball and straight pool call every shot; 9-ball and rotation none). A missed call is not a foul: the turn ends.") }
     Section {
       Picker("Aim Guide", selection: $guide) { Text("Full").tag("full"); Text("Short").tag("short"); Text("Off").tag("off") }.pickerStyle(.segmented).labelsHidden()
@@ -215,7 +264,7 @@ struct SettingsView: View {
       Toggle("Opening Animation", isOn: $intro)
     } header: { Text("Opening") } footer: { Text("A break under the lamp each time felt opens, then the home. A tap skips it. With Reduce Motion the home simply fades in.") }
   }
-  /* ppAud: Sound, Haptics (the volumes are not ported) */
+  /* ppAud: Sound (on or off, the master volume and the table sounds), Haptics */
   @ViewBuilder private var audio: some View {
     Section {
       Picker("Sound", selection: $sound) { Text("On").tag(true); Text("Off").tag(false) }.pickerStyle(.segmented).labelsHidden()
@@ -226,7 +275,7 @@ struct SettingsView: View {
       Picker("Haptics", selection: $haptics) { Text("On").tag(true); Text("Off").tag(false) }.pickerStyle(.segmented).labelsHidden()
     } header: { Text("Haptics") } footer: { Text("A tick for a hard contact, two for a pot, three for a win.") }
   }
-  /* ppA11y: Seeing the Table (the page's ball marks, text size and keyboard rows are not ported) */
+  /* ppA11y: Seeing the Table (ball marks, high-contrast aim, Reduce Motion), Text Size, Keyboard */
   @ViewBuilder private var a11y: some View {
     Section {
       Toggle("Colour-Blind Safe Ball Marks", isOn: $marks)

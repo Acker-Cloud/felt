@@ -1005,9 +1005,9 @@ struct TableCanvas: View {
   }
 
   /* 5c drawCall: the called ball (a ring) and pocket (a pulsing glow and a ring) until the shot: the player's call while
-     aiming, the CPU's in its plan; an obvious (auto) call a little fainter */
+     aiming, the CPU's in its plan; an obvious (auto) call a little fainter. None with Highlight Called Ball and Pocket off */
   func drawCall(_ pen: OverlayPen, _ m: Mapper) {
-    guard let c = model.cpuTurn ? model.g?.call : model.humanCall(), let n = c.ball, model.rolling == nil else { return }
+    guard Prefs.callUI.highlight, let c = model.cpuTurn ? model.g?.call : model.humanCall(), let n = c.ball, model.rolling == nil else { return }
     let s = model.sim, rp0 = s.BALL_R * m.k, w = max(2, rp0 * 0.12), col = look.call
     defer { pen.alpha = 1 }
     pen.alpha = c.auto ? 0.8 : 1

@@ -1424,7 +1424,7 @@ struct PowerBar: View {
     .accessibilityLabel("Power")
     .accessibilityIdentifier("power")
     /* aria-valuetext: the call's words with the percentage while a call is open (callSay) */
-    .accessibilityValue(model.rolling != nil ? "Rolling" : model.callMenuOffered ? "\(model.callLab(upright: upright) ?? "Call your shot"), \(Int(model.power * 100)) percent" : "\(Int(model.power * 100)) percent")
+    .accessibilityValue(model.rolling != nil ? "Rolling" : model.callMenuOffered ? "\(model.callLab(upright: upright) ?? "Call your shot"), \(model.callWarnNow.isEmpty ? "" : model.callWarnNow + ", ")\(Int(model.power * 100)) percent" : "\(Int(model.power * 100)) percent")
   }
 }
 
@@ -2204,6 +2204,8 @@ struct Overlays: View {
           .frame(minHeight: 30)
         }
         if !model.msg.isEmpty { Text(model.msg).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("msg") }
+        /* #callHist: the declaration history (settings.calls.history) */
+        if let h = model.callHist { Text(h).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("callHist") }
         }
         Button { model.paused = false } label: { Label("Resume", systemImage: "play.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("resume")
@@ -2227,9 +2229,9 @@ struct Overlays: View {
           }
         }
       }
-      .sheet(item: Binding(get: { sheet.map { SheetID(id: $0) } }, set: { sheet = $0?.id })) { s in
+      .sheet(item: Binding(get: { sheet.map { SheetID(id: $0) } }, set: { sheet = $0?.id }), onDismiss: { model.syncCallPrefs() }) { s in
         NavigationStack {
-          Group { if s.id == "prefs" { SettingsView() } else { HelpView(acts: HelpActions(lesson: {}, tutorial: { _ in }, modes: {}, drills: {}, career: {})) } }
+          Group { if s.id == "prefs" { SettingsView(locked: model.g?.rules.locked == true) } else { HelpView(acts: HelpActions(lesson: {}, tutorial: { _ in }, modes: {}, drills: {}, career: {})) } }
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { sheet = nil }.foregroundStyle(.primary) } }
         }
       }
