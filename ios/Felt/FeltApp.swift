@@ -10,10 +10,9 @@ struct FeltApp: App {
   var body: some Scene {
     WindowGroup {
       Home().preferredColorScheme(.dark).statusBarHidden()
-        /* at a table, an edge swipe takes two (the first only shows the home bar): set at the window's root, where
-           UIKit asks, as the table's own cover did not reach it */
+        /* at a table, an edge swipe takes two (the first only lights the home bar): set at the window's root too, where
+           UIKit asks; the bar stays shown (a hidden bar is not deferred) */
         .defersSystemGestures(on: Chrome.shared.atTable > 0 ? .all : [])
-        .persistentSystemOverlays(Chrome.shared.atTable > 0 ? .hidden : .automatic)
     }
   }
 }
@@ -379,6 +378,7 @@ struct TableScreen: View {
     .onDisappear { model.abandonCpuGame(); Chrome.shared.atTable -= 1 }
     .onAppear {
       Chrome.shared.atTable += 1
+      Task { try? await Task.sleep(for: .milliseconds(300)); Chrome.refresh() }
       /* `-felt-edges`: what UIKit is told about the screen edges, a second after the table opens */
       if ProcessInfo.processInfo.arguments.contains("-felt-edges") { Task { try? await Task.sleep(for: .seconds(1)); Chrome.printEdges() } }
     }
@@ -395,7 +395,6 @@ struct TableScreen: View {
     .statusBarHidden()
     /* a swipe from an edge takes two at the table (the first only shows the home bar), as games do */
     .defersSystemGestures(on: .all)
-    .persistentSystemOverlays(.hidden)
     .focusable().focusEffectDisabled().focused($keys)
     .onAppear { keys = true }
     /* `-felt-keybench`: keys through model.key (10 right, 2 up, Space with keyShoot, then the result printed) */
@@ -590,25 +589,11 @@ struct TableScreen: View {
     guard model.rolling == nil, let c = model.cue else { tch.gest = g; return }
     let dv = JSMath.hypot(Double(b.x - g.last.x), Double(b.y - g.last.y))
     if dv > 0 { g.v = AimFeel.fingerSpeed(g.v, dv, t - g.tLast); g.last = b; g.tLast = t }
-    if !g.sweep {
-      if g.far > AimFeel.TAP_SLOP { g.sweep = true }
-      else if t - g.t0 >= AimFeel.HOLD_MS && g.far > AimFeel.HOLD_SLOP { g.sweep = true; g.held = true }
-    }
-    /* while a let-go would still be a tap the line waits, then catches up with the finger in one step */
-    if g.sweep && !g.maybeTap(t) { if !g.shown { model.takeAim() }; g.shown = true; turnTo(&g, b, t, m, c) }
-    /* while a let-go would still be a tap the line waits; once it cannot be (TAP_MS from the press) it catches up with the
-       finger in one step even if the finger has stopped, as the page's g.wait timer (else it waited for the next move) */
-    else if g.sweep && !g.wait {
-      g.wait = true
-      let t0 = g.t0, due = max(0, AimFeel.TAP_MS - (t - g.t0)) + 5
-      Task { @MainActor in
-        try? await Task.sleep(for: .milliseconds(Int(due)))
-        guard var w = tch.gest, w.t0 == t0, w.sweep, !w.shown, model.rolling == nil, let c2 = model.cue else { return }
-        model.takeAim(); w.shown = true
-        turnTo(&w, w.last, w.tLast, Mapper(size: size, TL: model.sim.TL, TW: model.sim.TW), c2)
-        tch.gest = w
-      }
-    }
+    /* the line moves with the finger from its first move (Zac, on device: no wait while a let-go could still be a tap;
+       the page waits TAP_MS); a let-go that is a tap still aims at the spot (touchEnd) */
+    if !g.sweep && g.far > 0 { g.sweep = true }
+    if t - g.t0 >= AimFeel.HOLD_MS && g.far > AimFeel.HOLD_SLOP { g.held = true }
+    if g.sweep { if !g.shown { model.takeAim() }; g.shown = true; turnTo(&g, b, t, m, c) }
     tch.gest = g
   }
   /* v3Drag: across turns the aim (rate by finger speed, 0.02 to 0.3 deg a point), up and down tilts (0.25 deg a point) */
@@ -650,7 +635,7 @@ struct TableScreen: View {
       }
       return
     }
-    if !g.sweep || g.maybeTap(t) {
+    if !g.sweep || (!g.held && g.far <= AimFeel.TAP_SLOP && t - g.t0 < AimFeel.TAP_MS) {
       let p = g.p0, (x, y) = m.table(p), reach = max(14, 1.3 * s.BALL_R * m.k)
       /* free table editing (5s): a tap drops or takes off a ball */
       if model.prac?.edit == true { model.editAt(x, y); return }
@@ -2808,6 +2793,15 @@ struct LinkTimeline<Content: View>: View {
 @MainActor @Observable final class Chrome {
   static let shared = Chrome()
   var atTable = 0
+  /* UIKit re-reads the edges only when told: tell every controller from the root to the table's cover */
+  static func refresh() {
+    guard var vc = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first?.rootViewController else { return }
+    while true {
+      vc.setNeedsUpdateOfScreenEdgesDeferringSystemGestures(); vc.setNeedsUpdateOfHomeIndicatorAutoHidden()
+      guard let p = vc.presentedViewController else { break }
+      vc = p
+    }
+  }
   static func printEdges() {
     guard let w = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first, var vc = w.rootViewController else { print("felt-edges no window"); return }
     var out = ["root \(vc.preferredScreenEdgesDeferringSystemGestures.rawValue) hidden \(vc.prefersHomeIndicatorAutoHidden)"]
