@@ -4,6 +4,7 @@
    two players on one device; snooker and carom are still the free practice table until their rule
    modules are ported. The roll steps exactly as the page's frame() does: dtMs / 1000 / SIM_DT steps
    a frame, the fraction carried to the next. */
+import Accessibility
 import Foundation
 import CoreGraphics
 import FeltRender
@@ -925,7 +926,7 @@ final class TableModel {
 
   func rerack() {
     abandonCpuGame()
-    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); handAimed = false; pottedBy = [[], [], [], []]; stats = GStats(); potCount = 0; banner = nil
+    rolling = nil; inHand = game != .carom && game != .bumper; picked = false; resetCall(); handAimed = false; pottedBy = [[], [], [], []]; stats = GStats(); statsN += 1; potCount = 0; banner = nil
     if tut != nil { tutBegin(0); return }
     if lesson != nil { g = lessonGame(); syncBalls(); randomOrient(); lessonAim(); return }
     if let D = drill, let d = drillById(D.id) {
@@ -1287,6 +1288,7 @@ final class TableModel {
        pause adds nothing) stand still under the pause menu, as the page's resume moves cpuT0 and cpuAnim on */
     if paused { lastT = nil; camLast = nil; cpuClock.last = nil; cpuPlan?.last = .infinity; return }
     self.now = now
+    voTick()
     if cpuThinking { cpuClock.step(now, held: rp != nil || handoff != nil) }
     defer { camStep(now) }
     stepAutoAim()
@@ -1769,6 +1771,8 @@ final class TableModel {
   struct GStats { var shots = [0, 0, 0, 0], fouls = [0, 0, 0, 0], pots = [0, 0, 0, 0], best = [0, 0, 0, 0], notes: [[String: Int]] = [[:], [:], [:], [:]]
     var brk: (p: Int, down: Int, foul: Bool)? = nil, last: [String] = [], lastP: Int? = nil }
   @ObservationIgnored private(set) var stats = GStats()
+  /* a new stats each game (the page's stats object): the turn is spoken again when a game starts (railSayTurn's key) */
+  @ObservationIgnored private(set) var statsN = 0
   @ObservationIgnored private var gBefore: Game? = nil
 
   /* cardOf (page 6b): a player's card in the pause menu, the second line in words and its balls */
@@ -1791,8 +1795,7 @@ final class TableModel {
       }
       return (Words.ptsWord(gm.score![p]) + (up && S.brk > 0 ? ", break \(S.brk)" : "") + (need ? ", needs snookers" : ""), dots, need)
     case "bumper":
-      let mine = on.filter { bOwner($0) == p }.sorted()
-      return ("\(Words.colourOf(p)), \(mine.count) left" + (mine.contains(B_MARK[p]) && mine.count > 1 ? ", marked first" : ""), mine, false)
+      return (SeatWords.bumperMeta(gm, p), on.filter { bOwner($0) == p }.sorted(), false)
     default:
       if is8(gm.kind) {
         guard let gr = gm.groups[p] else { return ("Open table", [], false) }
@@ -1806,6 +1809,47 @@ final class TableModel {
       return (!fw.isEmpty ? fw : pot > 0 ? "\(pot) potted" : "", pottedBy[p], f > 0)
     }
   }
+  /* rackTally (6b2): a match raced in racks (a career or tournament match), player p's racks won and the race, 7 at most */
+  func rackTally(_ p: Int) -> (Int, Int)? {
+    guard let t = tmatch, !t.done, !t.points, g?.mode == nil, t.need > 1, t.need <= 7, p <= 1 else { return nil }
+    return (t.score[p], t.need)
+  }
+
+  /* VoiceOver at the table (issue #4). The status line (#msg, polite) is spoken when it changes, its own turn words
+     ("Player 2 to shoot.") left out when the turn will be spoken (say, railWillSay); then the turn, once (#railSay,
+     railSayTurn: "Player 2's turn, solids"), when the shooter changes or a game starts, never as the aim moves. Both
+     queued behind other speech (polite: AnnouncementPriority low). The seats and the potted windows are elements over
+     the canvas (railAX, potAX: TableCanvas records them as it draws, RailAX shows them) */
+  struct SeatAX: Equatable { let id: String, rect: CGRect, words: String }
+  var railAX: [SeatAX] = []
+  var potAX: SeatAX? = nil
+  @ObservationIgnored private var saidMsg = ""
+  @ObservationIgnored private var railSayKey: (stats: Int, p: Int)? = nil
+  /* the words spoken, newest last (a test hook: `-felt-aimprobe`'s vo-probe) */
+  @ObservationIgnored private(set) var voSaid: [String] = []
+  /* the turn is spoken in a game on: not a solo session (practice, a trick shot, a drill, the lesson, a tutorial), not over */
+  private var railSayOn: Bool { guard let gm = g else { return false }; return gm.winner == nil && gm.mode == nil && tut == nil && lesson == nil }
+  private func voTick() {
+    let on = railSayOn, turn = g?.turn ?? 0
+    let will = on && !(railSayKey.map { $0.stats == statsN && $0.p == turn } ?? false)
+    if msg != saidMsg {
+      saidMsg = msg
+      announce(will ? SeatWords.unspoken(msg, turn: Words.turnOf(turn)) : msg)
+    }
+    guard on, let gm = g else { railSayKey = nil; return }
+    if !will { return }
+    railSayKey = (statsN, turn)
+    let who = cpuLevel != nil ? (turn == 0 ? "Your turn" : "CPU's turn") : "\(Words.nameOf(turn))'s turn"
+    announce(SeatWords.turn(gm, turn, who: who, tally: rackTally(turn)))
+  }
+  private func announce(_ t: String) {
+    if t.isEmpty { return }
+    voSaid = Array((voSaid + [t]).suffix(8))
+    var a = AttributedString(t)
+    a.accessibilitySpeechAnnouncementPriority = .low
+    AccessibilityNotification.Announcement(a).post()
+  }
+
   /* the pause menu's card name: the CPU by its opponent's name (FOES) */
   func cardName(_ p: Int) -> String { cpuLevel != nil && p == 1 ? "\(["easy": "Rookie", "medium": "Regular", "hard": "Hustler"][cpuLevel!] ?? "CPU") (CPU)" : Words.nameOf(p) }
   /* the potted row: the players' pots in pot order, then any other ball off the table */

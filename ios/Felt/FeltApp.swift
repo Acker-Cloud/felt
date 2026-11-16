@@ -662,6 +662,8 @@ struct TableScreen: View {
               .accessibilityIdentifier("aim-probe").accessibilityValue(String(format: "%@ %.4f", model.aimHeld ? "held" : "free", model.aim))
             Text("probe").font(.system(size: 1)).opacity(0.02).allowsHitTesting(false)
               .accessibilityIdentifier("cpu-probe").accessibilityValue(model.lastThink)
+            Text("probe").font(.system(size: 1)).opacity(0.02).allowsHitTesting(false)
+              .accessibilityIdentifier("vo-probe").accessibilityValue(model.voSaid.joined(separator: " | "))
           }
         }
         .onContinuousHover { phase in
@@ -675,6 +677,8 @@ struct TableScreen: View {
         .accessibilityElement()
         .accessibilityLabel("Table")
         .accessibilityIdentifier("table")
+        /* the seats and the potted windows for VoiceOver, over the table element (never a touch's: no hit testing) */
+        .overlay { RailAX(model: model) }
       }
       .padding(.top, -ext.t).padding(.leading, -ext.l)
       Controls(model: model, upright: strip, big: F.big, col: F.col)
@@ -1920,6 +1924,24 @@ struct RollText: View {
   var body: some View {
     let _ = NumRoll.text(key, text)
     TimelineView(.animation(minimumInterval: nil, paused: !NumRoll.live(key))) { _ in Text(NumRoll.text(key, text)) }
+  }
+}
+
+/* VoiceOver at the table (issue #4): each seat on the rail row an element read from its words (seatWords, the page's
+   .ps) and the potted windows one (#potSay), placed where the canvas drew them (railAX, potAX); seen by VoiceOver only:
+   no hit testing, so the table's drag never meets them */
+struct RailAX: View {
+  let model: TableModel
+  var body: some View {
+    ZStack(alignment: .topLeading) {
+      ForEach(model.railAX + (model.potAX.map { [$0] } ?? []), id: \.id) { e in
+        Color.clear.frame(width: e.rect.width, height: e.rect.height)
+          .accessibilityElement().accessibilityLabel(e.words).accessibilityIdentifier(e.id)
+          .position(x: e.rect.midX, y: e.rect.midY)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .allowsHitTesting(false)
   }
 }
 

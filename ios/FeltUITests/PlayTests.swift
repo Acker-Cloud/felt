@@ -111,4 +111,32 @@ final class PlayTests: XCTestCase {
     sleep(1)
     XCTAssertEqual(app.otherElements["power"].value as? String, "0 percent")
   }
+
+  /* VoiceOver at the table (issue #4): each seat an element read from its words (seatWords), the potted windows one
+     (#potSay), the turn spoken once with the status line's news first (vo-probe: the announcements, -felt-aimprobe);
+     none of them takes a touch: a drag over the seats and the windows still aims */
+  @MainActor func testVoiceOverRail() throws {
+    let app = XCUIApplication()
+    app.launchArguments = ["-felt-game", "9-Ball", "-felt-pots", "1,3", "-felt-aimprobe"]
+    app.launch()
+    let table = app.otherElements["table"], seat = app.otherElements["seat0"], potted = app.otherElements["potted"]
+    let vo = app.staticTexts["vo-probe"], aim = app.staticTexts["aim-probe"]
+    XCTAssertTrue(table.waitForExistence(timeout: 10))
+    XCTAssertTrue(seat.waitForExistence(timeout: 5))
+    let s0 = seat.label, s1 = app.otherElements["seat1"].label
+    let note = XCTAttachment(string: "\(s0)\n\(s1)\n\(potted.label)\n\(vo.value as? String ?? "")"); note.name = "vo-words"; note.lifetime = .keepAlways; add(note)
+    XCTAssertTrue(s0.hasSuffix(", on the 2, shooting"), s0)
+    XCTAssertFalse(s1.contains("shooting"), s1)
+    XCTAssertEqual(potted.label, "Potted: 1, 3")
+    let said = vo.value as? String ?? ""
+    XCTAssertTrue(said.contains("to break.") && said.hasSuffix("turn, on the 2"), said)
+    /* the seat lies over the rail, the windows over the side rails: a press on each still aims */
+    let a0 = aim.value as? String
+    seat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.05, thenDragTo: table.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)))
+    XCTAssertNotEqual(aim.value as? String, a0, "a drag from the seat aims")
+    let a1 = aim.value as? String
+    potted.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.05, thenDragTo: table.coordinate(withNormalizedOffset: CGVector(dx: 0.6, dy: 0.6)))
+    XCTAssertNotEqual(aim.value as? String, a1, "a drag from the potted windows aims")
+    XCTAssertEqual(app.otherElements["power"].value as? String, "0 percent")
+  }
 }

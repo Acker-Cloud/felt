@@ -204,7 +204,7 @@ struct TableCanvas: View {
       ctx.scaleBy(x: sc, y: sc)
       /* the rail row and the potted windows sit on the fitted view (the page's DOM over the canvas); the windows hide
          while zoomed (potTick: cam.z > 1.02) */
-      if m.z <= 1.02 { drawPotRail(&ctx, base, bp) } else { model.potSlideDue = [] }   /* hidden: a pot then never rolls in */
+      if m.z <= 1.02 { drawPotRail(&ctx, base, bp) } else { model.potSlideDue = []; if model.potAX != nil { model.potAX = nil } }   /* hidden: a pot then never rolls in */
       drawRail(&ctx, base, bp)
       drawCall(Sink2D(ctx: ctx, m: m), m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
@@ -661,7 +661,7 @@ struct TableCanvas: View {
   func drawRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter, row: (y: Double, width: Double, C: V3.Cam, box: V3.Box)? = nil) {
     /* a party of three or four: the cards in the pause menu and the handoff carry the scores (the rail's .many chips are
        not ported) */
-    guard let g = model.g, g.winner == nil, (model.party?.names.count ?? 2) <= 2 else { return }
+    guard let g = model.g, g.winner == nil, (model.party?.names.count ?? 2) <= 2 else { if !model.railAX.isEmpty { model.railAX = [] }; return }
     let s = model.sim, T = model.potGeometry(m), band = T.railBand
     let ink = Color(.sRGB, red: 0xef / 255.0, green: 0xe7 / 255.0, blue: 0xda / 255.0), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85)
     let mid = -(band.co + band.rail) / 2   /* the band's middle, metres out from the nose */
@@ -835,6 +835,17 @@ struct TableCanvas: View {
         e.fill(P([(21, 7.5), (12, 12.5), (12, 22), (21, 17)]), with: .color(ink.opacity(0.5)))
       }
     }
+    /* VoiceOver (issue #4): each seat an element over its inlay (44 by 44 at least, on the row), read from its words (seatWords;
+       a trick shot's "Try 3", a drill's "Shot 2 of 4") */
+    var ax: [TableModel.SeatAX] = []
+    for p in seatList {
+      guard let sx = seatX[p] else { continue }
+      let c0 = at(sx), w = Swift.max(44, total(p))
+      let words = soloNum.map { g.mode == "trick" ? "Try \($0)" : "Shot \($0.replacingOccurrences(of: "/", with: " of "))" }
+        ?? SeatWords.seat(g, p, name: Words.nameOf(p), next: p == g.turn ? next : nil, tally: model.rackTally(p))
+      ax.append(.init(id: "seat\(p)", rect: CGRect(x: c0.x - w / 2, y: c0.y - 22, width: w, height: 44), words: words))
+    }
+    if model.railAX != ax { model.railAX = ax }
     for p in seatList {
       guard let sx = seatX[p], let items = seatItems[p], let widths = seatW[p] else { continue }
       let lit = p == g.turn || soloNum != nil
@@ -931,31 +942,39 @@ struct TableCanvas: View {
      the cue, the loupe or a ball lies over it (potCovered). */
   func drawPotRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter, live: (C: V3.Cam, box: V3.Box, rowTop: Double)? = nil) {
     /* potGame: a game with no mode, or practice; never a trick shot or a drill */
-    guard let g = model.g, !model.potOrder.isEmpty, g.mode == nil || g.mode == "practice", model.tut == nil else { return }
+    guard let g = model.g, !model.potOrder.isEmpty, g.mode == nil || g.mode == "practice", model.tut == nil else { if model.potAX != nil { model.potAX = nil }; return }
     let s = model.sim, T = model.potGeometry(m), band = T.railBand
     /* potPlan: the slots, packed for POT_PER_RAIL between the holes (RAIL_PAD) and sights (POT_SIGHT_PAD) */
     let P = PotRail.plan(s, k: m.k, ox: m.ox, oy: m.oy, portrait: m.upright, live: live != nil, rail: band.rail, co: band.co, sights: T.railSights())
     let sides = P.sides
     /* potSeats */
-    var seats: [(Int, PotRail.Slot)] = []
+    var seats: [(Int, PotRail.Slot, Int)] = []
     if is8(g.kind) {
       var n8 = [0, 0]
       for n in model.potOrder {
         var side = n > 8 ? 1 : 0
         if n == 8 { side = g.groups[model.potBy[8] ?? 0] == "stripes" ? 1 : 0 }
-        if n8[side] < sides[side].count { seats.append((n, sides[side][n8[side]])); n8[side] += 1 }
+        if n8[side] < sides[side].count { seats.append((n, sides[side][n8[side]], side)); n8[side] += 1 }
       }
     } else {
       for (i, n) in model.potOrder.enumerated() {
-        if i < sides[0].count { seats.append((n, sides[0][i])) } else if i - sides[0].count < sides[1].count { seats.append((n, sides[1][i - sides[0].count])) }
+        if i < sides[0].count { seats.append((n, sides[0][i], 0)) } else if i - sides[0].count < sides[1].count { seats.append((n, sides[1][i - sides[0].count], 1)) }
       }
+    }
+    /* VoiceOver (#potSay, issue #4): "Potted: 1, 3, 9", in pot order, one element over the windows of the first side
+       showing any (never the table between the rails) */
+    var shown: [[CGRect]] = [[], []]
+    defer {
+      let r = (shown[0].isEmpty ? shown[1] : shown[0]).reduce(CGRect.null) { $0.union($1) }
+      let ax = r.isNull ? nil : TableModel.SeatAX(id: "potted", rect: r, words: SeatWords.potted(model.potOrder))
+      if model.potAX != ax { model.potAX = ax }
     }
     /* 3D: what may lie over a window (the cue as last drawn, the loupe while shown, the balls on the table) */
     let cueLen = CueGeo.of(game: model.game.table.2).len, now = model.now
     let lp = model.loupeA > 0.02 ? model.loupe.map { (x: $0.x, y: $0.y, r: $0.r) } : nil
     let onTable = live == nil ? [] : (model.rolling?.balls ?? model.balls).filter { $0.on }.map { (x: $0.x, y: $0.y, z: $0.z ?? 0) }
     let recess = Color(rgb: 16, 11, 8), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85), f = model.scaleFactor
-    for (n, slot) in seats {
+    for (n, slot, side) in seats {
       if let t = model.potAt[n], model.now < t { continue }   /* still dropping into its pocket */
       var c = CGPoint(x: slot.x, y: slot.y), sz = P.s, ballD = P.ball, ctx = ctx
       /* the roll in starts the first time the window shows (one with no place then never rolls in) */
@@ -989,6 +1008,7 @@ struct TableCanvas: View {
         ctx.opacity = sl.a   /* the animation's opacity stands in for .hid's while it runs */
       } else { model.potSlideT[n] = nil }
       let rr = CGRect(x: c.x - sz / 2, y: c.y - sz / 2, width: sz, height: sz)
+      shown[side].append(rr)
       ctx.fill(Path(ellipseIn: rr), with: .color(recess))
       ctx.stroke(Path(ellipseIn: rr), with: .color(edge), lineWidth: 1)
       if sl != nil { ctx.clip(to: Path(ellipseIn: rr)) }

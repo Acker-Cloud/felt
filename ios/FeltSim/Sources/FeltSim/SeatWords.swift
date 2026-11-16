@@ -1,0 +1,72 @@
+/* 6b2's and 6b3's words for VoiceOver (issue #4): a seat read as a group (seatWords: "Player 1, stripes, 2 of 5
+   racks, shooting, next: the 12, stripe"), the turn spoken once (railSayTurn: "Your turn, solids", "Player 2's turn,
+   on the 3"), the potted windows (#potSay: "Potted: 1, 3, 9") and the status line's own turn words left unspoken
+   while the turn is (say: railWillSay). Names come from the caller (nameOf), the rest from the game. */
+public enum SeatWords {
+  public static func lcFirst(_ t: String) -> String { t.isEmpty ? t : t.prefix(1).lowercased() + t.dropFirst() }
+  /* nextWords: the ball to play, "Next: the 12, stripe" */
+  public static func nextWords(_ n: Int?) -> String {
+    guard let n else { return "" }
+    return "Next: the \(n)" + (n >= 1 && n <= 7 ? ", solid" : n >= 9 && n <= 15 ? ", stripe" : "")
+  }
+  public static func ptsWord(_ n: Int) -> String { "\(n) point\(n == 1 ? "" : "s")" }
+  /* snooker's onWords: the ball on */
+  public static func onWords(_ g: Game) -> String {
+    let S = g.snk!
+    if let f = S.free { return "the free \(snkName(f))" }
+    switch S.on { case .red: return "a red"; case .colour: return "a colour"; case .ball(let b): return "the \(snkName(b))"; case .none: return "nothing" }
+  }
+  /* bumper pool's card line (cardOf): "Red, 3 left, marked first" */
+  public static func bumperMeta(_ g: Game, _ p: Int) -> String {
+    let mine = g.balls.filter { $0.on && $0.n > 0 && bOwner($0.n) == p }.map { $0.n }
+    return "\(p != 0 ? "White" : "Red"), \(mine.count) left" + (mine.contains(B_MARK[p]) && mine.count > 1 ? ", marked first" : "")
+  }
+  /* onTwo: a third foul in a row loses (9, 10 and 14.1 under the three-foul rule) */
+  public static func onTwo(_ g: Game, _ p: Int) -> Bool {
+    ["9", "10", "straight"].contains(g.kind) && g.rules.threeFoul != nil && g.winner == nil && g.fouls[p] >= 2
+  }
+  /* seatSum: what player p is on and their score; tally a match's racks won and its race (rackTally) */
+  public static func sum(_ g: Game, _ p: Int, tally: (Int, Int)? = nil) -> [String] {
+    let k = g.kind, up = p == g.turn && g.winner == nil, on = g.balls.filter { $0.on && $0.n > 0 }.map { $0.n }.sorted()
+    var w: [String] = []
+    if is8(k) {
+      let gr = g.groups[p]
+      w.append(gr == nil ? "open table" : on.contains { ($0 < 8 ? "solids" : $0 > 8 ? "stripes" : nil) == gr } ? gr! : "on the 8")
+    } else if k == "bumper" { w.append(lcFirst(bumperMeta(g, p))) }
+    else if k == "carom" { w.append(p != 0 ? "yellow" : "white") }
+    if ["9", "10", "rotation"].contains(k) && up, let f = on.first { w.append("on the \(f)") }
+    if ["straight", "rotation", "carom"].contains(k) { w.append("\(g.score![p]) of \(g.race!) points") }
+    if k == "snooker" {
+      w.append(ptsWord(g.score![p]))
+      if up { w.append("on \(onWords(g))") }
+      if up && g.snk!.brk > 0 { w.append("break \(g.snk!.brk)") }
+    }
+    if let t = tally { w.append("\(t.0) of \(t.1) racks") }
+    if onTwo(g, p) { w.append("two fouls") }
+    return w
+  }
+  /* seatWords: the player, their sum, "shooting" on the shooter's, then the ball to play */
+  public static func seat(_ g: Game, _ p: Int, name: String, next: Int?, tally: (Int, Int)? = nil) -> String {
+    var w = [name] + sum(g, p, tally: tally)
+    if p == g.turn && g.winner == nil { w.append("shooting") }
+    if let n = next, !w.contains("on the \(n)") { w.append(lcFirst(nextWords(n))) }
+    return w.joined(separator: ", ")
+  }
+  /* railSayTurn's words: who (cpuMode: "Your turn" or "CPU's turn", else "Player 2's turn") and their sum */
+  public static func turn(_ g: Game, _ p: Int, who: String, tally: (Int, Int)? = nil) -> String {
+    ([who] + sum(g, p, tally: tally)).joined(separator: ", ")
+  }
+  /* #potSay: the balls down, in pot order */
+  public static func potted(_ order: [Int]) -> String { order.isEmpty ? "" : "Potted: " + order.map(String.init).joined(separator: ", ") }
+  /* say(): the status line as VoiceOver hears it while the turn will be spoken: the turn's words (turnOf, "Player 2 to
+     shoot") and what runs on from them to the sentence's end (snooker's ", on the reds.") left out */
+  public static func unspoken(_ t: String, turn ph: String) -> String {
+    guard !ph.isEmpty, let r = t.range(of: ph) else { return t }
+    let rest = t[r.upperBound...]
+    var j = rest.startIndex
+    if rest.hasPrefix(", "), let dot = rest.firstIndex(of: ".") { j = rest.index(after: dot) }
+    else if let c = rest.first, c == "." || c == ":" { j = rest.index(after: j) }
+    while j < rest.endIndex, rest[j].isWhitespace { j = rest.index(after: j) }
+    return String(t[..<r.lowerBound]) + String(rest[j...])
+  }
+}

@@ -67,12 +67,8 @@ enum Words {
     return ("\(nameOf(who)) \(cpuMode && who == 0 ? "go" : "goes") again: \(left(who)) left.", nil)
   }
   /* snooker's (page 5k): onWords, ptsWord, dWords, frameHead */
-  static func onWords(_ g: Game) -> String {
-    let S = g.snk!
-    if let f = S.free { return "the free \(snkName(f))" }
-    switch S.on { case .red: return "a red"; case .colour: return "a colour"; case .ball(let b): return "the \(snkName(b))"; case .none: return "nothing" }
-  }
-  static func ptsWord(_ n: Int) -> String { "\(n) point\(n == 1 ? "" : "s")" }
+  static func onWords(_ g: Game) -> String { SeatWords.onWords(g) }
+  static func ptsWord(_ n: Int) -> String { SeatWords.ptsWord(n) }
   static func dWords(_ p: Int) -> String { cpuMode ? "Ball in hand in the D for \(p == 0 ? "you" : "the CPU")" : "\(nameOf(p)): ball in hand in the D" }
   static func frameHead(_ w: Int) -> String { cpuMode ? (w == 0 ? "You win the frame" : "The CPU wins the frame") : "\(nameOf(w)) wins the frame" }
   /* snookerWords: the banner and the status line after a shot at snooker */
