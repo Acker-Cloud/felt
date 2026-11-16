@@ -1524,7 +1524,7 @@ final class TableModel {
     aim = a.aim
     if let p = a.pull { power = p }
     if u >= 1 {
-      lastThink = String(format: "think %.3f skip %d", cpuClock.el, cpuClock.skip ? 1 : 0); TouchLog.add("cpustroke " + lastThink)
+      lastThink = String(format: "think %.3f skip %d tap %.3f", cpuClock.el, cpuClock.skip ? 1 : 0, cpuClock.skipAt ?? -1); TouchLog.add("cpustroke " + lastThink)
       cpuPlan = nil
       cpuThinking = false
       power = P.power; markPower = P.power
@@ -1536,7 +1536,7 @@ final class TableModel {
      search. Returns whether it was the CPU's turn (the press is then eaten whole) */
   func cpuSkip() -> Bool {
     guard cpuTurn, rolling == nil, stroke == nil, rp == nil else { return false }
-    if cpuThinking { cpuClock.skip = true }
+    if cpuThinking, !cpuClock.skip { cpuClock.skip = true; cpuClock.skipAt = cpuClock.el }
     return true
   }
   /* cpuThinkMs: short on the break or an easy pot, longer on a hard one, longest on a safety or kick */

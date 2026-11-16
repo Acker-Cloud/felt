@@ -136,7 +136,7 @@ public func cpuAnim(_ u0: Double, from: Double, to: Double, power: Double) -> (a
    once el reaches the hold over the speed, or at once after a tap (skip, the page's cpuSkip: the wait cut, never the
    search) */
 public struct CPUThinkClock {
-  public var el = 0.0, last: Double? = nil, skip = false
+  public var el = 0.0, last: Double? = nil, skip = false, skipAt: Double? = nil
   public init() {}
   public mutating func step(_ now: Double, held: Bool) {
     if held { last = nil; return }

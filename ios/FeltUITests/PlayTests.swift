@@ -75,9 +75,13 @@ final class PlayTests: XCTestCase {
     waitForExpectations(timeout: 10)
     let v = probe.value as? String ?? ""
     let note = XCTAttachment(string: v); note.name = "cpu-skip"; note.lifetime = .keepAlways; add(note)
-    XCTAssertTrue(v.hasSuffix("skip 1"), "the tap hurried the CPU's break: \(v)")
-    /* hurried: the think cut and the swing 250 ms, inside the unhurried break's least (765 ms think, 900 ms swing) */
-    XCTAssertLessThan(Double(v.split(separator: " ")[1]) ?? 9, 1.665)
+    XCTAssertTrue(v.contains(" skip 1 "), "the tap hurried the CPU's break: \(v)")
+    /* hurried: from the tap the stroke follows within the hurried swing (250 ms, a frame's slack), never the unhurried
+       wait and 900 ms swing. The tap's moment is the think clock's at the tap ("tap <s>"), so the harness's own delay in
+       delivering it (seconds on a Debug build) does not count */
+    let f = v.split(separator: " "), think = Double(f[1]) ?? 9, tap = f.count > 5 ? Double(f[5]) ?? -1 : -1
+    XCTAssertGreaterThanOrEqual(tap, 0, "the tap landed in the think: \(v)")
+    XCTAssertLessThanOrEqual(think - tap, 0.25 + 0.02, "the stroke followed the tap within the hurried swing: \(v)")
   }
 
   /* the cue ball in hand carried in 3D (4o, v3Table): the press on the ball as the camera draws it, a carry, the let-go.
