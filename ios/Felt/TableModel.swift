@@ -182,7 +182,7 @@ final class TableModel {
      first contact and the first object ball's drop. The live game holds still (the CPU waits) until it ends; any touch
      ends it */
   struct ShotRec { let balls: [Ball], angle: Double, power: Double, spin: Spin, ball: Int, g: Game?, orient: [Int: Mat3], id: Int }
-  struct Replay { let rec: ShotRec, tab: Tab; var lead: Double, struck = false, acc = 0.0, hold = 0.0, end = false, shotAt = 0.0, camT: Double; let moments: [Double], keepOrient: [Int: Mat3], plan: Cam.Plan }
+  struct Replay { let rec: ShotRec, tab: Tab; var lead: Double, struck = false, acc = 0.0, hold = 0.0, end = false, shotAt = 0.0, camT: Double; let moments: [Double], keepOrient: [Int: Mat3], keepPots: [Pot], keepFx: [Fx], plan: Cam.Plan }
   static let REPLAY_OFFER_MS = 3.5, REPLAY_NOTABLE_MS = 6.5, REPLAY_LEAD = 0.5, REPLAY_SLOW = 0.35, SLOW_IN = 0.09, SLOW_OUT = 0.12, SLOW_RAMP = 0.06
   @ObservationIgnored var lastShot: ShotRec? = nil
   @ObservationIgnored private var shotN = 0
@@ -212,14 +212,14 @@ final class TableModel {
     let tr = P.tr, ci = rec.balls.firstIndex { $0.n == rec.ball } ?? -1, oi = tr.first.flatMap { f in rec.balls.firstIndex { $0.n == f.n } } ?? -1
     let drop = tr.pots.first { $0.n != rec.ball }, moments = [tr.first?.t, drop?.t].compactMap { $0 }
     let plan = Cam.plan(tr, Cam.REPLAY, rec.balls.indices.map { $0 == ci || $0 == oi }, lead: TableModel.REPLAY_LEAD, TL: sim.TL, TW: sim.TW, RAIL: camRail, POCKETS: sim.POCKETS)
-    rp = Replay(rec: rec, tab: sim.newTable(rec.balls.map { $0.copy() }, cue: rec.ball), lead: -TableModel.REPLAY_LEAD, camT: -TableModel.REPLAY_LEAD, moments: moments, keepOrient: orient, plan: plan)
+    rp = Replay(rec: rec, tab: sim.newTable(rec.balls.map { $0.copy() }, cue: rec.ball), lead: -TableModel.REPLAY_LEAD, camT: -TableModel.REPLAY_LEAD, moments: moments, keepOrient: orient, keepPots: pots, keepFx: effects, plan: plan)
     orient = rec.orient; pots = []; effects = []
     sound.replaying = true
   }
-  /* endReplay: the live table back exactly as it was */
+  /* endReplay: the live table back exactly as it was: the balls' turn, the live drops and the hit flashes (rp.keep) */
   func endReplay() {
     guard let R = rp else { return }
-    rp = nil; orient = R.keepOrient; pots = []
+    rp = nil; orient = R.keepOrient; pots = R.keepPots; effects = R.keepFx
     sound.replaying = false
   }
   private func replayRate(_ t: Double) -> Double {
