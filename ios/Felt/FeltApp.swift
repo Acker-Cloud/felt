@@ -469,13 +469,16 @@ struct TableScreen: View {
         .onAppear { model.bake(tg.size, scale: scale) }
         .onChange(of: tg.size) { _, s in model.bake(s, scale: scale) }
         .contentShape(Rectangle())
-        /* v3Pinch: two fingers move the 3D camera in or out (its distance by their spread, kept). Only in 3D: a pinch
-           waiting to begin held back every event of the table's drag until the lift (measured on POSEIDON, -felt-touchlog) */
-        .simultaneousGesture(MagnifyGesture().onChanged { v in
-          guard model.view3d else { return }
-          if tch.pinch0 == nil { tch.pinch0 = model.v3Dist; tch.gest = nil }
-          model.v3Dist = min(V3.DIST[1], max(V3.DIST[0], tch.pinch0! / Double(v.magnification)))
-        }.onEnded { _ in tch.pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist") }, including: model.view3d && !Chrome.noMag ? .all : .subviews)
+        /* v3Pinch: two fingers move the 3D camera in or out (its distance by their spread, kept). A UIKit pinch beside the
+           drag, never delaying it: SwiftUI's MagnifyGesture waiting to begin held back every event of the table's drag to
+           the lift (measured on POSEIDON, -felt-touchlog) */
+        .gesture(PinchRecognizer(on: model.view3d) { st, scale in
+          switch st {
+          case .began: tch.pinch0 = model.v3Dist; tch.gest = nil
+          case .changed: if let p0 = tch.pinch0 { model.v3Dist = min(V3.DIST[1], max(V3.DIST[0], p0 / Double(scale))); TouchLog.add(String(format: "pinch dist %.3f", model.v3Dist)) }
+          default: tch.pinch0 = nil; UserDefaults.standard.set(model.v3Dist, forKey: "felt.settings.viewDist"); TouchLog.flush()
+          }
+        })
         .gesture(DragGesture(minimumDistance: 0).onChanged { v in TouchLog.add(String(format: "ev %.4f %.1f %.1f", v.time.timeIntervalSinceReferenceDate, v.location.x, v.location.y)); model.touching = true; if tch.pinch0 == nil { touch(v.location, v.time.timeIntervalSinceReferenceDate, tg.size, began: tch.gest == nil && !tch.eating && !tch.picking && !tch.placing) } }
           .onEnded { v in lift(v.location, v.time.timeIntervalSinceReferenceDate, tg.size) })
         /* a test hook: `-felt-touchbench` sweeps a synthetic finger through touch() at 120 Hz (a press, an arc, a lift, every 2 s) */
@@ -581,7 +584,7 @@ struct TableScreen: View {
       }
     }
     guard var g = tch.gest else { return }
-    if model.view3d && !tch.placing { drag3d(&g, b, t); tch.gest = g; return }
+    if model.view3d && !tch.placing { drag3d(&g, b, t); tch.gest = g; TouchLog.add(String(format: "aim3d %.5f", model.aim)); return }
     g.far = max(g.far, JSMath.hypot(Double(b.x - g.p0.x), Double(b.y - g.p0.y)))
     if tch.placing, let o = g.grab {
       if !g.moving && g.far > AimFeel.GRAB_SLOP { g.moving = true }
@@ -2796,7 +2799,6 @@ struct LinkTimeline<Content: View>: View {
 @MainActor @Observable final class Chrome {
   static let shared = Chrome()
   var atTable = 0
-  static let noMag = ProcessInfo.processInfo.arguments.contains("-felt-nomag")
   static let noFocus = ProcessInfo.processInfo.arguments.contains("-felt-nofocus")
   static let noDefer = ProcessInfo.processInfo.arguments.contains("-felt-nodefer")
   /* UIKit re-reads the edges only when told: tell every controller from the root to the table's cover */
@@ -2830,4 +2832,22 @@ struct LinkTimeline<Content: View>: View {
     guard on else { return }
     try? lines.joined(separator: "\n").write(to: FileManager.default.temporaryDirectory.appendingPathComponent("touchlog.txt"), atomically: true, encoding: .utf8)
   }
+}
+
+/* the 3D camera's pinch as a UIKit recognizer: recognised beside every other gesture, touches never delayed or cancelled */
+struct PinchRecognizer: UIGestureRecognizerRepresentable {
+  let on: Bool
+  let act: (UIGestureRecognizer.State, CGFloat) -> Void
+  final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool { true }
+  }
+  func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+  func makeUIGestureRecognizer(context: Context) -> UIPinchGestureRecognizer {
+    let g = UIPinchGestureRecognizer()
+    g.cancelsTouchesInView = false; g.delaysTouchesBegan = false; g.delaysTouchesEnded = false
+    g.delegate = context.coordinator
+    return g
+  }
+  func updateUIGestureRecognizer(_ g: UIPinchGestureRecognizer, context: Context) { g.isEnabled = on }
+  func handleUIGestureRecognizerAction(_ g: UIPinchGestureRecognizer, context: Context) { act(g.state, g.scale) }
 }

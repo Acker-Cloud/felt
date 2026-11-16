@@ -57,5 +57,6 @@ final class PlayTests: XCTestCase {
     sleep(1)
     table.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.3)).press(forDuration: 0.05, thenDragTo: table.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.35)), withVelocity: 150, thenHoldForDuration: 0.3)
     sleep(1)
+    if (ProcessInfo.processInfo.environment["FELT_ARGS"] ?? "").contains("3d") { table.pinch(withScale: 0.6, velocity: -0.8); sleep(1) }
   }
 }
