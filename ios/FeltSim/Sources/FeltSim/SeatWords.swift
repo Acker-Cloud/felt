@@ -168,15 +168,113 @@ public enum RailRow {
     }
     return last
   }
-  /* placeRail's row for a party (.many): the seats by group() (party), then the replay's items and the 3D switch (ends),
-     clear of the bottom rail's seats. The seats packed nowhere: the score keeper keeps off the pockets alone (pockets: the
-     bottom rail's gaps between them) and the replay and the switch give way */
+  /* placeRail's STEPS whole, cheapest first: the seats set closer (tight: Caption 2, the race left to the pause menu), the
+     replay bare, the badge kept, the scoreboard cut to (its parts with data-p from this up dropped; under 4 it is set
+     closer too), the switch kept, the scoreboard kept */
+  public static let ALL_STEPS: [(tight: Bool, bare: Bool, badge: Bool, cut: Int, sw: Bool, snk: Bool)] = [
+    (false, false, true, 4, true, true), (true, false, true, 4, true, true), (true, true, true, 4, true, true), (true, true, false, 4, true, true),
+    (true, true, false, 3, true, true), (true, true, false, 2, true, true), (true, true, false, 1, true, true), (true, true, false, 1, false, true),
+    (true, true, false, 1, false, false)]
+  /* a seat's width (wOf: its offsetWidth and 1) as laid out and with #turnChip.tight */
+  public struct Chip: Equatable {
+    public let w: Double, tight: Double
+    public init(w: Double, tight: Double? = nil) { self.w = w; self.tight = tight ?? w }
+  }
+  /* the row as placeRail leaves it: each seat's centre and whether on the far rail (nil: not placed), the scoreboard's
+     centre (nil: given way or not shown), the replay's items' and the switch's, the step it stood at (its index in
+     ALL_STEPS; 99 the score keeper alone), and that step's tight, bare and cut */
+  public struct Row {
+    public var seats: [(x: Double, far: Bool)?] = [], snk: Double? = nil, rpl: [Double?] = [], sw: Double? = nil
+    public var level = 0, tight = false, bare = false, cut = 4
+  }
+  /* placeRail's seat(): a seat w wide in the gap nearest the rail's middle on its left (player 1) or its right (player 2);
+     a gap across the middle gives each its half, the two meeting at the middle */
+  static func seat(_ segs: [[Double]], _ w: Double, left: Bool, mid: Double, _ used: inout [[Double]]) -> Double? {
+    var best: (x: Double, d: Double)? = nil
+    for g in segs { for f in free(g, used) {
+      let a = left ? f[0] : Swift.max(f[0], mid + GAP / 2), b = left ? Swift.min(f[1], mid - GAP / 2) : f[1]
+      if b - a < w { continue }
+      let across = g[0] < mid && g[1] > mid, c = (g[0] + g[1]) / 2
+      let x = across ? (left ? b - w / 2 : a + w / 2) : Swift.max(a + w / 2, Swift.min(b - w / 2, c)), d = abs(x - mid)
+      if best == nil || d < best!.d { best = (x, d) }
+    } }
+    guard let b = best else { return nil }
+    used.append([b.x - w / 2, b.x + w / 2])
+    return b.x
+  }
+  /* placeRail's group(): two seats by seat() and the scoreboard (sw: its width, nil when not shown) beside the player to
+     shoot (turn: their seat); else, or two that do not both fit, the seats and the scoreboard packed in order (pack),
+     the seats alone too many for the bottom rail carrying on along the far rail's gaps (top; nil in 3D) */
+  static func group(_ segs: [[Double]], top: [[Double]]?, mid: Double, ws: [Double], snk sw: Double?, turn: Int, _ used: inout [[Double]], _ row: inout Row) -> Bool {
+    row.seats = ws.map { _ in nil }; row.snk = nil
+    let items = ws + (sw.map { [$0] } ?? [])
+    if ws.count == 2 {
+      if let a = seat(segs, ws[0], left: true, mid: mid, &used), let b = seat(segs, ws[1], left: false, mid: mid, &used) {
+        row.seats = [(a, false), (b, false)]
+        guard let w2 = sw else { return true }
+        let sx = turn == 1 ? b : a
+        var best: Double? = nil
+        for g in segs { for f in free(g, used) where f[1] - f[0] >= w2 {
+          let x = Swift.max(f[0] + w2 / 2, Swift.min(f[1] - w2 / 2, sx)); if best == nil || abs(x - sx) < abs(best! - sx) { best = x }
+        } }
+        guard let x = best else { return false }
+        used.append([x - w2 / 2, x + w2 / 2]); row.snk = x
+        return true
+      }
+      used = []
+    }
+    var pos = pack(items, segs, mid: mid)
+    var far: [(Int, Double)] = []
+    if pos == nil, let top {
+      var n = ws.count - 1
+      while pos == nil && n >= 1 {
+        if let a = pack(Array(items[0..<n]), segs, mid: mid), let b = pack(Array(items[n..<ws.count]), top, mid: mid), items.count == ws.count {
+          pos = a; far = b.enumerated().map { (n + $0.offset, $0.element) }
+        }
+        n -= 1
+      }
+    }
+    guard let pos else { return false }
+    for (i, x) in pos.enumerated() {
+      used.append([x - items[i] / 2, x + items[i] / 2])
+      if i < ws.count { row.seats[i] = (x, false) } else { row.snk = x }
+    }
+    for (i, x) in far { row.seats[i] = (x, true) }
+    return true
+  }
+  /* placeRail whole: over ALL_STEPS until everything fits (the last stands whatever fits) group() (the seats, chips; the
+     scoreboard, snk: its width at each cut, 4 to 1, or nil), then the replay's items on the right and the 3D switch on
+     the left (side()). A seat still not placed: the score keeper never gives way, so with everything else hidden it keeps
+     off the pockets alone (pockets: the bottom rail's gaps between them; in 3D, live, the row's own gaps) */
+  public static func place(_ segs: [[Double]], top: [[Double]]?, pockets: [[Double]], live: Bool = false, mid: Double, chips: [Chip], turn: Int = 0,
+                           snk: [Double]? = nil, rpl: [Rpl] = [], pw: Double?) -> Row {
+    var row = Row()
+    for (lv, st) in ALL_STEPS.enumerated() {
+      var used: [[Double]] = []
+      row = Row(); row.level = lv; row.tight = st.tight; row.bare = st.bare && !rpl.isEmpty; row.cut = st.cut
+      var ok = group(segs, top: top, mid: mid, ws: chips.map { st.tight ? $0.tight : $0.w }, snk: st.snk ? snk.map { $0[4 - st.cut] } : nil, turn: turn, &used, &row)
+      for r in rpl {
+        if r.badge && !st.badge { row.rpl.append(nil); continue }
+        let x = side(segs, st.bare ? r.bare : r.w, right: true, &used)
+        ok = x != nil && ok; row.rpl.append(x)
+      }
+      if let pw { if st.sw { row.sw = side(segs, pw, right: false, &used); ok = row.sw != nil && ok } }
+      if ok || lv == ALL_STEPS.count - 1 { break }
+    }
+    if row.seats.contains(where: { $0 == nil }) {
+      var used: [[Double]] = []
+      row.rpl = rpl.map { _ in nil }; row.sw = nil; row.snk = nil
+      _ = group(live ? segs : pockets, top: top, mid: mid, ws: chips.map(\.tight), snk: nil, turn: turn, &used, &row)
+      row.level = 99
+    }
+    return row
+  }
+  /* placeRail's row for a party (.many) whose seats are as wide set closer: place() with no scoreboard; the seats packed
+     nowhere at all: nil */
   public static func many(_ ws: [Double], near: [[Double]], far: [[Double]]?, pockets: [[Double]], mid: Double, pw: Double?, rpl: [Rpl] = []) -> (seats: [(x: Double, far: Bool)]?, sw: Double?, rpl: [Double?], bare: Bool) {
-    guard let pos = party(ws, near: near, far: far, mid: mid) else { return (party(ws, near: pockets, far: far, mid: mid), nil, rpl.map { _ in nil }, false) }
-    var used: [[Double]] = []
-    for (i, q) in pos.enumerated() where !q.far { used.append([q.x - ws[i] / 2, q.x + ws[i] / 2]) }
-    let e = ends(near, used: used, rpl: rpl, pw: pw)
-    return (pos, e.sw, e.rpl, e.bare)
+    let r = place(near, top: far, pockets: pockets, mid: mid, chips: ws.map { Chip(w: $0) }, rpl: rpl, pw: pw)
+    let seats = r.seats.contains { $0 == nil } ? nil : r.seats.map { $0! }
+    return (seats, r.sw, r.rpl, r.bare)
   }
 }
 

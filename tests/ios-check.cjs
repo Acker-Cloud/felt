@@ -32,6 +32,7 @@ check('ios hero goldens match the page (1n, 4m: the shots and their recorded rol
 check('ios practice goldens match the page (1e+: the racks, the scatter, the judge, the editing)', read('practice.json') === b.practice, read('practice.json') ? 'practice.json is stale' : 'practice.json missing');
 check('ios trick shot goldens match the page (1h: layouts, stored solutions, the judge, the program)', read('tricks.json') === b.tricks, read('tricks.json') ? 'tricks.json is stale' : 'tricks.json missing');
 check('ios drill goldens match the page (1m: layouts along each run, scores and words, totals, tiers)', read('drills.json') === b.drills, read('drills.json') ? 'drills.json is stale' : 'drills.json missing');
+check('ios rail row goldens match the page (6b2: placeRail\'s steps and the score keeper\'s fallback)', read('rail.json') === b.rail, read('rail.json') ? 'rail.json is stale' : 'rail.json missing');
 check('ios daily shot goldens match the page (5s: dayNum and the day\'s shot)', read('daily.json') === b.daily, read('daily.json') ? 'daily.json is stale' : 'daily.json missing');
 check('ios tutorial goldens match the page (1l: every step laid, solved and judged)', read('tutorials.json') === b.tutorials, read('tutorials.json') ? 'tutorials.json is stale' : 'tutorials.json missing');
 {

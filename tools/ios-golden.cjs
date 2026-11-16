@@ -908,10 +908,98 @@ ${D.NAT.map(n => `    (${q(n.id)}, ${q(n.name)}, ${q(n.first)}, ${q(n.last)}, ${
       });
     }
   }
-  return { math, career, careerData, jv, tutorials: JSON.stringify(tutorials), daily: JSON.stringify(daily), drills: JSON.stringify(drills), tricks: JSON.stringify(tricks), practice: JSON.stringify(practice), hero: JSON.stringify({ heroes }), v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
+  return { rail: buildRail(), math, career, careerData, jv, tutorials: JSON.stringify(tutorials), daily: JSON.stringify(daily), drills: JSON.stringify(drills), tricks: JSON.stringify(tricks), practice: JSON.stringify(practice), hero: JSON.stringify({ heroes }), v3: JSON.stringify({ cams: v3cams }), golden: JSON.stringify({ hashEvery: HASH_EVERY, tables, cases, guides }), rules: JSON.stringify({ games }), cpu: JSON.stringify({ cpu }), tables, cases, guides, games, cpuCases: cpu };
+}
+/* 6b2, the bottom rail's row (RailTests): placeRail's own lines (free, fitIn, pack, seat, group, side and the whole STEPS
+   loop: the seats set closer, the replay bare, the badge, the scoreboard cut, the switch, the scoreboard) then its score
+   keeper's fallback, run on given gaps and widths (CSS px; a width is wOf's, offsetWidth and 1). The gaps and widths are
+   the page's own at 375x667, 667x375 and 393x852 (felt.railBar.segs, the far rail's and the pockets' gaps as placeRail
+   makes them, each seat measured laid out and with #turnChip.tight, the scoreboard at each cut): 8-ball, snooker (frames
+   and a break; a free ball), 14.1 at 150, rotation, carom at 15, a match's racks as tally pips (9 and 8-ball, race to
+   7); then the same with the replay's offer or while one plays, in 3D (no far rail; the fallback keeps the row's gaps),
+   on gaps cut narrower, without the switch, and a party's three or four seats */
+function buildRail() {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const a = src.indexOf('  const free = g => used.reduce('), b = src.indexOf('  /* the score keeper never gives way');
+  if (a < 0 || b < 0) throw new Error('rail: placeRail lines not found');
+  const body = src.slice(a, b).replace(/const at = \(el, x, y, p\) => \{[\s\S]*?\n  \};\n/, '').replace(/const wOf = [^\n]*\n/, '');
+  const fb = src.slice(b, src.indexOf('  out.level = lv;', b));
+  if (!fb.includes('group();') || !fb.includes('lv = 99;')) throw new Error('rail: the score keeper\'s fallback changed');
+  const RAIL_GAP = +src.match(/RAIL_GAP = (\d+)/)[1];
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const cls = () => { const s = new Set(); return { toggle: (k, on) => { if (on) s.add(k); else s.delete(k); }, contains: k => s.has(k) }; };
+  const run = C => {
+    const mk = (id, w) => ({ id, w, style: {}, hidden: false, classList: cls() });
+    const chips = C.chips.map((w, i) => mk('pchip' + i, w)), viewBtn = mk('viewBtn', C.pw);
+    viewBtn.hidden = C.pw === null;
+    const parts = [0, 1, 2, 3].map(p => ({ dataset: { p: String(p) }, classList: cls() }));
+    const snkBar = { id: 'snkBar', hidden: !C.snk, style: {}, children: parts, classList: cls() };
+    const R = C.rpl, replayBtn = mk('replayBtn', R && R.offer), replaySkip = mk('replaySkip', R && R.skip), replayBadge = mk('replayBadge', R && R.badge);
+    const rpl = !R ? [] : R.offer !== undefined ? [replayBtn] : [replaySkip, replayBadge];
+    for (const e of [viewBtn, ...rpl]) e.firstElementChild = { el: e };
+    const turnChip = { classList: cls() }, placed = {};
+    const at = (el, x, y) => { placed[el.id] = { x, far: y === 'top' }; el.style.visibility = ''; };
+    const wOf = el => {
+      const e = el.el || el;
+      if (e === snkBar) return C.snk[parts.filter(q => q.classList.contains('cut')).length];
+      if (chips.includes(e)) return turnChip.classList.contains('tight') ? e.w[1] : e.w[0];
+      return e === replayBadge && e.classList.contains('bare') ? R.bare : e.w;
+    };
+    const out = { items: {} };
+    /* the fallback as the page's, its gaps given (the pockets' alone; in 3D the row's own) */
+    const lv = new Function('out', 'segs', 'topSegs', 'mid', 'chips', 'snkBar', 'at', 'wOf', 'RAIL_GAP', 'clamp', 'py', 'ty', 'topY', 'game', 'seatOf',
+      'rpl', 'replayBadge', 'viewBtn', 'turnChip', 'live', 'PK', 'let used = [];\n' + body + `
+  if (chips.some(e => out.items[e.id] === undefined)) {
+    for (const e of [...rpl, viewBtn, snkBar]) { e.style.visibility = 'hidden'; delete out.items[e.id]; }
+    used = [];
+    segs = live ? segs : PK;
+    group();
+    lv = 99;
+  }
+  return lv;`)(out, C.segs, C.top, C.mid, chips, snkBar, at, wOf, RAIL_GAP, clamp, 'near', 'near', 'top', { turn: C.turn }, i => i, rpl, replayBadge, viewBtn, turnChip, C.top === null, C.pk);
+    const shown = el => out.items[el.id] !== undefined && el.style.visibility !== 'hidden' ? out.items[el.id] : null;
+    return { level: lv, seats: chips.map(c => out.items[c.id] !== undefined ? [placed[c.id].x, placed[c.id].far] : null), snk: out.items.snkBar !== undefined ? out.items.snkBar : null,
+      rpl: rpl.map(shown), sw: shown(viewBtn), tight: turnChip.classList.contains('tight'), bare: rpl.some(e => e.classList.contains('bare')),
+      cut: 4 - parts.filter(q => q.classList.contains('cut')).length };
+  };
+  /* the gaps: the near rail's (the far rail's the same on these tables) and the pockets' */
+  const G = {
+    pool375: { segs: [[78.48, 115.33], [123.13, 183.6], [191.4, 251.87], [259.67, 296.52]], pk: [[78.48, 296.52]], mid: 187.5, pw: 17 },
+    pool667: { segs: [[57.07, 93.89], [101.7, 162.12], [169.93, 230.36], [238.17, 280.12], [324.88, 366.83], [374.64, 435.07], [442.88, 503.3], [511.11, 547.93]], pk: [[57.07, 280.12], [324.88, 547.93]], mid: 302.5, pw: 17 },
+    pool393: { segs: [[66.54, 111.14], [120.02, 192.06], [200.94, 272.98], [281.86, 326.46]], pk: [[66.54, 326.46]], mid: 196.5, pw: 20 },
+    snk375: { segs: [[64.87, 310.13]], pk: [[64.87, 310.13]], mid: 187.5, pw: 17 },
+    snk667: { segs: [[40.34, 288.78], [316.22, 564.66]], pk: [[40.34, 288.78], [316.22, 564.66]], mid: 302.5, pw: 17 },
+    carom375: { segs: [[48.68, 115.03], [121.15, 184.44], [190.56, 253.85], [259.97, 326.32]], pk: [[48.68, 326.32]], mid: 187.5, pw: 17 },
+    carom667: { segs: [[24.87, 91.21], [97.34, 160.62], [166.74, 230.03], [236.15, 299.44], [305.56, 368.85], [374.97, 438.26], [444.38, 507.66], [513.79, 580.13]], pk: [[24.87, 580.13]], mid: 302.5, pw: 17 },
+  };
+  /* the seats (laid out, set closer) and the scoreboard (with 0 to 3 parts cut), as the page measured them at 375x667 */
+  const W = [
+    ['8-ball', 'pool', [[16, 14], [11, 9]], null], ['snooker, frame 2 and a break', 'snk', [[21, 19], [21, 19]], [73, 63, 42, 42]],
+    ['snooker, a free ball', 'snk', [[28, 26], [13, 11]], [124, 110, 110, 38]], ['14.1 at 150', 'pool', [[69, 38], [48, 19]], null],
+    ['rotation', 'pool', [[54, 31], [41, 19]], null], ['carom at 15', 'carom', [[41, 19], [34, 11]], null],
+    ['9-ball, racks to 7', 'pool', [[67, 64], [62, 59]], null], ['8-ball, racks to 7', 'pool', [[77, 73], [64, 61]], null],
+    ['14.1 at 393', 'pool', [[72, 41], [48, 19]], null], ['party of three', 'pool', [[27, 26], [13, 12], [13, 12]], null],
+    ['party of four, 14.1', 'pool', [[40, 20], [30, 15], [30, 15], [30, 15]], null],
+  ];
+  const RPL = [['', null], ['the offer', { offer: 17 }], ['a replay playing', { skip: 17, badge: 82, bare: 17 }]];
+  /* a gap cut narrower: each about its middle */
+  const narrow = (gs, f) => gs.map(([x0, x1]) => { const c = (x0 + x1) / 2, h = (x1 - x0) / 2 * f; return [Math.round((c - h) * 100) / 100, Math.round((c + h) * 100) / 100]; });
+  const cases = [];
+  for (const [name, tab, chips, snk] of W) for (const [gk, g] of Object.entries(G)) {
+    if (!gk.startsWith(tab)) continue;
+    for (const [rn, rpl] of RPL) for (const live of [false, true]) for (const f of [1, 0.85, 0.7, 0.5]) {
+      if (live && f < 1) continue;
+      const segs = f === 1 ? g.segs : narrow(g.segs, f);
+      for (const turn of snk ? [0, 1] : [0]) for (const pw of f === 0.85 && !rpl ? [g.pw, null] : [g.pw]) {
+        const C = { segs, top: live ? null : segs, pk: g.pk, mid: g.mid, chips, turn, snk, rpl, pw };
+        cases.push({ name: [name, gk, rn, live ? '3D' : '', f < 1 ? 'narrow ' + f : '', snk ? 'turn ' + turn : '', pw === null ? 'no switch' : ''].filter(Boolean).join(', '), in: C, out: run(C) });
+      }
+    }
+  }
+  return JSON.stringify({ cases });
 }
 /* tests/ios-check.cjs rebuilds both in memory and requires the committed files to match */
-module.exports = { build, OUT, loadFd };
+module.exports = { build, buildRail, OUT, loadFd };
 if (require.main === module) {
   const b = build();
   fs.mkdirSync(OUT, { recursive: true });
@@ -928,6 +1016,7 @@ if (require.main === module) {
   fs.writeFileSync(path.join(OUT, 'drills.json'), b.drills);
   fs.writeFileSync(path.join(OUT, 'daily.json'), b.daily);
   fs.writeFileSync(path.join(OUT, 'tutorials.json'), b.tutorials);
+  fs.writeFileSync(path.join(OUT, 'rail.json'), b.rail);
   fs.writeFileSync(path.join(__dirname, '..', 'ios', 'FeltSim', 'Sources', 'FeltSim', 'CareerData.swift'), b.careerData);
   const steps = b.cases.reduce((a, c) => a + c.result.steps, 0);
   console.log(`ios-golden: ${b.tables.length} tables, ${b.cases.length} shots, ${b.guides.length} guides, ${b.games.length} games (${b.games.reduce((a, g) => a + g.steps.length, 0)} judgements), ${b.cpuCases.length} CPU decisions, ${steps} steps, ${b.cases.reduce((a, c) => a + c.result.potted.length, 0)} pots -> ${path.relative(process.cwd(), OUT)}`);
