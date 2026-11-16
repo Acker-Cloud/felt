@@ -194,6 +194,7 @@ struct TableCanvas: View {
         ctx.draw(Image(decorative: img, scale: 1), in: CGRect(x: x, y: y, width: Double(img.width), height: Double(img.height)))
       }
       ctx.scaleBy(x: sc, y: sc)
+      if model.aimHeld, model.rolling == nil, let c = model.cue, c.on { drawHeld(&ctx, m, c) }
       drawPlace(&ctx, m, bp, sc)
       drawFx(&ctx, m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
@@ -285,6 +286,30 @@ struct TableCanvas: View {
     }
   }
   private func drawGuide(_ ctx: inout GraphicsContext, _ m: Mapper) { drawGuide(Sink2D(ctx: ctx, m: m), m) }
+  /* drawHeld: a held pointer aim (5 input): a small padlock up and to the side of the ghost ball (or, with the guide off,
+     a little way along the line from the cue ball), white over a near-black edge so it keeps 3:1 on any cloth; beside
+     the line, on its upper side on screen, never over the ghost itself */
+  private func drawHeld(_ ctx: inout GraphicsContext, _ m: Mapper, _ c: Ball) {
+    let R = model.sim.BALL_R, a = model.aim
+    let at = model.ghostAt ?? (c.x + JSMath.cos(a) * 3 * R, c.y + JSMath.sin(a) * 3 * R), s = m.pt(at.0, at.1)
+    let rp = R * m.k, off = rp + 9
+    /* screen-space side of the line: the glyph sits up from the ghost on whichever side is up */
+    let e = m.pt(at.0 + JSMath.cos(a) * R, at.1 + JSMath.sin(a) * R), lx = Double(e.x - s.x), ly = Double(e.y - s.y), L = JSMath.hypot(lx, ly) == 0 ? 1 : JSMath.hypot(lx, ly)
+    var nx = -ly / L, ny = lx / L
+    if ny > 0 { nx = -nx; ny = -ny }
+    let x = Double(s.x) + nx * off, y = Double(s.y) + ny * off
+    var path = Path()
+    path.move(to: CGPoint(x: x - 4, y: y - 1)); path.addLine(to: CGPoint(x: x - 4, y: y - 3.2))
+    path.addArc(center: CGPoint(x: x, y: y - 3.2), radius: 4, startAngle: .radians(Double.pi), endAngle: .radians(0), clockwise: false)
+    path.addLine(to: CGPoint(x: x + 4, y: y - 1))
+    let edge = Color.black.opacity(0.8)
+    ctx.stroke(path, with: .color(edge), style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round))
+    let box = Path(roundedRect: CGRect(x: x - 6, y: y - 1.5, width: 12, height: 9), cornerRadius: 2, style: .circular)
+    ctx.fill(box, with: .color(edge)); ctx.stroke(box, with: .color(edge), style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+    ctx.stroke(path, with: .color(.white), style: StrokeStyle(lineWidth: 1.75, lineCap: .round, lineJoin: .round))
+    ctx.fill(Path(roundedRect: CGRect(x: x - 5.5, y: y - 1, width: 11, height: 8), cornerRadius: 1.75, style: .circular), with: .color(.white))
+    ctx.fill(Path(ellipseIn: CGRect(x: x - 1.3, y: y + 2.6 - 1.3, width: 2.6, height: 2.6)), with: .color(.black.opacity(0.75)))
+  }
   /* drawHint: auto aim's suggestion, a ring breathing round its ball (HINT_PULSE 2.4 s, faded in over HINT_FADE 300 ms)
      and a chevron on the cloth a few cm inside the pocket's mouth, its point toward the drop; a call on the table stands
      in for it */
@@ -357,6 +382,7 @@ struct TableCanvas: View {
     }
   }
   func drawGuide(_ sink: GuideSink, _ m: Mapper) {
+    model.ghostAt = nil
     if model.guideMode == "off" || model.rp != nil { return }
     guard let c = model.cue else { return }
     let gi = model.guide()
@@ -364,10 +390,13 @@ struct TableCanvas: View {
     let s = model.sim, R = s.BALL_R, rp = R * m.k, dx = JSMath.cos(model.aim), dy = JSMath.sin(model.aim)
     let gx = c.x + dx * h.t, gy = c.y + dy * h.t, ov = look.ovMin
     let wa = { (a: Double) in Color.white.opacity(max(a, ov)) }, white = { (a: Double) in Color.white.opacity(a) }
+    /* a held pointer aim (5 input) draws its line solid, the soft one is free to follow the pointer */
+    let held = model.aimHeld
+    model.ghostAt = (gx, gy)
     /* with no complete preview of this layout yet, the line and the ghost on the last verdict (the ring never flips on
        half-known data) */
     guard let P = gi?.1 else {
-      if h.t > 2 * R { sink.line([[c.x + dx * R, c.y + dy * R], [gx - dx * R, gy - dy * R]], wa(0.5), 1.25, []) }
+      if h.t > 2 * R { sink.line([[c.x + dx * R, c.y + dy * R], [gx - dx * R, gy - dy * R]], wa(held ? 0.9 : 0.5), held ? 1.75 : 1.25, []) }
       sink.ring(gx, gy, rp, model.guideLegal ? white(0.9) : look.illegal, 1.5, fill: white(0.08), ghost: true)
       return
     }
@@ -394,7 +423,7 @@ struct TableCanvas: View {
         && (gm.rules.kitchenSpot || lt.contains { n in (gm.balls.first { $0.n == n }?.x ?? 0) >= s.HEAD_X })
       legal = !wrong && !kitchen
     }
-    if h.t > 2 * R { strokeLine([[c.x + dx * R, c.y + dy * R], [gx - dx * R, gy - dy * R]], wa(0.5), 1.25) }
+    if h.t > 2 * R { strokeLine([[c.x + dx * R, c.y + dy * R], [gx - dx * R, gy - dy * R]], wa(held ? 0.9 : 0.5), held ? 1.75 : 1.25) }
     ring(gx, gy, rp, legal ? white(0.9) : look.illegal, 1.5, fill: white(0.08), ghost: true)
     if let f = first, !legal { ring(f.x, f.y, rp + 3, look.illegal, 2) }
     if legal, let obj = P.obj, obj.count > 1 {

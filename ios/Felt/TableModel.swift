@@ -204,7 +204,7 @@ final class TableModel {
      the first object ball's drop) and the camera's plan in close (CAM_REPLAY) on the cue ball and the first ball it hits */
   func startReplay() {
     guard rp == nil, let rec = lastShot, rolling == nil, stroke == nil else { return }
-    hideOffer()
+    hideOffer(); aimLock = .free
     let P = camPred.flatMap { $0.id == rec.id ? $0 : nil } ?? Cam.predict(sim, id: rec.id, balls: rec.balls, ball: rec.ball, angle: rec.angle, power: rec.power, spin: rec.spin)
     while !Cam.step(sim, P, 1) {}
     let tr = P.tr, ci = rec.balls.firstIndex { $0.n == rec.ball } ?? -1, oi = tr.first.flatMap { f in rec.balls.firstIndex { $0.n == f.n } } ?? -1
@@ -665,7 +665,7 @@ final class TableModel {
     }
     pushUndo(gm)
     let added = hit == nil ? engine.onTable(n).first { !engine.onTable(gm).contains($0) } : nil
-    g = n; syncBalls(); aimAtNearest()
+    g = n; syncBalls(); aimAtNearest(keep: true)
     msg = hit.map { "Took the \($0.n) off." } ?? "Dropped the \(added ?? 0)."
   }
   /* audit F5: a CPU quick game the player has shot in (cpuGameLive) */
@@ -690,6 +690,8 @@ final class TableModel {
   @ObservationIgnored var loupeT = 0.0
   @ObservationIgnored var loupe: (x: Double, y: Double, r: Double, to: (x: Double, y: Double, r: Double))? = nil
   @ObservationIgnored var guideLegal = true
+  /* the ghost ball the guide last drew (drawHeld's padlock stands by it), nil with no guide */
+  @ObservationIgnored var ghostAt: (Double, Double)? = nil
   /* the 3D view (4o): on, its pitch and distance (the player's, kept in the settings), the camera last drawn */
   var view3d = Prefs.view == "3d"
   /* the rail's 3D switch: its centre on the stage as last drawn (nil: not shown) */
@@ -945,7 +947,10 @@ final class TableModel {
 
   /* bumper pool: the player chose the ball to strike this turn (pickBall), so auto aim keeps it */
   @ObservationIgnored var picked = false
-  func aimAtNearest() {
+  func aimAtNearest(keep: Bool = false) {
+    /* a turn, a ball in hand moved, a new rack: the pointer's hold starts over (every aimLock reset); a bumper ball
+       picked or a free table edited keeps it (keep) */
+    if !keep { aimLock = .free }
     /* auto aim off: each turn keeps the aim it was left with (a new rack still aims) */
     if !(Prefs.autoAim && careerAutoAim) && (g?.shots ?? 0) > 0 { return }
     /* bumper's autoAim (page 5): suggestBumper's ball unless one was picked; its line, or straight at the far cup */
@@ -973,7 +978,8 @@ final class TableModel {
       /* the cue points at the centre of the ball suggested (carom: the suggested line itself) */
       guard let t = gm.balls.first(where: { $0.n == sg.n }) else { return }
       let to = gm.kind == "carom" ? sg.angle : atan2(t.y - c.y, t.x - c.x)
-      if reduceMotion { aim = to; return }
+      lockAim()
+      if reduceMotion { aim = to; keepAim(); return }
       aimAnim = (aim, AimFeel.wrap(to - aim), now)
       return
     }
@@ -1007,6 +1013,68 @@ final class TableModel {
   func takeAim() {
     if let a = aimAnim { aim = a.from + a.d; aimAnim = nil }
     handAimed = true
+  }
+
+  /* a pointer (an iPad's mouse or trackpad; page 5's input comment). hov: where the pointer is anchored (x, y, since t),
+     whether it is on the bed, and `rest`, the aim where it last rested. aimLock: free, pending (lock wherever the
+     pointer next shows up), locked at a point, or held: a click on the cloth (or a pointer sweep let go) holds the aim,
+     top-down only, and no later pointer move breaks it; the wheel, the arrows and the english still adjust it; another
+     click aims there and holds that; Esc (before it pauses) or a right click lets go. Touch and pen never hold */
+  enum AimLock: Equatable { case free, pending, at(CGPoint), held }
+  struct Hov { var x: CGFloat, y: CGFloat, t: Double, bed: Bool, rest: Double }
+  static let LOCK_PX: CGFloat = 24, DWELL_MS = 150.0
+  @ObservationIgnored var aimLock = AimLock.free
+  @ObservationIgnored var hov: Hov? = nil
+  func lockAim() { if aimLock != .held { aimLock = hov.map { .at(CGPoint(x: $0.x, y: $0.y)) } ?? .pending }; keepAim() }
+  /* a fine adjustment made off the table: lock where the pointer next shows up (a held aim stays held) */
+  func pendLock() { if aimLock != .held { aimLock = .pending }; keepAim() }
+  /* the pointer's click-to-hold: top-down only, where hover aims */
+  func holdAim() { aimLock = view3d ? .free : .held; keepAim() }
+  @discardableResult func letGoAim() -> Bool {
+    guard aimLock == .held else { return false }
+    aimLock = .free; keepAim()
+    return true
+  }
+  var aimHeld: Bool { aimLock == .held && human && trickRes == nil && rp == nil && !view3d }
+  /* this aim is deliberate: a dash off the bed comes back to it */
+  func keepAim() { hov?.rest = aim }
+  func leaveBed() {
+    guard var h = hov, h.bed else { return }
+    h.bed = false; hov = h
+    if human && !touching && aimLock == .free { aim = h.rest }
+  }
+  /* hover: the pointer at p (the table's view, at time t in ms) aims, over the bed only and never while the aim is locked
+     or in 3D (the camera is the aim) */
+  func hover(_ p: CGPoint, _ t: Double, _ m: Mapper) {
+    if view3d || touching { return }
+    let (x, y) = m.table(p), bed = x >= 0 && x <= sim.TL && y >= 0 && y <= sim.TW
+    if hov == nil { hov = Hov(x: p.x, y: p.y, t: t, bed: false, rest: aim) }
+    if JSMath.hypot(Double(p.x - hov!.x), Double(p.y - hov!.y)) > 4 {
+      if t - hov!.t >= TableModel.DWELL_MS && hov!.bed { hov!.rest = aim }
+      hov!.x = p.x; hov!.y = p.y; hov!.t = t
+    }
+    if aimLock == .pending { aimLock = .at(p) }
+    else if case .at(let q) = aimLock, JSMath.hypot(Double(p.x - q.x), Double(p.y - q.y)) > Double(TableModel.LOCK_PX) { aimLock = .free }
+    if !bed { leaveBed(); return }
+    hov!.bed = true
+    let aiming = human && trickRes == nil && rp == nil
+    if aiming && !mouseTipSeen { showMouseTip() }
+    guard aiming, aimLock == .free, let c = cue else { return }
+    let s = m.pt(c.x, c.y)
+    if JSMath.hypot(Double(p.x - s.x), Double(p.y - s.y)) > 2 * sim.BALL_R * m.k { aimAnim = nil; aim = atan2(y - c.y, x - c.x) }
+  }
+  /* the pointer tip: once ever, the first time a pointer hovers the bed on the player's aim (felt.mouseTip.v1, written the
+     moment it shows); never over the lesson's or a tutorial's coach */
+  static let MOUSE_TIP = "Click the cloth to lock your aim, then pull the power bar."
+  @ObservationIgnored private(set) var mouseTipSeen = MouseTipStore.seen
+  @ObservationIgnored private(set) var mouseTipShows = 0
+  @discardableResult func showMouseTip() -> Bool {
+    guard !mouseTipSeen, lesson == nil, tut == nil else { return false }
+    mouseTipSeen = true; mouseTipShows += 1
+    MouseTipStore.seen = true
+    banner = ("Aiming With a Mouse", TableModel.MOUSE_TIP, now + 4.2)
+    msg = TableModel.MOUSE_TIP
+    return true
   }
 
   /* only the power bar shoots (the page's rule). Its release starts the stroke: the cue is driven
@@ -1080,6 +1148,9 @@ final class TableModel {
   /* a test hook: `-felt-aimbench` turns the aim a little every frame, as a slow sweep, and prints every 2 s the frames,
      the worst gap between them and how many times each counted view's body ran (Bench.bodies) */
   static let aimBench = ProcessInfo.processInfo.arguments.contains("-felt-aimbench")
+  /* `-felt-aimprobe`: the aim and its hold in an element's value for the UI tests (PointerTests) */
+  static let aimProbe = ProcessInfo.processInfo.arguments.contains("-felt-aimprobe")
+  static let pointerBench = ProcessInfo.processInfo.arguments.contains("-felt-pointerbench")
   static let touchBench = ProcessInfo.processInfo.arguments.contains("-felt-touchbench") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-hand") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-slow")
   @ObservationIgnored private var bench: (t0: Double, prev: Double, n: Int, worst: Double)?
   /* keyboard (page 5's keydown, for a hardware keyboard): left and right aim (Shift coarse 0.03, Alt or Ctrl one ridge
@@ -1094,7 +1165,8 @@ final class TableModel {
   var human: Bool { !cpuTurn && g?.winner == nil && rolling == nil && stroke == nil }
   func key(_ k: String, shift: Bool, alt: Bool) -> Bool {
     if keyPull != nil { cancelKeyPull(); return true }
-    if k == "escape" { paused.toggle(); return true }
+    /* Esc lets a held pointer aim go before it pauses */
+    if k == "escape" { if !paused && letGoAim() { return true }; paused.toggle(); return true }
     guard !paused, human, trickRes == nil else { return false }
     let dx = k == "right" ? 1.0 : k == "left" ? -1.0 : 0, dy = k == "up" ? 1.0 : k == "down" ? -1.0 : 0
     if keyMove {
@@ -1121,6 +1193,7 @@ final class TableModel {
     case "left", "right":
       takeAim()
       aim = AimFeel.wrap(aim + dx * (shift ? 0.03 : alt ? TableModel.FINE_STEP : 0.004))
+      lockAim()
       return true
     default: return false
     }
@@ -1774,7 +1847,7 @@ final class TableModel {
   /* pickBall: bumper pool, strike ball n from now on (one of the shooter's, any but on the opening) */
   func pickBall(_ n: Int) -> Bool {
     guard var gm = g, gm.kind == "bumper", engine.bumperStrikers(gm).contains(n), rolling == nil, stroke == nil, !cpuTurn else { return false }
-    if gm.striker != n { gm.striker = n; g = gm; syncBalls(); picked = true; aimAtNearest() }
+    if gm.striker != n { gm.striker = n; g = gm; syncBalls(); picked = true; aimAtNearest(keep: true) }
     return true
   }
 

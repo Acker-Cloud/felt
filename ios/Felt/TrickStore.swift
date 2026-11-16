@@ -84,6 +84,15 @@ enum TutStore {
   static func offer(_ kind: String) -> Bool { let r = rec; return tutById(kind) != nil && !r.done.contains(kind) && !r.skipped.contains(kind) && !r.never }
 }
 
+/* felt.mouseTip.v1: { v: 1, seen }; anything unreadable is unseen */
+enum MouseTipStore {
+  static let KEY = "felt.mouseTip.v1"
+  static var seen: Bool {
+    get { guard let o = TrickStore.json(KEY) as? [String: Any], TrickStore.int(o["v"]) == 1 else { return false }; return (o["seen"] as? Bool) == true }
+    set { TrickStore.put(KEY, ["v": 1, "seen": newValue]) }
+  }
+}
+
 /* felt.lesson.v1: { v: 1, seen (the first-run offer was shown), done }; anything unreadable is a first run */
 enum LessonStore {
   static let KEY = "felt.lesson.v1"

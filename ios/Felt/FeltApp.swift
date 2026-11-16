@@ -404,7 +404,7 @@ struct TableScreen: View {
     /* a swipe from an edge takes two at the table (the first only shows the home bar), as games do */
     .defersSystemGestures(on: Chrome.noDefer ? [] : .all)
     .focusable(!Chrome.noFocus).focusEffectDisabled().focused($keys)
-    .onAppear { keys = true }
+    .onAppear { keys = true; PointerWatch.install(); PointerWatch.onSecondary = { [weak model] in model?.letGoAim() } }
     /* `-felt-keybench`: keys through model.key (10 right, 2 up, Space with keyShoot, then the result printed) */
     .task {
       guard ProcessInfo.processInfo.arguments.contains("-felt-keybench") else { return }
@@ -489,8 +489,23 @@ struct TableScreen: View {
         })
         .gesture(DragGesture(minimumDistance: 0).onChanged { v in TouchLog.add(String(format: "ev %.4f %.1f %.1f", v.time.timeIntervalSinceReferenceDate, v.location.x, v.location.y)); model.touching = true; if tch.pinch0 == nil { touch(v.location, v.time.timeIntervalSinceReferenceDate, tg.size, began: tch.gest == nil && !tch.eating && !tch.picking && !tch.placing) } }
           .onEnded { v in lift(v.location, v.time.timeIntervalSinceReferenceDate, tg.size) })
+        /* a pointer (an iPad's mouse or trackpad) aims by hovering the bed (the model's hover); not a gesture, so it
+           never holds the drag back */
+        .overlay(alignment: .topLeading) {
+          if TableModel.aimProbe {
+            let _ = model.frame
+            Text("probe").font(.system(size: 1)).opacity(0.02).allowsHitTesting(false)
+              .accessibilityIdentifier("aim-probe").accessibilityValue(String(format: "%@ %.4f", model.aimHeld ? "held" : "free", model.aim))
+          }
+        }
+        .onContinuousHover { phase in
+          switch phase {
+          case .active(let p): model.hover(p, CACurrentMediaTime() * 1000, Mapper(size: tg.size, TL: model.sim.TL, TW: model.sim.TW))
+          case .ended: model.leaveBed()
+          }
+        }
         /* a test hook: `-felt-touchbench` sweeps a synthetic finger through touch() at 120 Hz (a press, an arc, a lift, every 2 s) */
-        .task(id: tg.size) { if TableModel.touchBench { await touchBench(tg.size) } }
+        .task(id: tg.size) { if TableModel.touchBench { await touchBench(tg.size) }; if TableModel.pointerBench { await pointerBench(tg.size) } }
         .accessibilityElement()
         .accessibilityLabel("Table")
         .accessibilityIdentifier("table")
@@ -545,6 +560,60 @@ struct TableScreen: View {
       lift(CGPoint(x: cx + rx * (hand ? 0 : 1), y: cy), t0 + 200 / 120, size)
       try? await Task.sleep(for: .milliseconds(300))
     }
+  }
+  /* `-felt-pointerbench`: a pointer through the model's hover and the table's own touch path (as PointerWatch marks a
+     press): hover aims, a click holds, hovers leave it, Esc lets go, a right click lets go, a sweep let go holds, a
+     finger's tap never holds; the first hover's tip. Prints each failure, then ok or the count */
+  private func pointerBench(_ size: CGSize) async {
+    try? await Task.sleep(for: .seconds(2))
+    let m = Mapper(size: size, TL: model.sim.TL, TW: model.sim.TW)
+    var fails: [String] = []
+    func pt(_ u: CGFloat, _ v: CGFloat) -> CGPoint { CGPoint(x: size.width * u, y: size.height * v) }
+    func hover(_ u: CGFloat, _ v: CGFloat) async { model.hover(pt(u, v), CACurrentMediaTime() * 1000, m); try? await Task.sleep(for: .milliseconds(200)) }
+    func press(_ from: CGPoint, _ to: CGPoint, pointer: Bool, secondary: Bool = false) async {
+      PointerWatch.pointer = pointer; PointerWatch.secondary = secondary
+      let t0 = Date.timeIntervalSinceReferenceDate, n = from == to ? 1 : 12
+      for k in 0..<n {
+        let u = CGFloat(k) / CGFloat(max(1, n - 1)), p = CGPoint(x: from.x + (to.x - from.x) * u, y: from.y + (to.y - from.y) * u)
+        model.touching = true; touch(p, t0 + Double(k) / 120, size, began: k == 0); try? await Task.sleep(for: .milliseconds(8))
+      }
+      lift(to, t0 + Double(n) / 120 + 0.02, size)
+      try? await Task.sleep(for: .milliseconds(200))
+    }
+    func check(_ ok: Bool, _ what: String) { if !ok { fails.append(what) } }
+    await hover(0.3, 0.2); let a1 = model.aim
+    check(model.mouseTipShows == 1, "the first hover shows the tip")
+    await hover(0.75, 0.25); let a2 = model.aim
+    check(!model.aimHeld && abs(a2 - a1) > 0.05, "hover aims")
+    await press(pt(0.6, 0.15), pt(0.6, 0.15), pointer: true); let a3 = model.aim
+    check(model.aimHeld && abs(a3 - a2) > 0.01, "a click aims and holds")
+    await hover(0.2, 0.3); await hover(0.8, 0.2)
+    check(model.aimHeld && model.aim == a3, "no hover moves a held aim")
+    _ = model.key("left", shift: false, alt: false)
+    check(model.aimHeld && model.aim != a3, "an arrow adjusts a held aim and it stays held")
+    _ = model.key("escape", shift: false, alt: false)
+    check(!model.aimHeld && !model.paused, "Esc lets go before it pauses")
+    await hover(0.35, 0.2)
+    check(abs(model.aim - a3) > 0.01, "hover aims again")
+    await press(pt(0.7, 0.2), pt(0.7, 0.2), pointer: true)
+    check(model.aimHeld, "a second click holds")
+    PointerWatch.onSecondary?()
+    check(!model.aimHeld, "a right click lets go")
+    await press(pt(0.7, 0.2), pt(0.7, 0.2), pointer: true); await press(pt(0.7, 0.2), pt(0.7, 0.2), pointer: true, secondary: true)
+    check(!model.aimHeld, "a right press on the table lets go")
+    await press(pt(0.3, 0.2), pt(0.7, 0.25), pointer: true)
+    check(model.aimHeld, "a pointer sweep let go holds")
+    await press(pt(0.6, 0.2), pt(0.6, 0.2), pointer: false)
+    check(!model.aimHeld, "a finger's tap never holds")
+    await press(pt(0.3, 0.2), pt(0.7, 0.25), pointer: false)
+    check(!model.aimHeld, "a finger's sweep never holds")
+    await hover(0.4, 0.2)
+    check(model.mouseTipShows == 1, "the tip shows once")
+    /* left held, for a look at drawHeld */
+    await press(pt(0.62, 0.2), pt(0.62, 0.2), pointer: true)
+    PointerWatch.pointer = false
+    for f in fails { print("felt-pointerbench FAIL " + f) }
+    print(fails.isEmpty ? "felt-pointerbench ok (14 checks)" : "felt-pointerbench \(fails.count) failed"); fflush(stdout)
   }
   private func touch(_ at: CGPoint, _ time: TimeInterval, _ size: CGSize, began: Bool) {
     let tt0 = CACurrentMediaTime()
@@ -644,6 +713,10 @@ struct TableScreen: View {
   private func touchEnd(_ at: CGPoint, _ time: TimeInterval, _ size: CGSize) {
     guard var g = tch.gest, !tch.placing, !tch.picking, model.rolling == nil, let c = model.cue else { return }
     let s = model.sim, m = model.camView(Mapper(size: size, TL: s.TL, TW: s.TW)), tm = TouchMap(model, m), t = time * 1000
+    /* the press's kind, as the window's watcher saw it begin: a pointer's click holds the aim it sets, a right click only
+       lets a held aim go; a finger or a pen never holds */
+    let mouse = PointerWatch.pointer
+    if mouse && PointerWatch.secondary { model.letGoAim(); return }
     /* in 3D (v3Drag) a let-go that neither swept nor tilted is a tap, read through the camera (v3Table) */
     if tm.cam != nil ? (!g.sweep && !g.held) : (!g.sweep || (!g.held && g.far <= AimFeel.TAP_SLOP && t - g.t0 < AimFeel.TAP_MS)) {
       let p = g.p0, (x, y) = tm.table(p)
@@ -656,13 +729,19 @@ struct TableScreen: View {
         let od = best.map { o -> Double in let w = tm.pt(o.x, o.y); return JSMath.hypot(Double(w.x - p.x), Double(w.y - p.y)) }
         if dc <= 2 * s.BALL_R * tm.k && !(od.map { $0 < dc } ?? false) { return }
       }
+      /* with a call open, a held click on a ball calls it (touch()) and leaves the aim as it is */
+      if best != nil && mouse && model.aimLock == .held && model.callOn { return }
       if let o = best { model.takeAim(); model.aim = atan2(o.y - c.y, o.x - c.x) }
       else if JSMath.hypot(x - c.x, y - c.y) > s.BALL_R { model.takeAim(); model.aim = atan2(y - c.y, x - c.x) }
+      else { return }
+      if mouse { model.holdAim() } else { model.aimLock = .free; model.keepAim() }
       return
     }
     if tm.cam != nil { return }
     turnTo(&g, at, t, m, c)
-    if let r = AimFeel.liftAim(g.trail, t) { model.aim = r }
+    /* the finger lifting off is not aiming: put back the aim it rested on (a pointer's let-go is still) */
+    if !mouse, let r = AimFeel.liftAim(g.trail, t) { model.aim = r }
+    if mouse { model.hov?.x = at.x; model.hov?.y = at.y; model.holdAim() } else { model.lockAim() }
   }
 }
 
@@ -812,6 +891,8 @@ struct FineWheel: View {
       }.onEnded { v in
         if model.rolling == nil, let r = AimFeel.liftAim(trail, v.time.timeIntervalSinceReferenceDate * 1000) { model.aim = r }
         last = 0; live = false; trail = []; model.fineAim = false
+        /* lock wherever the pointer next shows up on the table, not where it left it */
+        model.pendLock()
       })
       .accessibilityLabel("Fine aim")
   }
@@ -2895,6 +2976,32 @@ struct LinkTimeline<Content: View>: View {
 }
 
 /* the window's chrome while a table is open (TableScreen counts itself in and out) */
+/* the pointer's presses (an iPad's mouse or trackpad; UIApplicationSupportsIndirectInputEvents makes them indirectPointer
+   touches): a watcher on the window notes each press's kind as it begins and then fails at once, so it never delays,
+   cancels or competes with the table's DragGesture (a gesture waiting to begin held back every drag event to the lift,
+   2026-11-15); a secondary click (a right click) is a tap of its own, the table's letGoAim */
+@MainActor final class PointerWatch: UIGestureRecognizer, UIGestureRecognizerDelegate {
+  static var pointer = false, secondary = false
+  static var onSecondary: (() -> Void)?
+  static func install() {
+    guard let w = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first,
+          !(w.gestureRecognizers ?? []).contains(where: { $0 is PointerWatch }) else { return }
+    let p = PointerWatch(target: nil, action: nil)
+    p.cancelsTouchesInView = false; p.delaysTouchesBegan = false; p.delaysTouchesEnded = false; p.delegate = p
+    w.addGestureRecognizer(p)
+    let r = UITapGestureRecognizer(target: p, action: #selector(rightClick))
+    r.buttonMaskRequired = .secondary; r.cancelsTouchesInView = false; r.delaysTouchesEnded = false; r.delegate = p
+    w.addGestureRecognizer(r)
+  }
+  override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+    PointerWatch.pointer = touches.contains { $0.type == .indirectPointer }
+    PointerWatch.secondary = PointerWatch.pointer && event.buttonMask.contains(.secondary)
+    state = .failed
+  }
+  @objc private func rightClick() { PointerWatch.onSecondary?() }
+  func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool { true }
+}
+
 @MainActor @Observable final class Chrome {
   static let shared = Chrome()
   var atTable = 0
