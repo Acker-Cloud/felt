@@ -20,6 +20,21 @@ public struct CallConfig: Sendable, Equatable {
   public var mode = "official", detail = "pocket", safety = true, eight = false, obvious = true, change = true
   public init() {}
 }
+/* the called-shot configuration: mode (who must call: 'off', 'eight' (8-ball games, by the official rules), 'official'
+   (what the ruleset says), 'all' (every shot of every pocket game but the break) or 'career' (the event's own; the
+   official rules outside one)), detail (what a call names: 'ball', 'pocket', 'rails' or 'strict'), and the switches
+   safety, eight, obvious and change. makeCall(c): CALL_DEFAULT with each field of c that is valid (a known mode or
+   detail, a switch that is a boolean) */
+public let CALL_MODES = ["off", "eight", "official", "all", "career"], CALL_DETAILS = ["ball", "pocket", "rails", "strict"]
+public var CALL_SWITCHES: [(String, WritableKeyPath<CallConfig, Bool>)] { [("safety", \.safety), ("eight", \.eight), ("obvious", \.obvious), ("change", \.change)] }
+public func makeCall(_ c: [String: Any]?) -> CallConfig {
+  var o = CallConfig()
+  guard let c else { return o }
+  if let m = c["mode"] as? String, CALL_MODES.contains(m) { o.mode = m }
+  if let d = c["detail"] as? String, CALL_DETAILS.contains(d) { o.detail = d }
+  for (k, p) in CALL_SWITCHES { if let b = c[k] as? Bool { o[keyPath: p] = b } }
+  return o
+}
 
 public let RULESETS: [String: RuleSet] = {
   func r(_ id: String, _ game: String, _ name: String, _ source: String, _ f: (inout RuleSet) -> Void = { _ in }) -> RuleSet {
