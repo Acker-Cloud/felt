@@ -76,7 +76,7 @@ enum Words {
   static func dWords(_ p: Int) -> String { cpuMode ? "Ball in hand in the D for \(p == 0 ? "you" : "the CPU")" : "\(nameOf(p)): ball in hand in the D" }
   static func frameHead(_ w: Int) -> String { cpuMode ? (w == 0 ? "You win the frame" : "The CPU wins the frame") : "\(nameOf(w)) wins the frame" }
   /* snookerWords: the banner and the status line after a shot at snooker */
-  static func snooker(_ v: Verdict, _ g: Game, _ shooter: Int, _ who: Int) -> (msg: String, banner: (String, String, Double)?) {
+  static func snooker(_ v: Verdict, _ g: Game, _ shooter: Int, _ who: Int, chose: (who: Int, kind: String, choice: String)? = nil) -> (msg: String, banner: (String, String, Double)?) {
     guard let sv = v.snk else { return ("", nil) }
     if let fo = sv.frameOver {
       let sc = fo.score, line = fo.forfeit != nil ? "Three misses" : fo.conceded ? "Conceded" : "\(max(sc[0], sc[1]))-\(min(sc[0], sc[1]))"
@@ -86,14 +86,15 @@ enum Words {
     if sv.reblack { return ("Level at \(g.score![0]): the black is re-spotted. \(dWords(who)).", ("Re-spotted black", "Level at \(g.score![0])\n\(dWords(who))", 2.2)) }
     if let f = v.foul {
       let head = sv.miss == true ? "Foul and a miss" : "Foul: \(f)", warn = sv.warn == true ? "A third miss loses the frame" : ""
-      let lines = ["\(ptsWord(sv.pen)) to \(nameOf(1 - shooter))", warn, g.inHand != nil ? dWords(who) : ""].filter { !$0.isEmpty }
-      return ("\(head)\(sv.miss == true ? ": \(f)" : ""). \(ptsWord(sv.pen)) to \(nameOf(1 - shooter)). \(warn.isEmpty ? "" : warn + ". ")\(turnOf(who)), on \(onWords(g)).",
-              (head, lines.joined(separator: "\n"), warn.isEmpty ? 1.7 : 2.4))
+      let then = chose.map { "\(nameOf($0.who)): \(optLabel($0.kind, $0.choice))" } ?? ""
+      let lines = ["\(ptsWord(sv.pen)) to \(nameOf(1 - shooter))", warn, then, g.inHand != nil ? dWords(who) : ""].filter { !$0.isEmpty }
+      return ("\(head)\(sv.miss == true ? ": \(f)" : ""). \(ptsWord(sv.pen)) to \(nameOf(1 - shooter)). \(warn.isEmpty ? "" : warn + ". ")\(then.isEmpty ? "" : then + ". ")\(turnOf(who)), on \(onWords(g)).",
+              (head, lines.joined(separator: "\n"), then.isEmpty && warn.isEmpty ? 1.7 : 2.4))
     }
     if who == shooter { return ("\(nameOf(who)): \(ptsWord(sv.pts)), break \(sv.brk). On \(onWords(g)).", nil) }
     return ("\(sv.ended > 0 ? "Break of \(sv.ended). " : "")\(turnOf(who)), on \(onWords(g)).", (turnOf(who), sv.ended > 0 ? "Break of \(sv.ended)" : "On \(onWords(g))", 1.0))
   }
-  static func optLabel(_ kind: String, _ choice: String) -> String { OPT[kind]?[choice] ?? choice }
+  static func optLabel(_ kind: String, _ choice: String) -> String { choice.hasPrefix("free:") ? "Free ball: the \(snkName(Int(choice.dropFirst(5)) ?? 0))" : OPT[kind]?[choice] ?? choice }
 
   static func callWords(_ v: Verdict, _ kind: String, _ shooter: Int, chose: (who: Int, kind: String, choice: String)? = nil) -> String {
     var parts: [String] = []

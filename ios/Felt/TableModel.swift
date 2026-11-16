@@ -1390,8 +1390,14 @@ final class TableModel {
     g = next; rolling = nil; spin = Spin(); v3Top2d = false
     /* a party: the device is handed over each time the turn goes to another player (or a choice to another) */
     if party != nil, next.winner == nil, (next.option?.who ?? next.turn) != shooter { handoff = (next.option?.who ?? next.turn, false) }
+    /* a choice the rules give (5c): the CPU answers at once (the page's nextTurn), and its choice is in the shot's words */
+    var chose: (who: Int, kind: String, choice: String)? = nil
+    while let gm = g, let o = gm.option, let pick = cpuPick(), let n = engine.chooseOption(gm, pick) {
+      chose = (o.who, o.kind, pick); g = n
+      randomOrientIfRacked(gm, n)
+    }
     syncBalls()
-    words(next, shooter)
+    words(g ?? next, shooter, chose: chose)
     aimAtNearest()
   }
   private func words(_ gm: Game, _ shooter: Int, chose: (who: Int, kind: String, choice: String)? = nil) {
@@ -1413,12 +1419,12 @@ final class TableModel {
     }
     if gm.kind == "carom" {
       let w = Words.carom(v, gm, shooter, gm.turn)
-      msg = w.msg
+      msg = chose.map { "\(Words.nameOf($0.who)): \(Words.optLabel($0.kind, $0.choice).lowercased()). \(Words.turnOf(gm.turn))." } ?? w.msg
       if gm.option == nil { banner = (w.banner.0, w.banner.1, now + w.banner.2) }
       return
     }
     if gm.kind == "snooker" {
-      let w = Words.snooker(v, gm, shooter, gm.option?.who ?? gm.turn)
+      let w = Words.snooker(v, gm, shooter, gm.option?.who ?? gm.turn, chose: chose)
       msg = gm.option != nil ? "\(w.msg) \(Words.OPT[gm.option!.kind]?["head"] ?? ""): \(Words.nameOf(gm.option!.who)) to choose." : w.msg
       if let b = w.banner, gm.option == nil { banner = (b.0, b.1, now + b.2) }
       return
@@ -1460,6 +1466,17 @@ final class TableModel {
     if next.option != nil { words(next, gm.turn, chose: (o.who, o.kind, choice)) }
     randomOrientIfRacked(gm, next)
     aimAtNearest()
+    cpuAnswer()
+  }
+  /* the page's nextTurn: a choice the rules give the CPU (game.option) is answered at once, with no think time and no
+     wait, and the turn goes on from what it chose (choose answers the next one, if the CPU's). Called as the shot
+     settles, after a player's choice and from cpuStep, so never under the pause menu, the handoff or a replay */
+  private func cpuAnswer() { if let pick = cpuPick() { choose(pick) } }
+  /* cpuOption's answer to the choice on the table, when it is the CPU's to make */
+  private func cpuPick() -> String? {
+    guard cpuTurn, let gm = g, let o = gm.option, let level = actingLevel else { return nil }
+    let c = CPU(engine: engine); c.arch = actingArch; c.hill = actingHill
+    return c.cpuOption(gm, level: level) ?? o.choices[0]
   }
   /* the CPU's turn (page 5's think): its search off the main thread on its own sim, held for the page's
      think time (cpuThinkMs, from the search's start), then its stroke through the same cue as a player's */
@@ -1472,21 +1489,13 @@ final class TableModel {
   var actingArch: String? { exhibArch.map { $0[min(1, g?.option?.who ?? g?.turn ?? 0)] } ?? tmatch?.arch }
   var actingHill: Bool { guard let t = tmatch, !t.points else { return false }; return t.score.contains(t.need - 1) }
   func cpuStep() {
-    guard cpuTurn, !cpuBusy, rolling == nil, stroke == nil, let gm = g, let level = actingLevel else { return }
+    guard cpuTurn, !cpuBusy, rolling == nil, stroke == nil else { return }
+    cpuAnswer()
+    guard cpuTurn, let gm = g, gm.option == nil, let level = actingLevel else { return }
     let arch = actingArch, hill = actingHill
     cpuBusy = true; cpuThinking = true; cpuPlanned = false; cpuReady = nil; cpuClock = CPUThinkClock()
     cpuClock.step(now, held: false)
     let spec = spec, seed = Double(Int.random(in: 1...1_000_000))
-    if gm.option != nil {
-      let c = CPU(engine: engine); c.arch = arch; c.hill = hill
-      let pick = c.cpuOption(gm, level: level) ?? gm.option!.choices[0]
-      Task { @MainActor in
-        try? await Task.sleep(for: .milliseconds(900))
-        cpuBusy = false; cpuThinking = false
-        if g?.option != nil { choose(pick) }
-      }
-      return
-    }
     Task.detached(priority: .userInitiated) {
       let sim = Sim(); TableModel.setUp(sim, spec)
       let c = CPU(engine: RulesEngine(sim: sim)); c.arch = arch; c.hill = hill
