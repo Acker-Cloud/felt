@@ -1,5 +1,6 @@
 /* felt, native. Home lists the tables; a table is aimed by touch, fine-tuned on the wheel, given
    english on the pad and shot from the power bar alone: pull it down, let go. */
+import FeltRender
 import FeltSim
 import QuartzCore
 import SwiftUI
@@ -2110,6 +2111,7 @@ struct FlowDots: View {
 struct Dot: View {
   let n: Int
   let size: CGFloat
+  @AppStorage("felt.settings.marks") private var marks = false
   var body: some View {
     let c = ballColor(n), col = Color(rgb: c.0, c.1, c.2)
     let lum = { (v: Int) -> Double in let x = Double(v) / 255; return x <= 0.03928 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
@@ -2124,6 +2126,14 @@ struct Dot: View {
       }
       if n == 21 || n == 31 { Circle().fill(n == 21 ? Color(hex: 0xf7f4ea) : Color(hex: 0xc8262c)).frame(width: size * 0.52, height: size * 0.52) }
       Circle().fill(RadialGradient(colors: [.clear, .black.opacity(0.35)], center: UnitPoint(x: 0.4, y: 0.4), startRadius: size * 0.2, endRadius: size * 0.6))
+      /* .cb: the colour-blind safe mark (Settings, Accessibility; markOf, 4b), inset 12%, light with a dark number or dark
+         with a light one, a half-point ring of the other tone; 7 pt words, 10 pt on the potted row's 18 pt dots */
+      if marks, let m = BallPainter.markOf(n) {
+        let fg = m.1 ? Color(hex: 0xf7f4ea) : Color(hex: 0x141414), bg = m.1 ? Color(hex: 0x141414) : Color(hex: 0xf7f4ea)
+        Text(m.0).font(.system(size: size >= 18 ? 10 : 7, weight: .bold)).foregroundStyle(fg).lineLimit(1).fixedSize()
+          .frame(width: size * 0.76, height: size * 0.76)
+          .background(Circle().fill(bg)).overlay(Circle().stroke(fg, lineWidth: 0.5).padding(-0.25))
+      }
     }
     .frame(width: size, height: size)
     .overlay(Circle().stroke(dark ? Color(rgb: 0xa3, 0xa3, 0xaa) : .black.opacity(0.3), lineWidth: dark ? 1.5 : 1).padding(dark ? -0.75 : -0.5))
