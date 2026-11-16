@@ -212,11 +212,13 @@ final class TableModel {
     let plan = Cam.plan(tr, Cam.REPLAY, rec.balls.indices.map { $0 == ci || $0 == oi }, lead: TableModel.REPLAY_LEAD, TL: sim.TL, TW: sim.TW, RAIL: camRail, POCKETS: sim.POCKETS)
     rp = Replay(rec: rec, tab: sim.newTable(rec.balls.map { $0.copy() }, cue: rec.ball), lead: -TableModel.REPLAY_LEAD, camT: -TableModel.REPLAY_LEAD, moments: moments, keepOrient: orient, plan: plan)
     orient = rec.orient; pots = []; effects = []
+    sound.replaying = true
   }
   /* endReplay: the live table back exactly as it was */
   func endReplay() {
     guard let R = rp else { return }
     rp = nil; orient = R.keepOrient; pots = []
+    sound.replaying = false
   }
   private func replayRate(_ t: Double) -> Double {
     var w = 0.0
@@ -811,6 +813,7 @@ final class TableModel {
     }
     self.exhib = exhib
     self.exhibArch = exhibArch
+    sound.replaying = false   /* a table left mid-replay leaves the shared sound turned down: a new one starts live */
     self.party = party.map { Party(names: $0.names, wins: $0.names.map { _ in 0 }, ruleset: $0.ruleset) }
     Words.cpuMode = cpuLevel != nil
     /* nameOf: an exhibition's or a party's players, else (two players) the names given at setup, else Player 1 and 2 */

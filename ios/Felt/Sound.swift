@@ -73,6 +73,9 @@ final class Sound {
   }
 
   private var now: Double { CACurrentMediaTime() }
+  /* a replay (5r) plays its hits at REPLAY_GAIN of the live ones (the page turns the bus down) and buzzes nothing */
+  static let REPLAY_GAIN = 0.45
+  var replaying = false
 
   /* the hash: hash01 (a value in [0, 1) for a seed); vary(x, r): x within +-r of itself */
   private static func hash01(_ n: Int32) -> Double {
@@ -94,7 +97,7 @@ final class Sound {
   @discardableResult private func hit(_ take: (AVAudioPCMBuffer, String)?, _ gain: Double, _ rate: Double, _ bright: Double, cut: Double = 0, fade: Double = 0.05, delay: Double = 0) -> Double {
     /* the volumes (settings.vol, settings.volFx): the bus carries the master times BUS_GAIN, each take the table
        sounds' share */
-    bus.outputVolume = Float(0.55 * Double(Prefs.int("vol", 100)) / 100)
+    bus.outputVolume = Float(0.55 * Double(Prefs.int("vol", 100)) / 100 * (replaying ? Sound.REPLAY_GAIN : 1))
     let gain = gain * Double(Prefs.int("volFx", 100)) / 100
     guard ok, let (buf0, id) = take, gain > 0.0005 else { return now }
     let t = now + delay
@@ -254,6 +257,7 @@ final class Sound {
     if firm { thud.impactOccurred(intensity: 0.8) } else { tick.selectionChanged() }
   }
   private func buzz(_ kind: String, _ v: Double) {
+    if replaying { return }   /* a replay is a look back: no ticks */
     if ["ball", "rail", "jaw", "post"].contains(kind) {
       guard v >= (kind == "ball" ? 1.5 : 2) else { return }
       let t = now
