@@ -26,7 +26,7 @@ struct HelpView: View {
   /* howList: a row per topic, its picture on the accent's tile (a game's ball, else the topic's glyph), the name and
      line, 54 pt; the title the list's head, as the page's header */
   var body: some View {
-    List {
+    CapList {
       Section {
         ForEach(HelpTopic.all) { t in
           NavigationLink { HelpPage(t: t, acts: acts) } label: {
@@ -60,7 +60,7 @@ struct HelpPage: View {
   let t: HelpTopic
   let acts: HelpActions
   var body: some View {
-    List {
+    CapList {
       if !t.rules.isEmpty {
         Section {
           ForEach(Array(t.rules.enumerated()), id: \.offset) { _, r in

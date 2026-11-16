@@ -162,7 +162,7 @@ struct CareerSlots: View {
   var body: some View {
     let _ = store.rev
     let E = store.E, slots = E.listSlots(), full = slots.count >= 6, ins = EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)
-    List {
+    CapList {
       CareerTitle(kick: "Career", title: "Your Careers")
       if !store.msg.isEmpty { Section { Text(store.msg).font(.system(size: 15)) } }
       Section {
@@ -238,7 +238,7 @@ struct CareerCreate: View {
   @State private var why = ""
   var body: some View {
     let ins = EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)
-    List {
+    CapList {
       CareerTitle(kick: "New career", title: "Your player")
       Section {
         field("Name") { TextField("Your name", text: $name).textInputAutocapitalization(.words).onChange(of: name) { _, v in if v.count > 24 { name = String(v.prefix(24)) } }.accessibilityIdentifier("cvf-name") }
@@ -450,7 +450,7 @@ struct CareerBracket: View {
     let E = store.E, S = E.S, H = CareerEngine.HUMAN
     if let id {
       let ev = S["cal"]!.a.first { $0["id"]!.s == id }, b = E.bracket(id)
-      List {
+      CapList {
         if let ev {
           Section {
             VStack(alignment: .leading, spacing: 2) {
@@ -489,7 +489,7 @@ struct CareerBracket: View {
     } else {
       let es = S["es"]!, fm = CareerStore.T("FORMATS")
       let evs = S["cal"]!.a.filter { truthy(es[$0["id"]!.s]?["en"]) }.reversed()
-      List {
+      CapList {
         if evs.isEmpty { Section { Text("Enter an event from the calendar; its draw shows here when it starts.").foregroundStyle(.secondary) } }
         else {
           Section {
@@ -549,7 +549,7 @@ struct CareerRivals: View {
   var body: some View {
     let _ = store.rev
     let E = store.E, rv = E.rivals(), obj = E.S["obj"]!.a.filter { !truthy($0["done"]) }
-    List {
+    CapList {
       CareerTitle(kick: "Career", title: "Rivals")
       if !obj.isEmpty {
         Section {
@@ -612,7 +612,7 @@ struct CareerPlayer: View {
     let _ = store.rev
     let E = store.E, p = E.player(id), h = E.headToHead(id), names = CareerStore.T("ATTR_NAMES")
     let dim = Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)
-    List {
+    CapList {
       CareerTitle(kick: p == .null ? "Player" : p["archName"]?.str ?? "Player", title: p == .null ? "Not Found" : p["name"]!.s)
       if p == .null { Section { Text("No such player.").foregroundStyle(.secondary) } }
       else {
@@ -695,7 +695,7 @@ struct CareerOptions: View {
   var body: some View {
     let _ = store.rev
     let E = store.E, o = E.S["me"]!["opt"]!, a = E.assist(), diff = E.S["profile"]?["difficulty"]?.str ?? "medium"
-    List {
+    CapList {
       CareerTitle(kick: "Difficulty: \(diff)", title: "Options")
       Section {
         toggle("Simulation Purity", "Skills are a record only: your shots are exactly yours", truthy(o["purity"]), "cvPurity") { E.setOptions(purity: $0) }
@@ -753,7 +753,7 @@ struct CareerRecords: View {
     let E = store.E, r = E.records(), p = r["personal"]!, H = CareerEngine.HUMAN
     let nm = { (id: Int) -> String in id == H ? "You" : E.player(id)["name"]?.str ?? "A player" }
     let ins = EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)
-    List {
+    CapList {
       CareerTitle(kick: "Career", title: "Records")
       Section {
         row("Longest Winning Run", nil, p["streak"].map { "\($0[0]!.i) (season \($0[1]!.i))" } ?? "None yet")
@@ -814,7 +814,7 @@ struct CareerRecap: View {
   var body: some View {
     let _ = store.rev
     let r = store.E.S["recap"] ?? .null, ins = EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)
-    List {
+    CapList {
       CareerTitle(kick: "Retired", title: r == .null ? "Recap" : r["name"]!.s)
       if r == .null { Section { Text("This career has not ended.").foregroundStyle(.secondary) } }
       else {
@@ -1020,7 +1020,7 @@ struct CareerCalendar: View {
     let list: [JV] = tab == "open" ? views.filter { avail.contains($0["id"]!.s) && E.eligibility($0).isEmpty }
       : tab == "entered" ? views.filter { truthy(es[$0["id"]!.s]?["en"]) && !truthy(es[$0["id"]!.s]?["done"]) }
       : views.filter { $0["status"]!.s != "cancelled" }
-    List {
+    CapList {
       CareerTitle(kick: "Season \(E.season), week \(E.weekOfDay(day))", title: "Calendar")
       Section {
         Picker("Show", selection: $tab) { Text("Open to You").tag("open"); Text("Entered").tag("entered"); Text("All").tag("all") }
@@ -1075,7 +1075,7 @@ struct CareerEvent: View {
   var body: some View {
     let _ = store.rev
     let E = store.E, ev = E.S["cal"]!.a.first { $0["id"]!.s == id }
-    List {
+    CapList {
       if let ev {
         let e = E.evView(ev), why = E.eligibility(ev), st = e["status"]!.s, r = e["rules"]!
         let wk = { (d: String) in E.weekOfDay(e[d]!.i) }
@@ -1162,7 +1162,7 @@ struct CareerNews: View {
   var body: some View {
     let _ = store.rev
     let Y = CareerEngine.const("YEAR").i
-    List {
+    CapList {
       ForEach(Array(store.E.S["news"]!.a.reversed().enumerated()), id: \.offset) { _, n in
         VStack(alignment: .leading, spacing: 2) {
           Text("Season \((n[0]?.i ?? 0) / Y + 1), week \((n[0]?.i ?? 0) % Y / 7 + 1)").font(.footnote).foregroundStyle(.secondary)
@@ -1207,7 +1207,7 @@ struct CareerHub: View {
     } else if ProcessInfo.processInfo.arguments.contains("-felt-career-rivals") {
       if let r = ProcessInfo.processInfo.arguments.contains("-felt-career-player") ? E.rivals().first?["id"]?.i : nil { CareerPlayer(store: store, id: r) } else { CareerRivals(store: store) }
     } else {
-    List {
+    CapList {
       Section {
         /* `-felt-career-groups`: the hub without its top, to see the groups (a test hook) */
         if !ProcessInfo.processInfo.arguments.contains("-felt-career-groups") {
@@ -1238,7 +1238,7 @@ struct CareerReview: View {
   let done: () -> Void
   @State private var a: JV = .null
   var body: some View {
-    List {
+    CapList {
       if a != .null {
         let t1 = a["t1"]!.i, mv = a["moved"]!.s, rk = a["rk"]!.a, CI = CareerStore.T("CIRCUITS").a.map { $0.s }
         CareerTitle(kick: "Season \(a["season"]!.i)", title: "Season Review")
@@ -1302,7 +1302,7 @@ struct CareerRankings: View {
     let all = E.rankings(key, top: 400).a, me = all.first { $0["human"] == true }
     let shown = Array(all.prefix(30)) + (me.map { $0["rank"]!.i > 30 ? [$0] : [] } ?? [])
     let def = E.toDefend(4)
-    List {
+    CapList {
       CareerTitle(kick: "Rankings", title: by == "circuit" ? names[CI.firstIndex(of: c) ?? 0] : by == "season" ? "This Season" : CareerStore.gameName(disc))
       Section {
         VStack(spacing: 8) {
@@ -1350,7 +1350,7 @@ struct CareerStats: View {
     let _ = store.rev
     let E = store.E, s = E.stats(), a = s["all"]!, ins = EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)
     let fr = a["foulsPerRack"]!, st = a["streak"]!.i
-    List {
+    CapList {
       CareerTitle(kick: "Career", title: "Stats")
       Section {
         VStack(spacing: 12) {
@@ -1448,7 +1448,7 @@ struct CareerShop: View {
   var body: some View {
     let _ = store.rev
     let E = store.E, items = E.shop(), money = E.S["me"]!["money"]!.d
-    List {
+    CapList {
       CareerTitle(kick: "\(CareerWords.crWords(money)) to spend", title: "Shop")
       if !store.msg.isEmpty { Section { Text(store.msg).font(.system(size: 15)) } }
       Section {} footer: {
@@ -1563,7 +1563,7 @@ struct CareerSponsors: View {
     let E = store.E, S = E.S, day = S["day"]!.i
     let act = S["spons"]!.a.filter { !truthy($0["end"]) }, offs = S["off"]!.a, past = S["sph"]!.a.count
     let note = { (t: String) in Text(t).font(.system(size: 13)).foregroundStyle(.secondary).listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)) }
-    List {
+    CapList {
       CareerTitle(kick: "Career", title: "Sponsors")
       if !store.msg.isEmpty { Section { Text(store.msg).font(.system(size: 15)) } }
       if act.isEmpty { Section { note("No sponsor yet. Offers come with results and reputation; two contracts at once, one per category.") } header: { CareerPageHead(t: "Contracts") } }
@@ -1639,7 +1639,7 @@ struct CareerPractice: View {
   let play: (String) -> Void
   var body: some View {
     let done = store.practiceToday, mas = store.E.S["me"]?["mas"], names = CareerStore.T("SKILL_NAMES")
-    List {
+    CapList {
       CareerTitle(kick: "\(done) of 3 sessions today", title: "Practice")
       Section {} footer: { Text("Each drill is played on the table and scored from your shots; the score is recorded here when it ends. Three sessions a day; practice never moves the clock. Mastery is a record; skills grow a little.") }
       Section {

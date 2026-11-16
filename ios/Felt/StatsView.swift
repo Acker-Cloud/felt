@@ -81,14 +81,19 @@ struct FormPips: View {
 struct StatsView: View {
   @State private var rec = Rec.load()
   var body: some View {
-    List {
+    CapList {
       /* .kpis: four tiles, two to a row: the win streak and best against the CPU, the trick shots' points of the
          program's, the daily shot's streak and its best */
       Section {
         let D = DailyStore.rec
+        /* four to a row above 600 pt wide (.kpis at min-width 600); never on a phone */
         Grid(horizontalSpacing: 8, verticalSpacing: 8) {
-          GridRow { kpi("Win Streak", rec.streak, "vs CPU"); kpi("Best Streak", rec.best, "vs CPU") }
-          GridRow { kpi("Trick Points", programTotal(TrickStore.score.pts), "of \(programMax())"); kpi("Daily Streak", DailyStore.streak(), "best \(D.best)") }
+          if Prefs.phone {
+            GridRow { kpi("Win Streak", rec.streak, "vs CPU"); kpi("Best Streak", rec.best, "vs CPU") }
+            GridRow { kpi("Trick Points", programTotal(TrickStore.score.pts), "of \(programMax())"); kpi("Daily Streak", DailyStore.streak(), "best \(D.best)") }
+          } else {
+            GridRow { kpi("Win Streak", rec.streak, "vs CPU"); kpi("Best Streak", rec.best, "vs CPU"); kpi("Trick Points", programTotal(TrickStore.score.pts), "of \(programMax())"); kpi("Daily Streak", DailyStore.streak(), "best \(D.best)") }
+          }
         }
         .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
       } header: {
@@ -170,7 +175,7 @@ struct StatsKindPage: View {
   var body: some View {
     let r = rec.kinds[kind]!, c = StatWords.cpuOf(r), car = kind == "carom", snk = kind == "snooker", pots = !["carom", "bumper"].contains(kind)
     let form = Array(rec.form.filter { $0.kind == kind }.suffix(10))
-    List {
+    CapList {
       Section("Games") {
         StatRow(label: "Played", value: "\(r.played)", sub: r.two > 0 ? "\(r.two) two-player" : "Two-player and against the CPU")
         StatRow(label: "Wins against the CPU", value: StatWords.of(c.w, c.n))
@@ -207,7 +212,7 @@ struct StatsBookPage: View {
   let rec: Rec
   var body: some View {
     let b = StatWords.book(rec)
-    List {
+    CapList {
       if b.isEmpty { Text("No records yet. Runs, long pots, breaks and win streaks are kept here, each with its date.").foregroundStyle(.secondary) }
       else {
         Section {
@@ -224,7 +229,7 @@ struct StatsFormPage: View {
   let rec: Rec
   var body: some View {
     let last = Array(rec.form.suffix(10)), won = last.filter { $0.wl == "W" }.count, f = Array(rec.form.suffix(20).reversed())
-    List {
+    CapList {
       Section {
         FormPips(list: last)
       } header: { Text("Last 10") } footer: { Text(last.isEmpty ? "No games against the CPU yet." : "\(StatWords.of(won, last.count)) won. Current run of wins: \(rec.streak).") }

@@ -20,10 +20,19 @@ enum Prefs {
   static var autoAim: Bool { bool("autoAim", true) }
   static var table: String { str("table", "7") }
   static var pockets: String { str("pockets", "regulation") }
-  /* snooker's table: compact (10 ft) on a phone, as loadSettings picks it */
-  /* 14.1's race: 50 on a phone, as loadSettings picks it */
-  static var race141: Int { int("race141", 50) }
-  static var snookerTable: String { str("snookerTable", "compact") }
+  /* loadSettings' phone: min(innerWidth, innerHeight) < 700 (every iPad is 744 or more either way); set at launch by
+     boot(), before any view reads it */
+  nonisolated(unsafe) static var phone = true
+  /* the defaults that go by it, registered so @AppStorage reads them too (a stored value wins) */
+  @MainActor static func boot() {
+    let s = UIScreen.main.bounds.size
+    phone = min(s.width, s.height) < 700
+    d.register(defaults: ["felt.settings.snookerTable": phone ? "compact" : "full", "felt.settings.race141": phone ? 50 : 100])
+  }
+  /* snooker's table: compact (10 ft) on a phone, full (12 ft) on a bigger screen, as loadSettings picks it */
+  /* 14.1's race: 50 on a phone, 100 on a bigger screen, as loadSettings picks it */
+  static var race141: Int { int("race141", phone ? 50 : 100) }
+  static var snookerTable: String { str("snookerTable", phone ? "compact" : "full") }
   static var snookerFrames: Int { int("snookerFrames", 1) }
   static var bumperTable: String { str("bumperTable", "octagon") }
   static var caromRace: Int { int("caromRace", 10) }
@@ -123,7 +132,7 @@ struct SettingsView: View {
      Accessibility page is not here: none of its settings (ball marks, high-contrast aim, text size, Space on the bar)
      are ported yet */
   var body: some View {
-    List {
+    CapList {
       Section {
         NavigationLink { page("Gameplay") { gameplay } } label: { PrefRow(icon: "circle.grid.2x1.fill", name: "Gameplay", line: "Rules, called shots, races, aim guide") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         NavigationLink { page("Controls") { controls } } label: { PrefRow(icon: "switch.2", name: "Controls", line: "Auto aim, layout, power bar") }.listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
@@ -143,7 +152,7 @@ struct SettingsView: View {
     .tint(.primary)
   }
   private func page<C: View>(_ title: String, @ViewBuilder _ c: () -> C) -> some View {
-    List { c() }.navigationTitle(title).navigationBarTitleDisplayMode(.inline).tint(.primary)
+    CapList { c() }.navigationTitle(title).navigationBarTitleDisplayMode(.inline).tint(.primary)
   }
   /* ppGame: Default Rules, Races, Called Shots, Aim Guide */
   @ViewBuilder private var gameplay: some View {
@@ -315,4 +324,19 @@ struct PrefRow: View {
       }
     }
   }
+}
+
+/* the full-screen sheets (How to play, Settings, Stats, Drills, the career, the modes): above 600 pt wide a card of 560
+   at most, centred (:is(#helpSheet, #prefsSheet, #statsSheet, #drillSheet, #careerSheet, #modesSheet) .sheet); full
+   width on a phone, either way up */
+extension View {
+  @ViewBuilder func pageCap(_ w: CGFloat = 560) -> some View {
+    if Prefs.phone { self } else { frame(maxWidth: w, alignment: .leading).frame(maxWidth: .infinity) }
+  }
+}
+/* a sheet's inset grouped list, capped as pageCap */
+struct CapList<C: View>: View {
+  let content: C
+  init(@ViewBuilder content: () -> C) { self.content = content() }
+  var body: some View { List { content }.pageCap() }
 }

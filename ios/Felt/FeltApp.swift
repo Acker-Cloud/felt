@@ -7,6 +7,7 @@ import UIKit
 
 @main
 struct FeltApp: App {
+  init() { Prefs.boot() }
   var body: some Scene {
     WindowGroup {
       Home().preferredColorScheme(.dark).statusBarHidden()
@@ -379,8 +380,8 @@ struct TableScreen: View {
     .overlay(alignment: .bottom) { ReplayPill(model: model).padding(.bottom, 92) }
     .overlay { if let r = model.trickRes, !model.paused { TrickResult(model: model, res: r, back: { dismiss() }) } }
     .overlay { if let r = model.drillRes, !model.paused { DrillResultView(model: model, res: r, back: { dismiss() }) } }
-    .overlay(alignment: model.coachAtTop ? .top : .bottom) { if model.tut != nil, !model.tutDone, !model.paused { CoachCard(model: model).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
-    .overlay(alignment: model.coachAtTop ? .top : .bottom) { if let L = model.lesson, !model.lessonDone, !model.paused { LessonCard(s: L).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
+    .overlay(alignment: model.coachAtTop ? .top : .bottom) { if model.tut != nil, !model.tutDone, !model.paused { CoachCard(model: model).pageCap(320).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
+    .overlay(alignment: model.coachAtTop ? .top : .bottom) { if let L = model.lesson, !model.lessonDone, !model.paused { LessonCard(s: L).pageCap(320).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
     .overlay { if model.lessonDone, !model.paused { LessonDoneView(home: { dismiss() }) } }
     .overlay { if model.tutDone, let t = tutById(model.tut!.id), !model.paused { TutDoneView(t: t, home: { dismiss() }) } }
     .onDisappear { model.abandonCpuGame(); Chrome.shared.atTable -= 1 }
@@ -448,11 +449,52 @@ struct TableScreen: View {
 
   /* #ui: padding max(2, the insets), max(4) at the foot; upright the stage over one 56 pt strip (#ctl), 4 apart, the
      strip stood in from the sides by 0.35 of the foot's inset (the display's rounded corners); else a column */
+  /* layout(): upright, the strip under the table or the side column where that is clearly bigger (a tablet: 1.04, a
+     screen under 600 wide 1.12); in the column, --colx (the room beside a table bound by the height, up to 24 pt, given
+     to the column) and --ctl-t/--ctl-b (the column flush with the table's footprint, top to bottom). Sizes as #ui's:
+     the strip 56 tall, 4 apart, padding 2 (4 at the foot); a bigger screen (min-width 700, min-height 600) 60, 8 apart,
+     padding 8; the column 64 wide, 8 from the stage, padding 8 */
+  struct Fit { var strip: Bool, big: Bool, col = 64.0, t = 0.0, b = 0.0, k = 0.0, foot = CGRect.zero }
+  private func fit(W: CGFloat, H: CGFloat, ins: EdgeInsets, upright: Bool) -> Fit {
+    let big = W >= 700 && H >= 600, TL = model.sim.TL, TW = model.sim.TW
+    let et = ins.top > 2 ? Double(ins.top) - 2 : 0
+    func map(_ w: Double, _ h: Double, _ e: Mapper.Ext) -> Mapper { Mapper(size: CGSize(width: w + e.l, height: h + e.t), TL: TL, TW: TW, ext: e) }
+    /* the footprint (the rail's outer edge, camRect) on the screen, the stage's safe corner at (x, y) */
+    func foot(_ m: Mapper, _ x: Double, _ y: Double, _ e: Mapper.Ext) -> CGRect {
+      let bw = m.upright ? TW : TL, bh = m.upright ? TL : TW
+      return CGRect(x: x - e.l + m.ox - m.rail * m.k, y: y - e.t + m.oy - m.rail * m.k, width: (bw + 2 * m.rail) * m.k, height: (bh + 2 * m.rail) * m.k)
+    }
+    let ce = Mapper.Ext(t: et, l: ins.leading > 2 ? Double(ins.leading) - 2 : 0, r: 0)
+    let cw = Double(W - max(8, ins.leading) - max(8, ins.trailing)) - 8 - 64, ch = Double(H - max(8, ins.top) - max(8, ins.bottom))
+    var m = map(cw, ch, ce)
+    if upright {
+      let sp: CGFloat = big ? 8 : 2
+      let sw = Double(W - max(sp, ins.leading) - max(sp, ins.trailing)), sh = Double(H - max(sp, ins.top) - max(big ? 8 : 4, ins.bottom)) - (big ? 68 : 60)
+      let se = Mapper.Ext(t: et, l: 0, r: 0), s = map(sw, sh, se)
+      if !(m.k > s.k * (W < 600 ? 1.12 : 1.04)) { return Fit(strip: true, big: big, k: s.k, foot: foot(s, Double(max(sp, ins.leading)), Double(max(sp, ins.top)), se)) }
+    }
+    var f = Fit(strip: false, big: big)
+    let bx = m.upright ? TW : TL, lo = max(-ce.l, -m.rail * m.k), hi = min(cw - (bx + 2 * m.rail) * m.k, cw - (m.rail + bx) * m.k), spare = (hi - lo).rounded(.down)
+    if spare >= 4 { f.col += min(24, spare); m = map(cw - min(24, spare), ch, ce) }
+    let bh = m.upright ? TL : TW, ft = m.oy - m.rail * m.k - ce.t, fb = m.oy + (bh + m.rail) * m.k - ce.t
+    f.t = max(0, ft.rounded()); f.b = max(0, (ch - fb).rounded())
+    f.k = m.k; f.foot = foot(m, Double(max(8, ins.leading)), Double(max(8, ins.top)), ce)
+    return f
+  }
+  /* `-felt-layout`: the fit printed once per size (a test hook: the table's footprint and the controls, against the page's) */
+  nonisolated(unsafe) private static var layoutSig = ""
+  private static func logFit(_ W: CGFloat, _ H: CGFloat, _ F: Fit) {
+    guard ProcessInfo.processInfo.arguments.contains("-felt-layout") else { return }
+    let r = F.foot, s = String(format: "felt-layout %.0fx%.0f %@ big %d k %.2f col %.0f ctl-t %.0f ctl-b %.0f foot %.1f %.1f %.1f %.1f", W, H, F.strip ? "strip" : "column", F.big ? 1 : 0, F.k, F.col, F.t, F.b, r.minX, r.minY, r.width, r.height)
+    if s != layoutSig { layoutSig = s; print(s) }
+  }
   @ViewBuilder private func screen(W: CGFloat, H: CGFloat, ins: EdgeInsets, upright: Bool) -> some View {
-    let layout = upright ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 8))
-    /* tableExt: the rails may run under the top inset (the status bar or the island) and, on its side, the leading one
-       (the controls' column is trailing), 2 pt short of each; the stage's canvas reaches into them */
-    let ext = Mapper.Ext(t: ins.top > 2 ? Double(ins.top) - 2 : 0, l: !upright && ins.leading > 2 ? Double(ins.leading) - 2 : 0, r: 0)
+    let F = fit(W: W, H: H, ins: ins, upright: upright), strip = F.strip, pad: CGFloat = strip && !F.big ? 2 : 8
+    let _ = Self.logFit(W, H, F)
+    let layout = strip ? AnyLayout(VStackLayout(spacing: F.big ? 8 : 4)) : AnyLayout(HStackLayout(spacing: 8))
+    /* tableExt: the rails may run under the top inset (the status bar or the island) and, beside a column, the leading
+       one (the controls' column is trailing), 2 pt short of each; the stage's canvas reaches into them */
+    let ext = Mapper.Ext(t: ins.top > 2 ? Double(ins.top) - 2 : 0, l: !strip && ins.leading > 2 ? Double(ins.leading) - 2 : 0, r: 0)
     let _ = { if Mapper.current != ext { Mapper.current = ext } }()
     layout {
       GeometryReader { tg in
@@ -511,12 +553,13 @@ struct TableScreen: View {
         .accessibilityIdentifier("table")
       }
       .padding(.top, -ext.t).padding(.leading, -ext.l)
-      Controls(model: model, upright: upright)
-        .frame(width: upright ? nil : 64, height: upright ? 56 : nil)
-        .padding(.horizontal, upright ? ins.bottom * 0.35 : 0)
+      Controls(model: model, upright: strip, big: F.big, col: F.col)
+        .frame(width: strip ? nil : F.col, height: strip ? (F.big ? 60 : 56) : nil)
+        .padding(.horizontal, strip ? ins.bottom * 0.35 : 0)
+        .padding(.top, F.t).padding(.bottom, F.b)
     }
-    .padding(.top, max(2, ins.top)).padding(.bottom, max(upright ? 4 : 8, ins.bottom))
-    .padding(.leading, max(upright ? 2 : 8, ins.leading)).padding(.trailing, max(upright ? 2 : 8, ins.trailing))
+    .padding(.top, max(pad, ins.top)).padding(.bottom, max(strip && !F.big ? 4 : 8, ins.bottom))
+    .padding(.leading, max(pad, ins.leading)).padding(.trailing, max(pad, ins.trailing))
     .frame(width: W, height: H)
   }
 
@@ -779,29 +822,27 @@ struct TableScreen: View {
 struct Controls: View {
   let model: TableModel
   let upright: Bool
+  /* a bigger screen (min-width 700, min-height 600): the strip 60 tall, 10 apart, the pad 60; the column's width (--col) */
+  var big = false
+  var col: CGFloat = 64
   /* settings.hand and settings.bar (Settings > Controls > Layout): left-handed reverses the strip (row-reverse); at the
      edge puts the power bar at the strip's end (order 6), on a column after the wheel (orders 1 and 2) */
   @AppStorage("felt.settings.hand") private var hand = "right"
   @AppStorage("felt.settings.bar") private var bar = "mid"
   var body: some View {
     let _ = Bench.hit("Controls")
-    let items = Group {
-      SpinPad(model: model)
-      PowerBar(model: model, upright: upright).overlay { LessonRing(on: model.lesson?.step == 3 && !model.lessonDone) }
-      FineWheel(model: model, upright: upright).overlay { LessonRing(on: model.lesson?.step == 2 && !model.lessonDone) }
-      pause
-    }
     if upright {
       /* the strip's flex, as the CSS resolves it: power `flex: 1` (basis 0, at least 150, 136 under 390 pt), the wheel
          `flex: 1 1 72px` up to 96: the space past their bases shared evenly, the wheel's share capped */
       GeometryReader { g in
-        let avail = g.size.width - 56 - 44 - 12, minP: CGFloat = g.size.width + 4 < 390 ? 136 : 150
+        let pad: CGFloat = big ? 60 : 56, gap: CGFloat = big ? 10 : 4
+        let avail = g.size.width - pad - 44 - 3 * gap, minP: CGFloat = g.size.width + 4 < 390 ? 136 : 150
         let wheel = max(44, min(96, 72 + (avail - 72) / 2, avail - minP))
         let base = bar == "edge" ? ["spin", "wheel", "pause", "power"] : ["spin", "power", "wheel", "pause"]
-        HStack(spacing: 4) {
+        HStack(spacing: gap) {
           ForEach(hand == "left" ? base.reversed() : base, id: \.self) { id in
             switch id {
-            case "spin": SpinPad(model: model)
+            case "spin": SpinPad(model: model, size: pad)
             case "power": PowerBar(model: model, upright: true).frame(width: avail - wheel).overlay { LessonRing(on: model.lesson?.step == 3 && !model.lessonDone) }
             case "wheel": FineWheel(model: model, upright: true).frame(width: wheel).overlay { LessonRing(on: model.lesson?.step == 2 && !model.lessonDone) }
             default: pause
@@ -809,14 +850,21 @@ struct Controls: View {
           }
         }
       }
-    } else if bar == "edge" {
+    } else {
+      /* the column (a tablet): #ctl's order, pause, the pad (col x col), then power and the wheel (at the edge the wheel
+         first), from the top (flex-start: the room left over at the foot) */
       VStack(spacing: 10) {
-        SpinPad(model: model)
         pause
-        FineWheel(model: model, upright: false).overlay { LessonRing(on: model.lesson?.step == 2 && !model.lessonDone) }
-        PowerBar(model: model, upright: false).overlay { LessonRing(on: model.lesson?.step == 3 && !model.lessonDone) }
+        SpinPad(model: model, size: col)
+        if bar == "edge" { wheelCol; powerCol } else { powerCol; wheelCol }
       }
-    } else { VStack(spacing: 10) { items } }
+      .frame(maxHeight: .infinity, alignment: .top)
+    }
+  }
+  private var powerCol: some View { PowerBar(model: model, upright: false).overlay { LessonRing(on: model.lesson?.step == 3 && !model.lessonDone) } }
+  /* the column's wheel: 200 tall on a bigger screen */
+  private var wheelCol: some View {
+    FineWheel(model: model, upright: false).frame(height: big ? 200 : nil).overlay { LessonRing(on: model.lesson?.step == 2 && !model.lessonDone) }
   }
   private var pause: some View {
     Button { model.paused = true } label: {
@@ -824,7 +872,7 @@ struct Controls: View {
         let o = CGPoint(x: size.width / 2 - 11, y: size.height / 2 - 11), k = 22.0 / 24
         for x in [6.0, 14.0] { ctx.fill(Path(roundedRect: CGRect(x: o.x + x * k, y: o.y + 5 * k, width: 4 * k, height: 14 * k), cornerRadius: 1.2 * k), with: .color(Color(rgb: 0xec, 0xec, 0xee))) }
       }
-      .frame(width: upright ? 44 : 64, height: upright ? 56 : 44)
+      .frame(width: upright ? 44 : col, height: upright ? (big ? 60 : 56) : (big ? 48 : 44))
       .background(RoundedRectangle(cornerRadius: 12).fill(Color(rgb: 0x1b, 0x1b, 0x1d)))
       .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
     }
@@ -873,7 +921,7 @@ struct FineWheel: View {
       .clipShape(RoundedRectangle(cornerRadius: 12))
       .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(live ? Color(rgb: 0xec, 0xec, 0xee) : Color(rgb: 0x6b, 0x6b, 0x74), lineWidth: 1))
       .opacity(model.rolling != nil ? 0.5 : 1)
-      .frame(minWidth: upright ? 44 : 64, maxWidth: upright ? 96 : 64, minHeight: upright ? 56 : 112, maxHeight: upright ? 56 : 200)
+      .frame(minWidth: upright ? 44 : 64, maxWidth: upright ? 96 : .infinity, minHeight: upright ? 56 : 112, maxHeight: upright ? .infinity : 200)
       .layoutPriority(upright ? 0 : 1)
       .contentShape(Rectangle())
       .gesture(DragGesture(minimumDistance: 0).onChanged { v in
@@ -902,6 +950,8 @@ struct FineWheel: View {
    ring is |spin| = 1 (inset 19%), the crosshair 62% long, the tip a chalk-blue dot ringed in white */
 struct SpinPad: View {
   let model: TableModel
+  /* #spinPad: 56; 60 in a bigger screen's strip, the column's width in a column */
+  var size: CGFloat = 56
   /* the press: when and where it began, how far it has gone, the tip before it (a hold puts it back) */
   @State private var down: (t: Date, p: CGPoint, far: CGFloat, before: Spin)? = nil
   @State private var hold: Task<Void, Never>? = nil
@@ -959,7 +1009,7 @@ struct SpinPad: View {
       }.onEnded { _ in hold?.cancel(); down = nil })
       .onTapGesture(count: 2) { if model.spinOk { model.spin = spinOf(x: 0, y: 0, e: model.spin.e) } }
     }
-    .frame(width: 56, height: 56)
+    .frame(width: size, height: size)
     .accessibilityLabel("English")
     .accessibilityValue("side \(Int(model.spin.x * 100)), follow \(Int(model.spin.y * 100))" + (model.elevDeg > 0 ? ", cue up \(model.elevDeg) degrees" : ""))
     .accessibilityAction(named: "Cue Elevation") { if model.spinOk { model.elevOpen = true } }
@@ -1042,6 +1092,8 @@ struct ElevTip: View {
 struct PowerBar: View {
   let model: TableModel
   let upright: Bool
+  /* pullFull: a thumb's reach, clamp(0.42 min(width, height), 150, 300) of the screen */
+  @MainActor static var pullFull: Double { let s = UIScreen.main.bounds.size; return min(300, max(150, 0.42 * Double(min(s.width, s.height)))) }
   @State private var t0: Date? = nil
   @State private var fullOnce = false
   @Environment(\.accessibilityReduceMotion) private var sysStill
@@ -1112,10 +1164,14 @@ struct PowerBar: View {
         model.hideOffer()
         guard model.rolling == nil else { return }
         if t0 == nil { t0 = Date() }
-        let d = upright ? v.translation.width : v.translation.height
+        let d = Double(upright ? v.translation.width : v.translation.height)
+        /* the pull's span: from the press to the bar's far end, at least half the bar, x 0.92; it arms past armPx
+           (max(28, 0.08 pullFull), a fifth of the span at most), full power at the span's end */
+        let s0 = Double(upright ? v.startLocation.x : v.startLocation.y), span = max(Double(len) - s0, Double(len) * 0.5) * 0.92
+        let arm = min(max(28, 0.08 * PowerBar.pullFull), span * 0.2)
         /* the bar does not arm without a needed call */
         let was = model.power
-        model.power = model.callReady ? min(1, max(0, Double(d / len))) : 0
+        model.power = model.callReady ? min(1, max(0, (d - arm) / (span - arm))) : 0
         /* powerFull: the bar at 100%, a soft tick in the ear and one in the hand, once per pull */
         if model.power >= 1 && was < 1 && !fullOnce { fullOnce = true; Sound.shared.cue("full") }
       }.onEnded { v in
@@ -1126,7 +1182,7 @@ struct PowerBar: View {
         model.shoot()
       })
     }
-    .frame(minWidth: upright ? 136 : 64, maxWidth: .infinity, minHeight: upright ? 56 : 96, maxHeight: upright ? 56 : 440)
+    .frame(minWidth: upright ? 136 : 64, maxWidth: .infinity, minHeight: upright ? 56 : 96, maxHeight: upright ? .infinity : 440)
     .layoutPriority(1)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("Power")
@@ -1296,7 +1352,7 @@ struct TourneyRun: View {
         }
         .accessibilityIdentifier("tourney-end")
       }
-      .padding(.horizontal, 16).padding(.bottom, 24)
+      .padding(.horizontal, 16).padding(.bottom, 24).pageCap()
     }
     .navigationTitle("").navigationBarTitleDisplayMode(.inline)
   }
@@ -1389,7 +1445,7 @@ struct TourneyDone: View {
             .background(Capsule().fill(Color(rgb: 0x2c, 0x2c, 0x30))).foregroundStyle(.white)
         }
       }
-      .padding(.horizontal, 16).padding(.bottom, 24)
+      .padding(.horizontal, 16).padding(.bottom, 24).pageCap()
     }
     .navigationTitle("").navigationBarTitleDisplayMode(.inline)
     .navigationDestination(isPresented: $fresh) { TourneySetup(store: store) }
@@ -1415,7 +1471,7 @@ struct TourneyView: View {
     else { list }
   }
   private var list: some View {
-    List {
+    CapList {
       if let t = store.tour, !t.done { running(t) } else if let t = store.tour, t.done {
         results(t)
         Section { NavigationLink { TourneySetup(store: store) } label: { Text("New Tournament").font(.headline) } }
@@ -1547,7 +1603,7 @@ struct ModeForm<C: View>: View {
         }
         content()
       }
-      .padding(.horizontal, 16).padding(.bottom, 24)
+      .padding(.horizontal, 16).padding(.bottom, 24).pageCap()
     }
     .safeAreaInset(edge: .bottom) {
       Button(action: go) { Text(action).font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
@@ -2400,21 +2456,27 @@ struct TrickResult: View {
           if !res.pts.isEmpty { Text(res.pts).font(.title3.weight(.semibold)).monospacedDigit() }
         }
         Text(res.why).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        HStack(spacing: 10) {
-          Button { model.startTrick(TRICKS[res.i].id) } label: { Text("Try Again").frame(maxWidth: .infinity, minHeight: 44) }
+        /* .btns: four to a row above 600 pt wide (min-width 600); a phone keeps its rows */
+        let btns = Prefs.phone ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+        btns {
+          let retry = Button { model.startTrick(TRICKS[res.i].id) } label: { Text("Try Again").frame(maxWidth: .infinity, minHeight: 44) }
             .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2))).accessibilityIdentifier("trickRetry")
-          if model.engine.trickSol(TRICKS[res.i]) != nil {
-            Button { model.showMe() } label: { Text("Show Me").frame(maxWidth: .infinity, minHeight: 44) }
-              .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2))).accessibilityIdentifier("trickShow")
-          }
+          let show = Button { model.showMe() } label: { Text("Show Me").frame(maxWidth: .infinity, minHeight: 44) }
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.2))).accessibilityIdentifier("trickShow")
+          let solved = model.engine.trickSol(TRICKS[res.i]) != nil
+          if Prefs.phone {
+            HStack(spacing: 10) { retry; if solved { show } }
+          } else { retry; if solved { show } }
+          Button { if res.daily { back() } else { model.startTrick(TRICKS[(res.i + 1) % TRICKS.count].id) } } label: { Text(res.daily ? "Home" : res.i == TRICKS.count - 1 ? "First" : "Next").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+            .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("trickNext")
+          Button("Back to Trick Shots", action: back).frame(maxWidth: .infinity, minHeight: 44).foregroundStyle(.primary)
         }
-        Button { if res.daily { back() } else { model.startTrick(TRICKS[(res.i + 1) % TRICKS.count].id) } } label: { Text(res.daily ? "Home" : res.i == TRICKS.count - 1 ? "First" : "Next").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
-          .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("trickNext")
-        Button("Back to Trick Shots", action: back).frame(maxWidth: .infinity, minHeight: 44).foregroundStyle(.primary)
       }
       .foregroundStyle(.primary)
       .padding(20)
       .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
+      /* #trickRes .sheet: 600 at most above 600 pt wide */
+      .pageCap(600)
       .padding(.horizontal, 12).padding(.bottom, 12)
     }
     .accessibilityElement(children: .contain)
@@ -2427,7 +2489,7 @@ struct DrillsList: View {
   let go: (String) -> Void
   var body: some View {
     let all = DrillStore.all
-    List {
+    CapList {
       Section {
         ForEach(Array(DRILL_LIB.enumerated()), id: \.offset) { i, d in
           let r = all[d.id], t = r.map { drillTier(d, $0.best) } ?? 0
@@ -2462,7 +2524,7 @@ struct DrillPage: View {
   let go: (String) -> Void
   var body: some View {
     let r = DrillStore.all[d.id], hist = Array((r?.hist ?? []).reversed().prefix(10))
-    List {
+    CapList {
       Section {
         rule("Goal", d.goal)
         rule("Scoring, \(d.shots) Shots", d.how + (d.hasOwnTotal ? "" : " Your score is the mean of the shots."))
@@ -2519,7 +2581,7 @@ struct DrillResultView: View {
       }
       .padding(20)
       .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
-      .padding(.horizontal, 12).padding(.bottom, 12)
+      .pageCap(600).padding(.horizontal, 12).padding(.bottom, 12)
     }
   }
 }
@@ -2567,7 +2629,7 @@ struct TutDoneView: View {
       .foregroundStyle(.white)
       .padding(20)
       .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
-      .padding(.horizontal, 12).padding(.bottom, 12)
+      .pageCap(440).padding(.horizontal, 12).padding(.bottom, 12)
     }
     .fullScreenCover(isPresented: $play) {
       TableScreen(model: TableModel(game: ["9": .nine, "bumper": .bumper, "carom": .carom, "snooker": .snooker, "heyball": .heyball][t.id] ?? .eight, cpu: UserDefaults.standard.string(forKey: "felt.opponent").flatMap { $0 == "two" ? nil : $0 } ?? "medium"))
@@ -2619,7 +2681,7 @@ struct LessonDoneView: View {
       .foregroundStyle(.white)
       .padding(20)
       .background(RoundedRectangle(cornerRadius: 24).fill(Color(rgb: 0x1c, 0x1c, 0x1e)))
-      .padding(.horizontal, 12).padding(.bottom, 12)
+      .pageCap(440).padding(.horizontal, 12).padding(.bottom, 12)
     }
     .fullScreenCover(isPresented: $play) { NavigationStack { GameSetup(game: .eight, go: {}) } }
   }
