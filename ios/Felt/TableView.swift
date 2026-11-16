@@ -677,7 +677,7 @@ struct TableCanvas: View {
        in 3D the row's 22 */
     /* --ph: the wood band less 2 px, 11 to 22 (placeRail); in 3D the row's 22. The next ball (nextBallEl) is --ph tall,
        a pip or a group's glyph smaller */
-    let ph = row != nil ? 22 : Swift.min(22, Swift.max(11, ((band.rail - band.co) * m.k - 2).rounded(.down))), dot = Swift.min(12, ph * 0.62)
+    let ph = row != nil ? 22 : Swift.min(22, Swift.max(11, ((band.rail - band.co) * m.k - 2).rounded(.down)))
     /* the gaps: the rail's span less every pocket (hole, jaws) and sight, with their pads */
     let len = row?.width ?? (m.upright ? s.TW : s.TL)
     var spans: [[Double]] = row != nil ? [[6, len - 6]] : [[0, len]]
@@ -722,37 +722,36 @@ struct TableCanvas: View {
       hs.reduce(span0) { sp, h in sp.flatMap { [[$0[0], Swift.min($0[1], h[0])], [Swift.max($0[0], h[1]), $0[1]]] }.filter { $0[1] - $0[0] > 0.01 } }
     }
     spans = cut(holes)
-    /* placeRail: the row's items placed in the gaps (rail units: metres top-down, points in 3D), each kept RAIL_GAP (6 pt)
-       from the others: the seats first (player 1 the gap nearest the rail's middle on its left, player 2 on its right; a
-       gap across the middle gives each its half, the two meeting at the middle), snooker's scoreboard beside the player
-       to shoot, then the replay's items (from the right) and the 3D switch (from the left), each its whole 44 pt target
-       where a gap has it, else its glyph, nearest its gap's middle (RailRow.ends) */
-    let unit = row != nil ? 1.0 : 1 / m.k, G = 6 * unit, rmid = len / 2
-    var used: [[Double]] = []
-    func free(_ g: [Double]) -> [[Double]] {
-      used.reduce([g]) { f, u in f.flatMap { [[$0[0], Swift.min($0[1], u[0] - G)], [Swift.max($0[0], u[1] + G), $0[1]]] }.filter { $0[1] - $0[0] > unit } }
-    }
-    func seatAt(_ w: Double, left: Bool) -> Double? {
-      var best: (x: Double, d: Double)? = nil
-      for g in spans { for f in free(g) {
-        let a = left ? f[0] : Swift.max(f[0], rmid + G / 2), b = left ? Swift.min(f[1], rmid - G / 2) : f[1]
-        if b - a < w { continue }
-        let across = g[0] < rmid && g[1] > rmid, c = (g[0] + g[1]) / 2
-        let x = across ? (left ? b - w / 2 : a + w / 2) : Swift.min(Swift.max(c, a + w / 2), b - w / 2), d = abs(x - rmid)
-        if best == nil || d < best!.d { best = (x, d) }
-      } }
-      return best?.x
-    }
+    /* placeRail: the row's items placed in the gaps (RailRow.place, in px: rail units are metres top-down, points in 3D),
+       each kept RAIL_GAP (6 pt) from the others: the seats first (two by seat(): player 1 the gap nearest the rail's middle
+       on its left, player 2 on its right; one, or a party's, packed in order, too many carrying on along the far rail),
+       snooker's scoreboard beside the player to shoot, then the replay's items (from the right) and the 3D switch (from
+       the left), over STEPS until all fit: the seats set closer (.tight: Caption 2, the race left to the pause menu), the
+       replay bare, the badge given way, the scoreboard set closer and its least parts cut (data-p), the switch given way,
+       then the scoreboard; the score keeper never gives way (with no room even so, the pockets' gaps alone) */
+    let unit = row != nil ? 1.0 : 1 / m.k, k = 1 / unit
     /* hudSolo: practice has no seats; a trick shot and a drill one, lit, its number engraved: the try ("Try 3") or the
        shot of how many ("Shot 2/4") */
     let soloNum: String? = g.mode == "trick" ? model.trick.map { String($0.attempts + (model.trickRes == nil ? 1 : 0)) }
       : g.mode == "drill" ? model.drill.flatMap { D in drillById(D.id).map { "\(min(D.js.count + (D.beat || model.drillRes != nil ? 0 : 1), $0.shots))/\($0.shots)" } } : nil
     let seatList: [Int] = many ? Array(0..<nSeats) : g.mode == "practice" || model.tut != nil ? [] : soloNum != nil ? [0] : [0, 1]
     let next = model.railNext()
-    /* .many: Caption 2 (11 px), set closer, the race (.of) left to the pause menu */
-    let font = Font.system(size: many ? 11 : Swift.max(11, Swift.min(13, ph * 0.62)), weight: .bold, design: .rounded).monospacedDigit()
-    /* each seat's items (chipOf) and their widths (pt) */
-    var seatItems: [Int: [(kind: String, n: Int, text: String)]] = [:], seatW: [Int: [Double]] = [:]
+    /* --rf: Caption 2 (11) on a slim rail, else 12; --dot: the group glyph and a ball's dot, min(10, ph - 3) */
+    let rf = ph < 16 ? 11.0 : 12.0, dotW = Swift.min(10, ph - 3)
+    func seatFont(_ size: Double) -> Font { Font.system(size: size, weight: .bold, design: .rounded).monospacedDigit() }
+    let ofFont = Font.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit()
+    func tw(_ t: Text) -> Double { Double(ctx.resolve(t).measure(in: CGSize(width: 400, height: 100)).width) }
+    /* dotEl's ring: a dark ball (under 3:1 on #26262a), not a stripe or bumper's */
+    func darkDot(_ n: Int) -> Bool {
+      if n > 20 && n < 40 || n > 8 && n <= 20 { return false }
+      let c = ballColor(n), lum = { (v: Int) -> Double in let x = Double(v) / 255; return x <= 0.03928 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
+      let L = 0.2126 * lum(c.0) + 0.7152 * lum(c.1) + 0.0722 * lum(c.2), Lp = 0.2126 * lum(38) + 0.7152 * lum(38) + 0.0722 * lum(42)
+      return (L + 0.05) / (Lp + 0.05) < 3
+    }
+    /* each seat's items (chipOf, hudChip): 8-ball's group glyph, the ball to play (railNext, the shooter's), the balls as
+       dots (the CPU's ball on at 9, 10 and rotation, the 8 once the group is down), a hollow pip with nothing to show, the
+       points, the race (.of), a match's racks as tally pips (rackTally) */
+    var seatItems: [Int: [(kind: String, n: Int, text: String)]] = [:]
     for p in seatList {
       let lit = p == g.turn || soloNum != nil
       var items: [(kind: String, n: Int, text: String)] = []
@@ -768,97 +767,113 @@ struct TableCanvas: View {
         items.append(("num", 0, String(mine.count)))
       case "carom": items.append(("num", C_CUE[p], String(g.score![p]))); items.append(("of", 0, "/\(g.race!)"))
       case "straight", "rotation":
-        if let nx { items.append(("ball", nx, "")) } else if g.kind == "rotation" && lit, let f = on.first { items.append(("ball", f, "")) }
+        if let nx { items.append(("ball", nx, "")) }
+        if g.kind == "rotation" && lit && nx == nil, let f = on.first { items.append(("dot", f, "")) }
         items.append(("num", 0, String(g.score![p]))); items.append(("of", 0, "/\(g.race!)"))
       case "9", "10":
-        if lit, let f = nx ?? on.first { items.append(("ball", f, "")) }
+        if lit, let f = on.first { items.append(nx.map { ("ball", $0, "") } ?? ("dot", f, "")) }
       default:
         if let gr = g.groups[p] {
           items.append(("grp", gr == "stripes" ? 1 : 0, ""))
           if let nx { items.append(("ball", nx, "")) }
-          else if !on.contains(where: { model.engine.groupOf($0) == gr }) { items.append(("ball", 8, "")) }
+          if !on.contains(where: { model.engine.groupOf($0) == gr }) && nx != 8 { items.append(("dot", 8, "")) }
         } else if let nx { items.append(("ball", nx, "")) }
       }
       }
-      if many { items.removeAll { $0.kind == "of" } }
       if items.isEmpty { items.append(("pip", 0, "")) }
+      if let t = model.rackTally(p) { items.append(("tal", t.0, String(t.1))) }
       seatItems[p] = items
-      seatW[p] = items.map { it -> Double in it.kind == "num" || it.kind == "of" ? Double(ctx.resolve(Text(it.text).font(font)).measure(in: CGSize(width: 200, height: 100)).width) : it.kind == "ball" ? ph : it.kind == "dot" ? Swift.min(10, ph - 3) : Swift.min(10, ph - 3) - 2 }
     }
-    /* .many: the .pb's 2 px between glyphs, a number's 1 px margin and wOf's 1 (placeRail measures offsetWidth + 1) */
-    let ig = many ? 2.0 : 4.0
-    func total(_ p: Int) -> Double {
-      let w = seatW[p] ?? [], extra = many ? 1 + (seatItems[p]?.contains { $0.kind == "num" } == true ? 1 : 0) : 0.0
-      return w.reduce(0, +) + ig * Double(Swift.max(0, w.count - 1)) + 4 + extra
+    /* a seat as laid out: its items (the race dropped in a party or set closer), each one's width (a number's 1 px margin,
+       a ringed dot's 1 either side, the tally's 2 before it), the .pb's gap (2, set closer 1), its padding (2, set closer 1;
+       a party's 2) and the type (--rf; a party's or set closer 11) */
+    func seatLay(_ p: Int, tight: Bool) -> (items: [(kind: String, n: Int, text: String)], ws: [Double], gap: Double, pb: Double, size: Double, w: Double) {
+      let items = (seatItems[p] ?? []).filter { !($0.kind == "of" && (tight || many)) }, size = tight || many ? 11 : rf
+      let ws = items.map { it -> Double in
+        switch it.kind {
+        case "num": return tw(Text(it.text).font(seatFont(size))) + 1
+        case "of": return tw(Text(it.text).font(ofFont))
+        case "ball": return ph
+        case "dot": return dotW + (darkDot(it.n) ? 2 : 0)
+        case "grp": return dotW
+        case "pip": return dotW - 2
+        default: let need = Double(Int(it.text) ?? 0); return 2 + need * 5 + Swift.max(0, need - 1) * 2
+        }
+      }
+      let gap = tight ? 1.0 : 2, pb = ws.reduce(0, +) + gap * Double(Swift.max(0, ws.count - 1)), pad = many ? 2.0 : tight ? 1 : 2
+      /* wOf: offsetWidth (whole px) and 1 */
+      return (items, ws, gap, pb, size, (pb + 2 * pad).rounded() + 1)
     }
+    /* snooker's scoreboard (hudSnooker, #snkBar): its parts in order, each with what a short rail drops first (data-p: the
+       points left 3, the frame 2, the warning 1; never the break or the ball on), the frame's score ("1-0") with more than
+       one frame, the break while one runs, the ball on as its balls (two with a free ball), the points left never shown,
+       then FREE BALL or Snookers needed */
+    var snkParts: [(p: Int, text: String?, dots: [Int], inw: Bool, track: Double)] = []
+    if g.kind == "snooker", let S = g.snk {
+      var dots: [Int] = []
+      if let f = S.free { dots = S.on == .red ? [41, f] : [f] }
+      else { switch S.on { case .red: dots = [41]; case .colour: dots = S_COLS.filter { c in g.balls.contains { $0.n == c && $0.on } }; case .ball(let b): dots = [b]; case .none: dots = [] } }
+      if S.frames > 1 { snkParts.append((2, "\(S.won[0])-\(S.won[1])", [], false, 0)) }
+      /* numRoll(e, 'snkBreak', val): the break rolls up as it grows */
+      snkParts.append((0, NumRoll.text("snkBreak", String(S.brk)), [], S.brk == 0, 0))
+      snkParts.append((0, nil, dots, false, 0))
+      snkParts.append((3, nil, [], true, 0))
+      if S.free != nil || g.option?.free == true { snkParts.append((1, "FREE BALL", [], false, 0.04 * rf)) }
+      else if model.engine.snookersNeeded(g, g.turn) { snkParts.append((1, "Snookers needed", [], false, 0)) }
+    }
+    func snkText(_ t: String, _ track: Double) -> Text { Text(t).font(seatFont(rf)).tracking(track) }
+    /* a part's content: its words, or its dots (--dot, a ringed one 1.5 either side) 4 apart */
+    func snkPartW(_ q: (p: Int, text: String?, dots: [Int], inw: Bool, track: Double)) -> Double {
+      q.text.map { tw(snkText($0, q.track)) } ?? q.dots.reduce(0) { $0 + dotW + (darkDot($1) ? 3 : 0) } + 4 * Double(Swift.max(0, q.dots.count - 1))
+    }
+    /* the bar at a cut (4: whole; under 4 set closer, the parts with data-p from cut up dropped): a shown part after another
+       (span + span) 10 in, set closer 6; padding 2, set closer 1 */
+    func snkLay(_ cut: Int) -> (total: Double, pad: Double, m: Double) {
+      let tight = cut < 4, m = tight ? 6.0 : 10, pad = tight ? 1.0 : 2
+      var t = 2 * pad
+      for (i, q) in snkParts.enumerated() where !q.inw && q.p < cut { t += (i > 0 ? m : 0) + snkPartW(q) }
+      return (t, pad, m)
+    }
+    let snkWs: [Double]? = snkParts.isEmpty ? nil : [4, 3, 2, 1].map { snkLay($0).total.rounded() + 1 }
     /* #viewBtn's glyph (--gl), shown in a game, never in the lesson */
     let gl = Swift.min(16, ph + 1), swOn = model.lesson == nil
     /* the replay's items (rpl): while one plays Skip, then the badge (its words, Slow motion, round a moment, dropped when
        bare); else the offer. Each pill its glyph (--gl), 2 px padding either side and wOf's 1; the badge's words at --rf
        after a 5 px gap */
-    let rf = ph < 16 ? 11.0 : 12.0, slowW = Double(ctx.resolve(Text("Slow motion").font(.system(size: rf, weight: .bold))).measure(in: CGSize(width: 300, height: 100)).width)
+    let slowW = Double(ctx.resolve(Text("Slow motion").font(.system(size: rf, weight: .bold))).measure(in: CGSize(width: 300, height: 100)).width)
     let rplIds = model.rp != nil ? ["replaySkip", "replayBadge"] : model.offer != nil ? ["replayBtn"] : []
     let rpl = rplIds.map { $0 == "replayBadge" ? RailRow.Rpl(w: model.replaySlow ? gl + 5 + 5 + slowW : gl + 5, bare: gl + 5, badge: true) : RailRow.Rpl(w: gl + 5) }
-    var rplX: [Double?] = rplIds.map { _ in nil }, rplBare = false
-    var seatPt: [Int: CGPoint] = [:], swX: Double? = nil
-    if many {
-      /* placeRail's group() (.many): the seats packed in turn order along the bottom rail's gaps, too many for it the
-         last ones along the far rail's (top-down); then the 3D switch clear of them, or it gives way; no room even so:
-         the gaps between the pockets alone (the score keeper never gives way), no switch (RailRow.many) */
-      let k = 1 / unit, ws = seatList.map { total($0) }, px = { (sp: [[Double]]) in sp.map { $0.map { $0 * k } } }
-      let far = row != nil ? nil : px(cut(farHoles))
-      /* the switch's pill: its glyph, 2 px padding either side and wOf's 1 */
-      let place = RailRow.many(ws, near: px(spans), far: far, pockets: px(cut(pocketHoles)), mid: rmid * k, pw: swOn ? gl + 5 : nil, rpl: rpl)
-      for (i, p) in seatList.enumerated() {
-        guard let q = place.seats?[i] else { continue }
-        let u = q.x / k
-        seatPt[p] = q.far ? (m.upright ? m.pt(s.TL - mid, u) : m.pt(u, mid)) : at(u)
-      }
-      swX = place.sw.map { $0 / k }; rplX = place.rpl.map { $0.map { $0 / k } }; rplBare = place.bare
+    let px = { (sp: [[Double]]) in sp.map { $0.map { $0 * k } } }
+    let place = RailRow.place(px(spans), top: row != nil ? nil : px(cut(farHoles)), pockets: px(cut(pocketHoles)), live: row != nil, mid: len / 2 * k,
+                              chips: seatList.map { RailRow.Chip(w: seatLay($0, tight: false).w, tight: seatLay($0, tight: true).w) },
+                              turn: seatList.count == 2 ? g.turn : 0, snk: snkWs, rpl: rpl, pw: swOn ? gl + 5 : nil)
+    var seatPt: [Int: CGPoint] = [:]
+    for (i, p) in seatList.enumerated() {
+      guard let q = place.seats[i] else { continue }
+      let u = q.x / k
+      seatPt[p] = q.far ? (m.upright ? m.pt(s.TL - mid, u) : m.pt(u, mid)) : at(u)
     }
-    var seatX: [Int: Double] = [:]
-    if !many { for p in seatList {
-      let w = total(p) * unit
-      if let x = seatAt(w, left: p == 0) { seatX[p] = x; used.append([x - w / 2, x + w / 2]); seatPt[p] = at(x) }
-    } }
-    /* snooker's scoreboard: the ball on (two with a free ball), the break while one runs; beside the shooter's seat */
-    var snkDots: [Int] = [], snkX: Double? = nil
-    let sdot = Swift.min(10, ph - 3)
-    if g.kind == "snooker", let S = g.snk {
-      if let f = S.free { snkDots = S.on == .red ? [41, f] : [f] }
-      else { switch S.on { case .red: snkDots = [41]; case .colour: snkDots = S_COLS.filter { c in g.balls.contains { $0.n == c && $0.on } }; case .ball(let b): snkDots = [b]; case .none: snkDots = [] } }
-      /* numRoll(e, 'snkBreak', val): the break rolls up as it grows (asked at 0 too, as the page's bar keeps it) */
-      let brkS = NumRoll.text("snkBreak", String(S.brk))
-      let brkW = S.brk > 0 ? Double(ctx.resolve(Text(String(S.brk)).font(font)).measure(in: CGSize(width: 200, height: 100)).width) + ig : 0
-      let w = (Double(snkDots.count) * (sdot + 2) + brkW + 4) * unit
-      if !snkDots.isEmpty || S.brk > 0, let sx = seatX[g.turn] ?? seatX[0] {
-        var best: Double? = nil
-        for gp in spans { for f in free(gp) where f[1] - f[0] >= w { let x = Swift.min(Swift.max(sx, f[0] + w / 2), f[1] - w / 2); if best == nil || abs(x - sx) < abs(best! - sx) { best = x } } }
-        if let x = best { snkX = x; used.append([x - w / 2, x + w / 2]) }
-      }
-      if let x = snkX {
-        var cx = Double(at(x).x) - w / unit / 2 + 2, cy = Double(at(x).y)
-        for n in snkDots {
-          let r = sdot / 2 * model.scaleFactor, (img, ix, iy) = bp.ballImage(n, (cx + sdot / 2) * model.scaleFactor, cy * model.scaleFactor, r, bp.axesOf(IDENT, screen: true))
-          ctx.draw(Image(decorative: img, scale: model.scaleFactor), in: CGRect(x: ix / model.scaleFactor, y: iy / model.scaleFactor, width: Double(img.width) / model.scaleFactor, height: Double(img.height) / model.scaleFactor))
-          cx += sdot + 2
-        }
-        if S.brk > 0 {
+    let swX = place.sw.map { $0 / k }, rplX = place.rpl.map { $0.map { $0 / k } }, rplBare = place.bare
+    /* the scoreboard drawn: the shown parts left to right from its padding, the ball on as little balls, the words engraved */
+    if let x = place.snk.map({ $0 / k }) {
+      let L = snkLay(place.cut), c = at(x), cy = Double(c.y)
+      var cx = Double(c.x) - L.total / 2 + L.pad
+      for (i, q) in snkParts.enumerated() where !q.inw && q.p < place.cut {
+        if i > 0 { cx += L.m }
+        if let t = q.text {
           var e = ctx; e.addFilter(.shadow(color: edge, radius: 0.7))
-          let t = ctx.resolve(Text(brkS).font(font).foregroundColor(ink))
-          e.draw(t, at: CGPoint(x: cx + ig, y: cy), anchor: .leading)
+          e.draw(snkText(t, q.track).foregroundColor(ink), at: CGPoint(x: cx, y: cy), anchor: .leading)
+          cx += snkPartW(q)
+        } else {
+          for (j, n) in q.dots.enumerated() {
+            if j > 0 { cx += 4 }
+            let ring = darkDot(n) ? 1.5 : 0
+            cx += ring
+            let r = dotW / 2 * model.scaleFactor, (img, ix, iy) = bp.ballImage(n, (cx + dotW / 2) * model.scaleFactor, cy * model.scaleFactor, r, bp.axesOf(IDENT, screen: true))
+            ctx.draw(Image(decorative: img, scale: model.scaleFactor), in: CGRect(x: ix / model.scaleFactor, y: iy / model.scaleFactor, width: Double(img.width) / model.scaleFactor, height: Double(img.height) / model.scaleFactor))
+            cx += dotW + ring
+          }
         }
-        _ = cy
-      }
-    }
-    /* #viewBtn (v3Btn, placeRail's side(viewBtn, left)): the 3D switch, a cube inlaid in the rail, bright while 3D is on;
-       shown in a game, never in the lesson */
-    if !many {
-      /* after group(): the replay's items on the right, then the switch on the left, over STEPS (RailRow.ends); a seat with
-         no room (the score keeper's fallback): both give way */
-      if seatList.allSatisfy({ seatX[$0] != nil }) {
-        let k = 1 / unit, e = RailRow.ends(spans.map { $0.map { $0 * k } }, used: used.map { $0.map { $0 * k } }, rpl: rpl, pw: swOn ? gl + 5 : nil)
-        swX = e.sw.map { $0 / k }; rplX = e.rpl.map { $0.map { $0 / k } }; rplBare = e.bare
       }
     }
     /* the replay (5r, placeReplay): the offer (#replayBtn) an arrow, brass for a notable shot, its words for VoiceOver alone;
@@ -920,7 +935,7 @@ struct TableCanvas: View {
     var ax: [TableModel.SeatAX] = []
     for p in seatList {
       guard let c0 = seatPt[p] else { continue }
-      let w = Swift.max(44, total(p))
+      let w = Swift.max(44, seatLay(p, tight: place.tight).w - 1)
       let words = soloNum.map { g.mode == "trick" ? "Try \($0)" : "Shot \($0.replacingOccurrences(of: "/", with: " of "))" }
         ?? SeatWords.seat(g, p, name: Words.nameOf(p), next: p == g.turn ? next : nil, tally: model.rackTally(p))
       ax.append(.init(id: "seat\(p)", rect: CGRect(x: c0.x - w / 2, y: c0.y - 22, width: w, height: 44), words: words))
@@ -928,47 +943,68 @@ struct TableCanvas: View {
     ax += rplAX
     if model.railAX != ax { model.railAX = ax }
     for p in seatList {
-      guard let c0 = seatPt[p], let items = seatItems[p], let widths = seatW[p] else { continue }
+      guard let c0 = seatPt[p] else { continue }
+      let L = seatLay(p, tight: place.tight), font = seatFont(L.size)
       let lit = p == g.turn || soloNum != nil
-      let tot = total(p) - 4 - (many ? 1 : 0)
       var g2 = ctx
       /* .pchip.busy: the CPU's seat pulses while it thinks (chipPulse; Reduce Motion: still) */
       let busy = p == g.turn ? model.busyAt.map { model.now - $0 } : nil
       g2.opacity = busy.map { RailPulse.opacity($0, reduce: model.reduceMotion) } ?? (lit ? 1 : 0.78)
       if lit { g2.addFilter(.shadow(color: Color(.sRGB, red: 1, green: 236 / 255, blue: 190 / 255, opacity: 0.75), radius: 3)) }
-      var x = Double(c0.x) - tot / 2
-      for (i, it) in items.enumerated() {
-        if many && it.kind == "num" { x += 1 }   /* .num's margin-left */
-        let w = widths[i], cx = x + w / 2, cy = Double(c0.y)
+      /* the .pb's items left to right about the seat's middle (its padding either side) */
+      var x = Double(c0.x) - L.pb / 2
+      let cy = Double(c0.y)
+      for (i, it) in L.items.enumerated() {
+        let w = L.ws[i]
         switch it.kind {
-        case "ball": drawNB(&g2, bp, it.n, CGPoint(x: cx, y: cy), ph, inset: 0.19)
+        case "ball": drawNB(&g2, bp, it.n, CGPoint(x: x + w / 2, y: cy), ph, inset: 0.19)
         case "dot":
-          /* .pchip .dot: the ball's colour, --dot across, cut dark round its edge */
-          let col = bp.flatOf(it.n).col, rect = CGRect(x: cx - w / 2, y: cy - w / 2, width: w, height: w)
-          g2.fill(Path(ellipseIn: rect), with: .color(Color(rgb: Int(col[0]), Int(col[1]), Int(col[2]))))
-          g2.stroke(Path(ellipseIn: rect.insetBy(dx: -0.5, dy: -0.5)), with: .color(edge), lineWidth: 1)
+          /* dotEl: the ball's colour (--dot across), a stripe's ivory caps (24%), bumper's marked spot, cut dark round its
+             edge; a dark ball ringed (#a3a3aa, 1.5) with 1 px either side */
+          let ring = darkDot(it.n), c = ballColor(it.n), rect = CGRect(x: x + (ring ? 1 : 0), y: cy - dotW / 2, width: dotW, height: dotW), disc = Path(ellipseIn: rect)
+          var d = g2
+          d.fill(disc, with: .color(Color(rgb: c.0, c.1, c.2)))
+          if it.n > 8 && it.n <= 20 {
+            var s = d; s.clip(to: disc)
+            s.fill(Path(CGRect(x: rect.minX, y: rect.minY, width: dotW, height: dotW * 0.24)), with: .color(Color(hex: 0xf6f4ec)))
+            s.fill(Path(CGRect(x: rect.minX, y: rect.maxY - dotW * 0.24, width: dotW, height: dotW * 0.24)), with: .color(Color(hex: 0xf6f4ec)))
+          }
+          if it.n == 21 || it.n == 31 {
+            let r = dotW * 0.28
+            d.fill(Path(ellipseIn: CGRect(x: rect.midX - r, y: rect.midY - r, width: 2 * r, height: 2 * r)), with: .color(it.n == 21 ? Color(hex: 0xf6f4ec) : Color(rgb: 0xc8, 0x26, 0x2c)))
+          }
+          if ring { d.stroke(Path(ellipseIn: rect.insetBy(dx: -0.75, dy: -0.75)), with: .color(Color(rgb: 0xa3, 0xa3, 0xaa)), lineWidth: 1.5) }
+          else { d.stroke(Path(ellipseIn: rect.insetBy(dx: -0.5, dy: -0.5)), with: .color(edge), lineWidth: 1) }
         case "grp":
-          let rect = CGRect(x: cx - dot / 2, y: cy - dot / 2, width: dot, height: dot), disc = Path(ellipseIn: rect)
+          let rect = CGRect(x: x, y: cy - dotW / 2, width: dotW, height: dotW), disc = Path(ellipseIn: rect)
           g2.stroke(disc, with: .color(edge), lineWidth: 1.5)
           if it.n == 0 { g2.fill(disc, with: .color(ink)) }
           else {
+            /* .grp.t: pearl caps over a dark band, 27% to 73% */
             var c = g2; c.clip(to: disc)
-            c.fill(Path(rect), with: .color(ink)); c.fill(Path(CGRect(x: rect.minX, y: cy - dot * 0.22, width: dot, height: dot * 0.44)), with: .color(edge))
+            c.fill(Path(rect), with: .color(ink)); c.fill(Path(CGRect(x: rect.minX, y: rect.minY + dotW * 0.27, width: dotW, height: dotW * 0.46)), with: .color(edge))
           }
         case "pip":
           /* .pip: --dot less 2 across, a 1.5 px ink ring inside, cut dark inside and out */
-          let pd = Swift.min(10, ph - 3) - 2, pr = CGRect(x: cx - pd / 2, y: cy - pd / 2, width: pd, height: pd)
+          let pr = CGRect(x: x, y: cy - w / 2, width: w, height: w)
           g2.stroke(Path(ellipseIn: pr.insetBy(dx: -0.5, dy: -0.5)), with: .color(edge), lineWidth: 1)
           g2.stroke(Path(ellipseIn: pr.insetBy(dx: 1.75, dy: 1.75)), with: .color(edge), lineWidth: 1)
           g2.stroke(Path(ellipseIn: pr.insetBy(dx: 0.75, dy: 0.75)), with: .color(ink), lineWidth: 1.5)
+        case "tal":
+          /* .tal: the race's racks as 5 px pips 2 apart (2 in), won ones whole pearl, the rest hollow, cut dark round */
+          for j in 0..<(Int(it.text) ?? 0) {
+            let r = CGRect(x: x + 2 + Double(j) * 7, y: cy - 2.5, width: 5, height: 5)
+            g2.stroke(Path(ellipseIn: r.insetBy(dx: -0.5, dy: -0.5)), with: .color(edge), lineWidth: 1)
+            if j < it.n { g2.fill(Path(ellipseIn: r), with: .color(ink)) } else { g2.stroke(Path(ellipseIn: r.insetBy(dx: 0.5, dy: 0.5)), with: .color(ink), lineWidth: 1) }
+          }
         default:
           /* carom's points are engraved like the others (the seats tell the players apart), then the race */
-          /* numRoll(t, 'chip' + p, c.num): a seat's number rolls up as it rises */
-          let t = Text(it.kind == "num" ? NumRoll.text("chip\(p)", it.text) : it.text).font(it.kind == "of" ? Font.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit() : font).foregroundColor(ink)
+          /* numRoll(t, 'chip' + p, c.num): a seat's number rolls up as it rises; .num's 1 px margin before it */
+          let num = it.kind == "num", t = Text(num ? NumRoll.text("chip\(p)", it.text) : it.text).font(num ? font : ofFont).foregroundColor(ink)
           var e = g2; e.addFilter(.shadow(color: edge, radius: 0.7))
-          e.draw(t, at: CGPoint(x: cx, y: cy))
+          e.draw(t, at: CGPoint(x: x + (num ? 1 : 0) + (w - (num ? 1 : 0)) / 2, y: cy))
         }
-        x += w + ig
+        x += w + L.gap
       }
     }
   }
