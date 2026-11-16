@@ -204,7 +204,12 @@ struct TableCanvas: View {
       ctx.scaleBy(x: sc, y: sc)
       /* the rail row and the potted windows sit on the fitted view (the page's DOM over the canvas); the windows hide
          while zoomed (potTick: cam.z > 1.02) */
-      if m.z <= 1.02 { drawPotRail(&ctx, base, bp) } else { model.potSlideDue = []; if model.potAX != nil { model.potAX = nil } }   /* hidden: a pot then never rolls in */
+      if PotRail.windows(live: false, z: m.z) { drawPotRail(&ctx, base, bp) } else {
+        model.potSlideDue = []   /* hidden: a pot then never rolls in */
+        /* the words hold (potTick writes #potSay before it hides the windows): the element where the windows stand unzoomed */
+        if model.potOn, !model.potOrder.isEmpty { let (P, q) = potSeats(base, live: false); potSay(base, PotRail.sayBox(shown: [[], []], planned: PotRail.planned(P, q))) }
+        else if model.potAX != nil { model.potAX = nil }
+      }
       drawRail(&ctx, base, bp)
       drawCall(Sink2D(ctx: ctx, m: m), m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
@@ -935,13 +940,12 @@ struct TableCanvas: View {
 
   /* potPlan and potSeats (6b3): the slots for this view (live: 3D's long rails laid out upright) and each ball down's
      slot, in pot order */
-  func potSeats(_ m: Mapper, live: Bool) -> (PotRail.Plan, [(Int, PotRail.Slot, Int)]) {
+  func potSeats(_ m: Mapper, live: Bool) -> (PotRail.Plan, [(n: Int, side: Int, i: Int)]) {
     let T = model.potGeometry(m), band = T.railBand
     /* potPlan: the slots, packed for POT_PER_RAIL between the holes (RAIL_PAD) and sights (POT_SIGHT_PAD) */
     let P = PotRail.plan(model.sim, k: m.k, ox: m.ox, oy: m.oy, portrait: m.upright, live: live, rail: band.rail, co: band.co, sights: T.railSights())
     let eightRight = model.g.map { $0.groups[model.potBy[8] ?? 0] == "stripes" } ?? false
-    let seats = PotRail.seats(model.potOrder, eight: is8(model.g?.kind ?? ""), eightRight: eightRight, counts: P.sides.map(\.count))
-    return (P, seats.map { ($0.n, P.sides[$0.side][$0.i], $0.side) })
+    return (P, PotRail.seats(model.potOrder, eight: is8(model.g?.kind ?? ""), eightRight: eightRight, counts: P.sides.map(\.count)))
   }
   /* #potSay's element: the words of every ball down, over box (sayBox), else at the fitted table's left rail */
   func potSay(_ m: Mapper, _ box: [Double]?) {
@@ -962,17 +966,17 @@ struct TableCanvas: View {
     let s = model.sim, (P, seats) = potSeats(m, live: live != nil)
     /* VoiceOver (#potSay, issue #4): every ball down, "Potted: 1, 3, 9" in pot order, whichever windows show (shown, else
        planned: a ball still dropping, a window faded or off the stage) */
-    var shown: [[[Double]]] = [[], []], planned: [[[Double]]] = [[], []]
+    var shown: [[[Double]]] = [[], []], planned: [[[Double]]] = live == nil ? PotRail.planned(P, seats) : [[], []]
     defer { potSay(m, PotRail.sayBox(shown: shown, planned: planned)) }
     /* 3D: what may lie over a window (the cue as last drawn, the loupe while shown, the balls on the table) */
     let cueLen = CueGeo.of(game: model.game.table.2).len, now = model.now
     let lp = model.loupeA > 0.02 ? model.loupe.map { (x: $0.x, y: $0.y, r: $0.r) } : nil
     let onTable = live == nil ? [] : (model.rolling?.balls ?? model.balls).filter { $0.on }.map { (x: $0.x, y: $0.y, z: $0.z ?? 0) }
     let recess = Color(rgb: 16, 11, 8), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85), f = model.scaleFactor
-    for (n, slot, side) in seats {
+    for q in seats {
+      let n = q.n, side = q.side, slot = P.sides[side][q.i]
       let fit = live.flatMap { PotRail.place(P, slot, $0.C, $0.box, z: s.cushionTop()) }
-      if live == nil { planned[side].append([slot.x - P.s / 2, slot.y - P.s / 2, slot.x + P.s / 2, slot.y + P.s / 2]) }
-      else if let f = fit { planned[side].append([f[0] - f[2] / 2, f[1] - f[2] / 2, f[0] + f[2] / 2, f[1] + f[2] / 2]) }
+      if let f = fit { planned[side].append([f[0] - f[2] / 2, f[1] - f[2] / 2, f[0] + f[2] / 2, f[1] + f[2] / 2]) }
       if let t = model.potAt[n], model.now < t { continue }   /* still dropping into its pocket */
       var c = CGPoint(x: slot.x, y: slot.y), sz = P.s, ballD = P.ball, ctx = ctx
       /* the roll in starts the first time the window shows (one with no place then never rolls in) */

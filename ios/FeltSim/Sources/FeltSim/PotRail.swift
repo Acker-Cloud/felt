@@ -95,6 +95,15 @@ public enum PotRail {
     }
     return out
   }
+  /* potTick's vis: the windows show in 3D, or top-down while the 2D camera is not zoomed (cam.z > 1.02: the rails are off
+     its window). #potSay's words are written before this and hold either way */
+  public static func windows(live: Bool, z: Double) -> Bool { live || !(z > 1.02) }
+  /* top-down: where each seated ball's window stands in the plan's view, per side ([x0, y0, x1, y1]) */
+  public static func planned(_ P: Plan, _ seats: [(n: Int, side: Int, i: Int)]) -> [[[Double]]] {
+    var out: [[[Double]]] = [[], []]
+    for q in seats { let sl = P.sides[q.side][q.i]; out[q.side].append([sl.x - P.s / 2, sl.y - P.s / 2, sl.x + P.s / 2, sl.y + P.s / 2]) }
+    return out
+  }
   /* #potSay's place for VoiceOver ([x0, y0, x1, y1], nil: nowhere to put it). The page's is visually hidden and holds
      every ball down whatever the windows show (zoomed, a ball still dropping, a window faded or off the stage); here an
      element needs a frame: the windows shown on the first side showing any (never across the table between the rails),

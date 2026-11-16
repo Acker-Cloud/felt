@@ -52,4 +52,22 @@ import Testing
     #expect(PotRail.sayBox(shown: [[], []], planned: [[a, b], [c]]) == [0, 80, 10, 110])
     #expect(PotRail.sayBox(shown: [[], []], planned: [[], []]) == nil)
   }
+
+  /* zoomed (cam.z > 1.02) the windows hide and the words hold: potTick writes #potSay before vis; the element stands
+     where the windows do unzoomed (the fitted view's slots) */
+  @Test func zoomed() {
+    #expect(PotRail.windows(live: false, z: 1) && PotRail.windows(live: false, z: 1.02))
+    #expect(!PotRail.windows(live: false, z: 1.03) && !PotRail.windows(live: false, z: 3))
+    #expect(PotRail.windows(live: true, z: 3))
+    let s = Sim()
+    s.setTable("9")
+    let k = 393 / (s.TW + 2 * 0.1), P = PotRail.plan(s, k: k, ox: 0.1 * k, oy: 40, portrait: true, live: false, rail: 0.1, co: 0.05, sights: [])
+    let order = PotRail.order([], off: [9, 1, 12])
+    let q = PotRail.seats(order, eight: false, eightRight: false, counts: P.sides.map(\.count)), plan = PotRail.planned(P, q)
+    #expect(q.count == 3 && plan[0].count == 3 && plan[1].isEmpty)
+    let box = PotRail.sayBox(shown: [[], []], planned: plan)!
+    let sl = P.sides[0]
+    #expect(box == [sl[0].x - P.s / 2, sl[2].y - P.s / 2, sl[0].x + P.s / 2, sl[0].y + P.s / 2])
+    #expect(SeatWords.potted(order) == "Potted: 1, 9, 12")
+  }
 }
