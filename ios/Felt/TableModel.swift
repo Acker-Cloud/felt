@@ -1142,9 +1142,11 @@ final class TableModel {
   private(set) var shotAt: TimeInterval = 0
   private(set) var now: TimeInterval = 0
   func shoot() {
-    guard rolling == nil, stroke == nil, power > 0.01, g?.option == nil, g?.winner == nil, !cpuTurn, trickRes == nil, !drillBlocked, rp == nil else { power = 0; return }
-    /* a pull the call refuses (no needed call yet) opens the call's menu on the let-go, the pockets first */
+    guard rolling == nil, stroke == nil, g?.option == nil, g?.winner == nil, !cpuTurn, trickRes == nil, !drillBlocked, rp == nil else { power = 0; return }
+    /* a pull the call refuses (no needed call yet) opens the call's menu on the let-go, the pockets first; the bar never
+       arms without the call, so this comes before the power test */
     if !callReady { power = 0; callMenu = true; return }
+    guard power > 0.01 else { power = 0; return }
     markPower = power
     stroke = (power, nil)
     confirmCall(humanCall())
