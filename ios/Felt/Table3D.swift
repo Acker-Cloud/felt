@@ -215,14 +215,17 @@ struct BallU {
     var cutTo: Double? = nil
     if let c = model.cue, model.rolling == nil {
       if !model.cpuTurn {
-        let moved = abs(c.x - px) > 1e-9 || abs(c.y - py) > 1e-9 || !px.isFinite
-        if !seatSet || moved || seatShot != model.shotAt || seatTurn != (model.g?.turn ?? 0) || seatPlan != nil { cutTo = model.aim } else { yaw = model.aim }
-        seatShot = model.shotAt; seatTurn = model.g?.turn ?? 0; seatPlan = nil
+        /* the cue ball carried in hand (or sliding back): the camera holds still, and cuts on the let-go */
+        if model.placeAt == nil {
+          let moved = abs(c.x - px) > 1e-9 || abs(c.y - py) > 1e-9 || !px.isFinite
+          if !seatSet || moved || seatShot != model.shotAt || seatTurn != (model.g?.turn ?? 0) || seatPlan != nil { cutTo = model.aim } else { yaw = model.aim }
+          seatShot = model.shotAt; seatTurn = model.g?.turn ?? 0; seatPlan = nil
+        }
       } else if model.stroke != nil || !model.cpuThinking {
         if seatPlan != model.aim { seatPlan = model.aim; cutTo = model.aim }
       } else if !seatSet { cutTo = model.aim }
       if let a = cutTo { px = c.x; py = c.y; yaw = a; seatSet = true; cut(now) }
-    }
+    } else if model.cue == nil, !seatSet, let lc = model.lastCue { px = lc.x; py = lc.y; yaw = lc.ang; seatSet = true; cut(now) }
     if !seatSet { px = s.TL / 4; py = s.TW / 2; yaw = 0; seatSet = true }
   }
   /* v3Pose with the moves: the aim's pose, or the overview, or a move between them (an ease in and out) */
@@ -377,7 +380,7 @@ struct BallU {
     let now = CACurrentMediaTime() * 1000
     update(now)
     let C = pose(box, now)
-    model.v3Cam = (C, box)
+    model.v3Cam = (C, box); model.v3K = V3.k(C, px, py, R)
     let sc = Double(view.contentScaleFactor)
     /* the fine-aim loupe (v3Loupe): the same eye, looking at the ghost ball's middle, LOUPE_MAG times closer, rendered
        into a small target first (the room, the cue, the lamp and the flashes left out) */
@@ -511,10 +514,16 @@ struct BallU {
       e.setDepthStencilState(depthOn)
     }
     /* the balls on the table, far to near */
-    let balls = (model.rolling?.balls ?? model.balls).filter { $0.on }
+    /* the cue ball in hand (4f): carried, the ghost at placeAt lifted V3_LIFT x bih.h stands in for it on a legal spot
+       (0.96), over an illegal one the ball stays on its last legal spot and the ghost is 0.5; let go, it settles (settleH) */
+    let carried = model.rolling == nil && !model.cpuTurn ? model.placeAt : nil
+    let ghostOk = carried.map { at in model.g.map { model.engine.canPlace($0, at.0, at.1) } ?? true } ?? false
+    let balls = (model.rolling?.balls ?? model.balls).filter { $0.on && !(ghostOk && $0.n == model.cueN) }
+    let sh = model.rolling == nil ? model.settleH(model.now) : 0
     /* v3Drops: each pot falls on toward the pocket's middle and below the bed, darkening and fading, over HERO_DROP_MS */
     struct Drawn { let n: Int, x: Double, y: Double, z: Double, a: Double, dark: Double, drop: (k: Int, u: Double)? }
-    var drawn = balls.map { Drawn(n: $0.n, x: $0.x, y: $0.y, z: R, a: 1, dark: 0, drop: nil) }
+    var drawn = balls.map { Drawn(n: $0.n, x: $0.x, y: $0.y, z: R + ($0.n == model.cueN && sh > 0 ? BallPainter.LIFT_H * sh : 0), a: 1, dark: 0, drop: nil) }
+    if let at = carried { drawn.append(Drawn(n: model.cueN, x: at.0, y: at.1, z: R + BallPainter.LIFT_H * model.bihH, a: ghostOk ? 0.96 : 0.5, dark: 0, drop: nil)) }
     let dur = 260 / model.speed, tnow = model.now
     for p in model.pots where p.k >= 0 && p.k < s.POCKETS.count && !balls.contains(where: { $0.n == p.n }) {
       let u = (tnow - p.t) * 1000 / dur, P = s.POCKETS[p.k]
@@ -524,7 +533,7 @@ struct BallU {
     }
     var vis = drawn.map { b -> (Drawn, Double) in (b, V3.dot(V3.sub([b.x, b.y, -b.z], C.Er), C.f)) }.filter { $0.1 > V3.NEAR + R }
     vis.sort { $0.1 > $1.1 }
-    /* their shadows on the bed (drawCast's lamp and lean) */
+    /* their shadows on the bed (drawCast's lamp and lean); a lifted ball's leans further, grows and fades */
     e.setDepthStencilState(depthRead)
     e.setRenderPipelineState(shadowP)
     var q = quad
@@ -533,10 +542,11 @@ struct BallU {
     for (o, _) in vis {
       if let d = o.drop, d.u > 0.4 { continue }
       let fa = o.drop.map { max(0, 1 - 2.5 * $0.u) } ?? 1
-      let dx = o.x - s.TL / 2, dy = o.y - s.TW / 2, t = R / (BallPainter.LAMP_H - R), lean = R * 0.2
-      let bx = o.x + dx * t + key[0] * lean, by = o.y + dy * t + key[1] * lean, grow = 1 + 0.1 * min(1, JSMath.hypot(dx, dy) / 1.2)
+      let lift = min(1, max(0, (o.z - R) / BallPainter.LIFT_H)), zc = max(R, o.z)
+      let dx = o.x - s.TL / 2, dy = o.y - s.TW / 2, t = zc / (BallPainter.LAMP_H - zc), lean = R * (0.2 + 0.7 * lift)
+      let bx = o.x + dx * t + key[0] * lean, by = o.y + dy * t + key[1] * lean, grow = (1 + 0.6 * lift) * (1 + 0.1 * min(1, JSMath.hypot(dx, dy) / 1.2))
       var u = ShU(M: M, S: SIMD3<Float>(Float((o.x + bx) / 2), Float((o.y + by) / 2), -0.0008), ext: Float(R * 1.6 * grow + JSMath.hypot(bx - o.x, by - o.y)),
-                  A: SIMD2<Float>(Float(o.x), Float(o.y)), B: SIMD2<Float>(Float(bx), Float(by)), R: Float(R), grow: Float(grow), ao: Float(fa * o.a), ca: Float(fa * o.a))
+                  A: SIMD2<Float>(Float(o.x), Float(o.y)), B: SIMD2<Float>(Float(bx), Float(by)), R: Float(R), grow: Float(grow), ao: Float(fa * o.a * (1 - lift)), ca: Float(fa * o.a * (1 - 0.5 * lift)))
       e.setVertexBytes(&u, length: MemoryLayout<ShU>.stride, index: 1); e.setFragmentBytes(&u, length: MemoryLayout<ShU>.stride, index: 1)
       e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
@@ -603,7 +613,7 @@ struct BallU {
       e.setDepthStencilState(depthOn)
     }
     /* the cue: behind the ball on the aim, raised a little at least (it clears the rails), pulled back by power */
-    if full, model.rolling == nil, !model.cpuThinking, let c = model.cue, let cb = cue3() {
+    if full, model.rolling == nil, !model.cpuThinking, carried == nil || ghostOk, let c = model.cue, let cb = cue3() {
       let rest = R + 0.012, back = 0.27
       var gap = rest + back * min(1, max(0, model.power))
       if let st = model.stroke {

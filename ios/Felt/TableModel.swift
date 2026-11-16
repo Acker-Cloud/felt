@@ -670,8 +670,12 @@ final class TableModel {
   @ObservationIgnored var v3Pitch = Prefs.viewPitch
   @ObservationIgnored var v3Dist = Prefs.viewDist
   @ObservationIgnored var v3Cam: (V3.Cam, V3.Box)? = nil
+  /* V3.k: the input's scale at the camera's pivot, as last drawn */
+  @ObservationIgnored var v3K = 100.0
   /* After the Shot 'top': the roll drawn top-down, the setting staying 3D (V3.top2d), until the turn's end */
   var v3Top2d = false
+  /* v3Want: the view is wanted (the setting) and has a place (not a replay, not the lesson, not the roll top-down) */
+  var v3Live: Bool { view3d && !v3Top2d && rp == nil && lesson == nil }
   @ObservationIgnored var onReport: ((Int, Int, Int, Bool) -> Void)?
   /* the handoff: the player the device is passed to (the breaker at a rack's start), until they are ready */
   var handoff: (p: Int, first: Bool)? = nil

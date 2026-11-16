@@ -38,4 +38,21 @@ private func ds(_ a: Any?) -> [Double]? { (a as? [Any])?.map { d($0) } }
     }
     #expect(n == 84)
   }
+  /* the input through the camera (v3Screen, v3Table, V3.k): a tap at a ball's projected centre maps back to that ball, a
+     tap off the bed's plane misses it, and V3.k is the screen scale at the pivot (a centimetre across it, in px) */
+  @Test func input() {
+    let s = Sim()
+    s.setTable("9")
+    let R = s.BALL_R, box = V3.Box(left: 0, top: 0, width: 393, height: 700)
+    for (px, py, yaw, pitch) in [(s.TL / 4, s.TW / 2, 0.0, 24.0), (s.TL * 0.6, s.TW * 0.3, 2.2, 50), (0.3, 0.2, -0.7, 10)] {
+      let C = V3.pose(s, box, px: px, py: py, yaw: yaw, pitch: pitch, dist: 1.1)
+      for (x, y) in [(px + 0.4 * cos(yaw), py + 0.4 * sin(yaw)), (s.TL / 2, s.TW / 2), (px + 0.05, py - 0.08)] {
+        let p = V3.screen(C, box, x, y, R), q = V3.table(C, box, p[0], p[1], R)
+        #expect(abs(q[0] - x) < 1e-9 && abs(q[1] - y) < 1e-9, "\(x), \(y) -> \(p) -> \(q)")
+      }
+      let k = V3.k(C, px, py, R), a = V3.screen(C, box, px, py, R), b = V3.screen(C, box, px - 0.005 * sin(yaw), py + 0.005 * cos(yaw), R)
+      #expect(abs(JSMath.hypot(b[0] - a[0], b[1] - a[1]) / 0.005 - k) < 0.01 * k, "k \(k)")
+      #expect(V3.table(C, box, box.width / 2, -1e4, R) == [-10, -10])
+    }
+  }
 }

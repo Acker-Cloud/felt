@@ -458,7 +458,7 @@ struct TableScreen: View {
       GeometryReader { tg in
         LinkTimeline(paused: model.paused) { tl in
           Group {
-            if model.view3d && !model.v3Top2d {
+            if model.v3Live {
               /* the rail row pinned to the stage's foot (V3_PIN_B 26 up), off the projected pockets and sights */
               Table3DView(model: model).overlay {
                 Canvas { ctx, size in
@@ -555,48 +555,50 @@ struct TableScreen: View {
     /* the rail's 3D switch: a 44 pt target round its glyph; the tap is the switch's, the rest of it eaten */
     if began, let c = model.railSwitch, abs(at.x - c.x) < 22, abs(at.y - c.y) < 22 { model.toggleView(); tch.eating = true; return }
     if began { model.hideOffer() }
-    let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW)
+    let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW), tm = TouchMap(model, m)
     model.uprightView = m.upright
-    let (x, y) = m.table(at)
+    let (x, y) = tm.table(at)
     /* bumper pool: a touch on one of the shooter's own balls strikes that one from now on (pickBall) */
     if began, model.game == .bumper, let g = model.g {
       /* ballAt: the shooter's striker nearest the touch within max(22, 1.5 ball radii); the current one aims instead */
-      let reach = max(22, 1.5 * s.BALL_R * m.k)
+      let reach = max(22, 1.5 * s.BALL_R * tm.k)
       var best: Int? = nil, bd = reach
       for n in model.engine.bumperStrikers(g) {
         guard let b = g.balls.first(where: { $0.n == n && $0.on }) else { continue }
-        let p = m.pt(b.x, b.y), d = JSMath.hypot(Double(p.x - at.x), Double(p.y - at.y))
+        let p = tm.pt(b.x, b.y), d = JSMath.hypot(Double(p.x - at.x), Double(p.y - at.y))
         if d < bd { bd = d; best = n }
       }
       if let n = best, n != model.cueN, model.pickBall(n) { tch.picking = true; return }
     }
     if tch.picking { return }
-    /* a call open: a touch on a pocket calls it (pocketAt: 26 pt or 1.6 ball radii round its centre), on a ball calls
-       that ball (and still aims) */
+    /* a call open: a touch on a pocket calls it (pocketAt: 26 pt, 1.6 ball radii or 1.3 of the hole as drawn round its
+       centre), on a ball calls that ball (objectAt, and still aims) */
     if began, model.callOn {
       var best = -1, bd = Double.infinity
       for (k, p) in s.POCKETS.enumerated() {
-        let q = m.pt(p[0], p[1]), d = JSMath.hypot(Double(q.x - at.x), Double(q.y - at.y))
-        if d < max(26, 1.6 * s.BALL_R * m.k) && d < bd { bd = d; best = k }
+        let q = tm.pt(p[0], p[1]), r = k < s.POCKET_R.count ? s.POCKET_R[k] : s.BALL_R, ex = tm.pt(p[0] + r, p[1]), ey = tm.pt(p[0], p[1] + r)
+        let hole = max(JSMath.hypot(Double(ex.x - q.x), Double(ex.y - q.y)), JSMath.hypot(Double(ey.x - q.x), Double(ey.y - q.y)))
+        let d = JSMath.hypot(Double(q.x - at.x), Double(q.y - at.y))
+        if d < max(26, 1.6 * s.BALL_R * tm.k, 1.3 * (hole < 1e4 ? hole : 0)) && d < bd { bd = d; best = k }
       }
       if best >= 0 { model.pickPocket(best); tch.picking = true; return }
-      if let b = model.balls.first(where: { $0.on && $0.n != model.cueN && JSMath.hypot($0.x - x, $0.y - y) < s.BALL_R * 1.4 }) { model.pickCallBall(b.n) }
+      if let b = tm.objectAt(at) { model.pickCallBall(b.n) }
     }
     let t = time * 1000, b = at
     if began {
       tch.gest = AimGesture(t0: t, p0: b, last: b, tLast: t, at: b, trail: [(t, model.aim, Double(b.x), Double(b.y))])
       /* ball in hand: a press within grabR (30 pt or 2.5 ball radii) moves it, relative to where it was */
       if model.inHand, let c = model.cue {
-        let q = m.pt(c.x, c.y)
-        if JSMath.hypot(Double(q.x - b.x), Double(q.y - b.y)) < max(30, 2.5 * s.BALL_R * m.k) { tch.placing = true; tch.gest?.grab = (c.x - x, c.y - y) }
+        let q = tm.pt(c.x, c.y)
+        if JSMath.hypot(Double(q.x - b.x), Double(q.y - b.y)) < max(30, 2.5 * s.BALL_R * tm.k) { tch.placing = true; tch.gest?.grab = (c.x - x, c.y - y); TouchLog.add("grab") }
       }
     }
     guard var g = tch.gest else { return }
-    if model.view3d && !tch.placing { drag3d(&g, b, t); tch.gest = g; TouchLog.add(String(format: "aim3d %.5f", model.aim)); return }
+    if tm.cam != nil && !tch.placing { drag3d(&g, b, t); tch.gest = g; TouchLog.add(String(format: "aim3d %.5f", model.aim)); return }
     g.far = max(g.far, JSMath.hypot(Double(b.x - g.p0.x), Double(b.y - g.p0.y)))
     if tch.placing, let o = g.grab {
       if !g.moving && g.far > AimFeel.GRAB_SLOP { g.moving = true }
-      if g.moving { model.place(x + o.dx, y + o.dy) }
+      if g.moving { model.place(x + o.dx, y + o.dy); TouchLog.add(String(format: "place %.4f %.4f", x + o.dx, y + o.dy)) }
       tch.gest = g; return
     }
     guard model.rolling == nil, let c = model.cue else { tch.gest = g; return }
@@ -641,29 +643,55 @@ struct TableScreen: View {
   /* the let-go: a tap aims at the spot (an object ball's centre within tapReach), a sweep may restore its lift jitter */
   private func touchEnd(_ at: CGPoint, _ time: TimeInterval, _ size: CGSize) {
     guard var g = tch.gest, !tch.placing, !tch.picking, model.rolling == nil, let c = model.cue else { return }
-    let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW), t = time * 1000
-    /* in 3D a tap aims at the table point under it (v3Table) */
-    if model.view3d {
-      if !g.sweep && !g.held, let (C, box) = model.v3Cam, let p = V3.unproj(C, box, Double(g.p0.x), Double(g.p0.y), s.BALL_R), JSMath.hypot(p[0] - c.x, p[1] - c.y) > s.BALL_R {
-        model.aim = atan2(p[1] - c.y, p[0] - c.x)
-      }
-      return
-    }
-    if !g.sweep || (!g.held && g.far <= AimFeel.TAP_SLOP && t - g.t0 < AimFeel.TAP_MS) {
-      let p = g.p0, (x, y) = m.table(p), reach = max(14, 1.3 * s.BALL_R * m.k)
+    let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW), tm = TouchMap(model, m), t = time * 1000
+    /* in 3D (v3Drag) a let-go that neither swept nor tilted is a tap, read through the camera (v3Table) */
+    if tm.cam != nil ? (!g.sweep && !g.held) : (!g.sweep || (!g.held && g.far <= AimFeel.TAP_SLOP && t - g.t0 < AimFeel.TAP_MS)) {
+      let p = g.p0, (x, y) = tm.table(p)
       /* free table editing (5s): a tap drops or takes off a ball */
       if model.prac?.edit == true { model.editAt(x, y); return }
-      var best: Ball? = nil, bd = reach
-      for o in model.balls where o.on && o.n != model.cueN {
-        let q = m.pt(o.x, o.y), d = JSMath.hypot(Double(q.x - p.x), Double(q.y - p.y))
-        if d < bd { bd = d; best = o }
+      let best = tm.objectAt(p)
+      /* in 3D on the cue ball itself (2 ball radii, unless nearer an object ball) there is no direction to take */
+      if tm.cam != nil {
+        let q = tm.pt(c.x, c.y), dc = JSMath.hypot(Double(p.x - q.x), Double(p.y - q.y))
+        let od = best.map { o -> Double in let w = tm.pt(o.x, o.y); return JSMath.hypot(Double(w.x - p.x), Double(w.y - p.y)) }
+        if dc <= 2 * s.BALL_R * tm.k && !(od.map { $0 < dc } ?? false) { return }
       }
       if let o = best { model.takeAim(); model.aim = atan2(o.y - c.y, o.x - c.x) }
       else if JSMath.hypot(x - c.x, y - c.y) > s.BALL_R { model.takeAim(); model.aim = atan2(y - c.y, x - c.x) }
       return
     }
+    if tm.cam != nil { return }
     turnTo(&g, at, t, m, c)
     if let r = AimFeel.liftAim(g.trail, t) { model.aim = r }
+  }
+}
+
+/* the input's toScreen and toTable, and view.k: the 2D Mapper, or while the 3D view is live (V3.live) its camera at a
+   ball centre's height (v3Screen, v3Table) with the scale at the cue ball (V3.k), so every table hit test and placement
+   lands where the ball is drawn */
+@MainActor struct TouchMap {
+  let m: Mapper, cam: (C: V3.Cam, box: V3.Box)?, R: Double, k: Double, model: TableModel
+  init(_ model: TableModel, _ m: Mapper) {
+    self.model = model; self.m = m; R = model.sim.BALL_R
+    cam = model.v3Live ? model.v3Cam.map { (C: $0.0, box: $0.1) } : nil
+    k = cam != nil ? model.v3K : m.k
+  }
+  func pt(_ x: Double, _ y: Double) -> CGPoint {
+    guard let (C, box) = cam else { return m.pt(x, y) }
+    let p = V3.screen(C, box, x, y, R); return CGPoint(x: p[0], y: p[1])
+  }
+  func table(_ p: CGPoint) -> (Double, Double) {
+    guard let (C, box) = cam else { return m.table(p) }
+    let q = V3.table(C, box, Double(p.x), Double(p.y), R); return (q[0], q[1])
+  }
+  /* objectAt: the object ball nearest p within tapReach (14 pt or 1.3 ball radii) */
+  func objectAt(_ p: CGPoint) -> Ball? {
+    var best: Ball? = nil, bd = max(14, 1.3 * R * k)
+    for o in model.balls where o.on && o.n != model.cueN {
+      let q = pt(o.x, o.y), d = JSMath.hypot(Double(q.x - p.x), Double(q.y - p.y))
+      if d < bd { bd = d; best = o }
+    }
+    return best
   }
 }
 

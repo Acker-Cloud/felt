@@ -59,4 +59,32 @@ final class PlayTests: XCTestCase {
     sleep(1)
     if (ProcessInfo.processInfo.environment["FELT_ARGS"] ?? "").contains("3d") { table.pinch(withScale: 0.6, velocity: -0.8); sleep(1) }
   }
+
+  /* the cue ball in hand carried in 3D (4o, v3Table): the press on the ball as the camera draws it, a carry, the let-go.
+     The camera sits behind the ball at the default pitch and distance (forced: a string in the argument domain reads as
+     unset), so the ball is at the stage's middle across and, down, at the angle between the pitch and the line to the
+     target (v3Pose: T ahead AHEAD x dist x cos pitch at R x (1 - AHEAD)), F the focal length at FOV 21 x 24 degrees.
+     The log (-felt-touchlog) records the grab and every placement */
+  @MainActor func testHandIn3D() throws {
+    let app = XCUIApplication()
+    app.launchArguments = ["-felt-game", "8-Ball", "-felt-touchlog", "-felt.settings.view", "3d", "-felt.settings.viewPitch", "x", "-felt.settings.viewDist", "x"]
+      + (ProcessInfo.processInfo.environment["FELT_ARGS"].map { $0.split(separator: " ").map(String.init) } ?? [])
+    app.launch()
+    let table = app.otherElements["table"]
+    XCTAssertTrue(table.waitForExistence(timeout: 10))
+    sleep(2)
+    let W = Double(table.frame.width), H = Double(table.frame.height), R = 0.05715 / 2, p = 24 * Double.pi / 180, d = 1.1
+    let eh = max(R + sin(p) * d, R * 1.42 + 0.05), back = cos(p) * d, ahead = 0.8 * d * cos(p)
+    let down = atan2(eh - R, back) - atan2(eh - R * 0.2, back + ahead), F = min(W / (2 * tan(21 * Double.pi / 180)), H / (2 * tan(24 * Double.pi / 180)))
+    let at = CGVector(dx: W / 2, dy: H / 2 + F * tan(down))
+    let o = table.coordinate(withNormalizedOffset: .zero), ball = o.withOffset(at)
+    let pre = XCTAttachment(screenshot: app.screenshot()); pre.name = "hand3d-before"; pre.lifetime = .keepAlways; add(pre)
+    ball.press(forDuration: 0.15, thenDragTo: o.withOffset(CGVector(dx: at.dx + 50, dy: at.dy - 40)), withVelocity: 120, thenHoldForDuration: 0.4)
+    sleep(1)
+    let post = XCTAttachment(screenshot: app.screenshot()); post.name = "hand3d-after"; post.lifetime = .keepAlways; add(post)
+    /* a tap on the cloth ahead aims there through the camera (v3Table), never shoots */
+    o.withOffset(CGVector(dx: W * 0.3, dy: H * 0.35)).tap()
+    sleep(1)
+    XCTAssertEqual(app.otherElements["power"].value as? String, "0 percent")
+  }
 }

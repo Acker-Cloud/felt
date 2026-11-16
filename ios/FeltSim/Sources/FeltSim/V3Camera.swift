@@ -138,6 +138,12 @@ public enum V3 {
     if t <= 0 { return nil }
     return [C.Er[0] + dir[0] * t, C.Er[1] + dir[1] * t]
   }
+  /* toScreen and toTable while the view is live (v3Screen, v3Table): a table point at a ball centre's height R to page px
+     (far off screen behind the eye), and a page point back onto that plane (off the table where the ray misses) */
+  public static func screen(_ C: Cam, _ box: Box, _ x: Double, _ y: Double, _ R: Double) -> [Double] { proj(C, box, x, y, R).map { [$0[0], $0[1]] } ?? [-1e5, -1e5] }
+  public static func table(_ C: Cam, _ box: Box, _ sx: Double, _ sy: Double, _ R: Double) -> [Double] { unproj(C, box, sx, sy, R) ?? [-10, -10] }
+  /* V3.k: the input's scale (tap reach, grab radius), CSS px per metre at the pivot (px, py) */
+  public static func k(_ C: Cam, _ px: Double, _ py: Double, _ R: Double) -> Double { C.F / Swift.max(0.05, dot(sub([px, py, -R], C.Er), C.f)) }
 }
 
 /* 4o's overlays: the 2D view's strokes laid on the bed as ribbons (v3Line, v3Strip, v3Push, v3PathZ): each polyline at one
