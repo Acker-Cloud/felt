@@ -886,7 +886,9 @@ struct TableCanvas: View {
       let lit = p == g.turn || soloNum != nil
       let tot = total(p) - 4 - (many ? 1 : 0)
       var g2 = ctx
-      g2.opacity = lit ? 1 : 0.78
+      /* .pchip.busy: the CPU's seat pulses while it thinks (chipPulse; Reduce Motion: still) */
+      let busy = p == g.turn ? model.busyAt.map { model.now - $0 } : nil
+      g2.opacity = busy.map { RailPulse.opacity($0, reduce: model.reduceMotion) } ?? (lit ? 1 : 0.78)
       if lit { g2.addFilter(.shadow(color: Color(.sRGB, red: 1, green: 236 / 255, blue: 190 / 255, opacity: 0.75), radius: 3)) }
       var x = Double(c0.x) - tot / 2
       for (i, it) in items.enumerated() {
@@ -1002,7 +1004,7 @@ struct TableCanvas: View {
     let cueLen = CueGeo.of(game: model.game.table.2).len, now = model.now
     let lp = model.loupeA > 0.02 ? model.loupe.map { (x: $0.x, y: $0.y, r: $0.r) } : nil
     let onTable = live == nil ? [] : (model.rolling?.balls ?? model.balls).filter { $0.on }.map { (x: $0.x, y: $0.y, z: $0.z ?? 0) }
-    let recess = Color(rgb: 16, 11, 8), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85), f = model.scaleFactor
+    let recess = Color(rgb: 16, 11, 8), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85)
     for q in seats {
       let n = q.n, side = q.side, slot = P.sides[side][q.i]
       let fit = live.flatMap { PotRail.place(P, slot, $0.C, $0.box, z: s.cushionTop()) }

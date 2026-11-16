@@ -108,6 +108,17 @@ import Testing
     #expect(row([100, 100, 100, 100], near, far, pk, 196.5, 21) == nil)
   }
 
+  /* .pchip.busy's chipPulse (1.1s ease-in-out infinite, opacity .6 at 50%) on a lit seat: the computed opacity Chromium
+     gives the page's own rules (getAnimations()[0], currentTime set, getComputedStyle; 6 significant digits) */
+  @Test func busyPulse() {
+    let ts = [0, 0.05, 0.1, 0.2, 0.275, 0.4, 0.5, 0.55, 0.6, 0.7, 0.825, 0.9, 1.0, 1.05, 1.1, 1.21, 2.475, 3.3]
+    let web = [1, 0.993504, 0.97315, 0.889768, 0.8, 0.661736, 0.606496, 0.6, 0.606496, 0.661736, 0.8, 0.889768, 0.97315, 0.993504, 1, 0.967336, 0.8, 1]
+    for (t, v) in zip(ts, web) { #expect(abs(RailPulse.opacity(t) - v) < 1e-6, "t \(t): \(RailPulse.opacity(t)) vs \(v)") }
+    /* Reduce Motion (data-motion reduce: the animation over at once): still at the seat's own */
+    #expect(RailPulse.opacity(0.55, reduce: true) == 1)
+    #expect(RailPulse.easeInOut(0.5) == 0.5)
+  }
+
   @Test func potted() {
     #expect(SeatWords.potted([]) == "")
     #expect(SeatWords.potted([1, 3, 9]) == "Potted: 1, 3, 9")

@@ -736,6 +736,10 @@ final class TableModel {
   }
   @ObservationIgnored private var cpuBusy = false
   private(set) var cpuThinking = false
+  /* .pchip.busy (hudChip): the CPU's seat pulses while it thinks, its shot not yet found (state thinking, !cpuPlan);
+     busyAt the pulse's start (the class added: the animation runs from there) */
+  var railBusy: Bool { cpuThinking && cpuPlan == nil }
+  @ObservationIgnored private(set) var busyAt: TimeInterval? = nil
   /* the CPU's shot found and its think time up (the page's cpuPlan): the 3D view cuts to it, the line and the cue show */
   private(set) var cpuPlanned = false
   /* think's turn and pull (page 5, cpuAnim): the cue turns from where it was onto the line, then draws back to the shot's
@@ -1317,6 +1321,7 @@ final class TableModel {
     cpuThinkStep()
     cpuAnimStep()
     if cpuTurn && rolling == nil && stroke == nil && !cpuBusy { cpuStep() }
+    if railBusy { if busyAt == nil { busyAt = now } } else if busyAt != nil { busyAt = nil }
     guard let tab = rolling else { lastT = nil; return }
     /* as frameBody: never backwards, at most 50 ms a frame */
     let dt = min(0.05, max(0, lastT.map { now - $0 } ?? 1.0 / 60))

@@ -144,3 +144,46 @@ public enum RailRow {
     return (pos, nil)
   }
 }
+
+/* .pchip.busy (6b2, hudChip): the CPU's seat while it thinks (state thinking, no plan yet) pulses: chipPulse 1.1s
+   ease-in-out infinite, its one keyframe opacity .6 at 50%, the seat's own (lit: 1) at either end. CSS eases each
+   keyframe interval on its own: ease-in-out is cubic-bezier(.42, 0, .58, 1), solved for x as Blink's gfx::CubicBezier
+   does (Newton, then bisection). Reduce Motion: still. t: seconds since the pulse began */
+public enum RailPulse {
+  public static let PERIOD = 1.1, LOW = 0.6
+  /* cubic-bezier(x1, y1, x2, y2) at progress x */
+  public static func bezier(_ x: Double, _ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double) -> Double {
+    if x <= 0 { return 0 }
+    if x >= 1 { return 1 }
+    let cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx, cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by
+    func sx(_ s: Double) -> Double { ((ax * s + bx) * s + cx) * s }
+    func dx(_ s: Double) -> Double { (3 * ax * s + 2 * bx) * s + cx }
+    var s = x, found = false
+    for _ in 0..<8 {
+      let e = sx(s) - x
+      if abs(e) < 1e-7 { found = true; break }
+      let d = dx(s)
+      if abs(d) < 1e-7 { break }
+      s -= e / d
+    }
+    if !found {
+      var lo = 0.0, hi = 1.0
+      s = x
+      while lo < hi {
+        let v = sx(s)
+        if abs(v - x) < 1e-7 { break }
+        if x > v { lo = s } else { hi = s }
+        s = (hi - lo) * 0.5 + lo
+        if hi - lo < 1e-12 { break }
+      }
+    }
+    return ((ay * s + by) * s + cy) * s
+  }
+  public static func easeInOut(_ x: Double) -> Double { bezier(x, 0.42, 0, 0.58, 1) }
+  /* the seat's opacity t seconds into the pulse (base: the seat's own, 1 when lit) */
+  public static func opacity(_ t: Double, base: Double = 1, reduce: Bool = false) -> Double {
+    if reduce || t < 0 { return base }
+    let p = t.truncatingRemainder(dividingBy: PERIOD) / PERIOD
+    return p < 0.5 ? base + (LOW - base) * easeInOut(p / 0.5) : LOW + (base - LOW) * easeInOut((p - 0.5) / 0.5)
+  }
+}
