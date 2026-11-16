@@ -478,7 +478,6 @@ struct TableScreen: View {
     .onChange(of: tableView) { _, v in model.syncView(v == "3d") }
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
     .overlay(alignment: .top) { CalloutView(model: model).padding(.top, 0) }
-    .overlay(alignment: .bottom) { ReplayPill(model: model).padding(.bottom, 92) }
     .overlay { if let r = model.trickRes, !model.paused { TrickResult(model: model, res: r, back: { dismiss() }) } }
     .overlay { if let r = model.drillRes, !model.paused { DrillResultView(model: model, res: r, back: { dismiss() }) } }
     .overlay(alignment: model.coachAtTop ? .top : .bottom) { if model.tut != nil, !model.tutDone, !model.paused { CoachCard(model: model).pageCap(320).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
@@ -793,6 +792,9 @@ struct TableScreen: View {
     /* during a replay nothing reaches the game: the first touch ends it and the rest of it is eaten; an offer goes on a touch */
     if began, model.rp != nil { model.endReplay(); tch.eating = true; return }
     if tch.eating { return }
+    /* the rail's replay offer (#replayBtn): a 44 pt target round its glyph; the tap starts the replay (startReplay), the
+       rest of it eaten */
+    if began, model.offer != nil, let c = model.railReplay, abs(at.x - c.x) < 22, abs(at.y - c.y) < 22 { model.startReplay(); tch.eating = true; return }
     /* the rail's 3D switch: a 44 pt target round its glyph; the tap is the switch's, the rest of it eaten */
     if began, let c = model.railSwitch, abs(at.x - c.x) < 22, abs(at.y - c.y) < 22 { model.toggleView(); tch.eating = true; return }
     /* F8: a press on the CPU's turn hurries its think (cpuSkip) and is eaten whole: it never aims, tilts or picks (the
@@ -1966,13 +1968,24 @@ struct RailAX: View {
   var body: some View {
     ZStack(alignment: .topLeading) {
       ForEach(model.railAX + (model.potAX.map { [$0] } ?? []), id: \.id) { e in
-        Color.clear.frame(width: e.rect.width, height: e.rect.height)
-          .accessibilityElement().accessibilityLabel(e.words).accessibilityIdentifier(e.id)
-          .position(x: e.rect.midX, y: e.rect.midY)
+        RailAXElement(model: model, e: e).position(x: e.rect.midX, y: e.rect.midY)
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .allowsHitTesting(false)
+  }
+}
+/* one of them; the replay's offer and Skip are buttons (a finger's tap reaches the table's touch, which knows the offer's
+   target; VoiceOver's activation starts or ends the replay here) */
+struct RailAXElement: View {
+  let model: TableModel
+  let e: TableModel.SeatAX
+  var body: some View {
+    let el = Color.clear.frame(width: e.rect.width, height: e.rect.height)
+      .accessibilityElement().accessibilityLabel(e.words).accessibilityIdentifier(e.id)
+    if e.id == "replayBtn" { el.accessibilityAddTraits(.isButton).accessibilityAction { model.startReplay() } }
+    else if e.id == "replaySkip" { el.accessibilityAddTraits(.isButton).accessibilityAction { model.endReplay() } }
+    else { el }
   }
 }
 
@@ -3137,42 +3150,6 @@ struct CalloutView: View {
       }
     }
     .allowsHitTesting(false)
-  }
-}
-
-/* #replayBtn and #replayBadge: the offer (an arrow and Replay, brass for a notable shot), then while one plays its badge
-   (Replay, Slow motion round a moment) and Skip */
-struct ReplayPill: View {
-  let model: TableModel
-  var body: some View {
-    let brass = Color(rgb: 0xd9, 0xb2, 0x5e)
-    Group {
-      if model.rp != nil {
-        HStack(spacing: 10) {
-          HStack(spacing: 6) {
-            Image(systemName: "arrow.counterclockwise").font(.system(size: 13, weight: .bold))
-            Text("Replay").font(.system(size: 14, weight: .semibold))
-            if model.replaySlow { Text("Slow motion").font(.system(size: 12)).foregroundStyle(.secondary) }
-          }
-          .padding(.horizontal, 12).frame(height: 32).background(Capsule().fill(Color(rgb: 18, 18, 20).opacity(0.9)))
-          Button { model.endReplay() } label: { Text("Skip").font(.system(size: 14, weight: .semibold)).padding(.horizontal, 14).frame(minHeight: 44) }
-            .background(Capsule().fill(Color(rgb: 18, 18, 20).opacity(0.9)).frame(height: 32)).accessibilityLabel("Skip the replay").accessibilityIdentifier("replaySkip")
-        }
-        .foregroundStyle(.white)
-      } else if let o = model.offer {
-        Button { model.startReplay() } label: {
-          HStack(spacing: 6) {
-            Image(systemName: "arrow.counterclockwise").font(.system(size: 13, weight: .bold))
-            Text("Replay").font(.system(size: 14, weight: .semibold))
-          }
-          .padding(.horizontal, 14).frame(minHeight: 44)
-          .foregroundStyle(o.notable != nil ? Color.black : Color.white)
-          .background(Capsule().fill(o.notable != nil ? brass : Color(rgb: 18, 18, 20).opacity(0.9)).frame(height: 32))
-        }
-        .accessibilityLabel(o.notable.map { "Replay the \(momentWord($0, model.g?.kind ?? "8").lowercased())" } ?? "Replay the last shot")
-        .accessibilityIdentifier("replayBtn")
-      }
-    }
   }
 }
 

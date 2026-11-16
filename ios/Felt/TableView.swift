@@ -667,7 +667,7 @@ struct TableCanvas: View {
     /* a party of three or four (chipCount, .many): a seat per player in turn order, each inlaid like the two-player
        seats (the shooter lit, the others dimmed), the race left to the pause menu */
     let nSeats = model.g.map { SeatWords.seats(party: model.party?.names.count, mode: $0.mode) } ?? 2, many = nSeats > 2
-    guard let g = model.g, g.winner == nil, many || (model.party?.names.count ?? 2) <= 2 else { if !model.railAX.isEmpty { model.railAX = [] }; return }
+    guard let g = model.g, g.winner == nil, many || (model.party?.names.count ?? 2) <= 2 else { if !model.railAX.isEmpty { model.railAX = [] }; model.railReplay = nil; return }
     let s = model.sim, T = model.potGeometry(m), band = T.railBand
     let ink = Color(.sRGB, red: 0xef / 255.0, green: 0xe7 / 255.0, blue: 0xda / 255.0), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85)
     let mid = -(band.co + band.rail) / 2   /* the band's middle, metres out from the nose */
@@ -725,18 +725,12 @@ struct TableCanvas: View {
     /* placeRail: the row's items placed in the gaps (rail units: metres top-down, points in 3D), each kept RAIL_GAP (6 pt)
        from the others: the seats first (player 1 the gap nearest the rail's middle on its left, player 2 on its right; a
        gap across the middle gives each its half, the two meeting at the middle), snooker's scoreboard beside the player
-       to shoot, then the 3D switch (its whole 44 pt target where a gap has it, else its glyph) nearest its gap's middle,
-       in the first gap from the left with room */
+       to shoot, then the replay's items (from the right) and the 3D switch (from the left), each its whole 44 pt target
+       where a gap has it, else its glyph, nearest its gap's middle (RailRow.ends) */
     let unit = row != nil ? 1.0 : 1 / m.k, G = 6 * unit, rmid = len / 2
     var used: [[Double]] = []
     func free(_ g: [Double]) -> [[Double]] {
       used.reduce([g]) { f, u in f.flatMap { [[$0[0], Swift.min($0[1], u[0] - G)], [Swift.max($0[0], u[1] + G), $0[1]]] }.filter { $0[1] - $0[0] > unit } }
-    }
-    func fitIn(_ g: [Double], _ w: Double) -> Double? {
-      let c = (g[0] + g[1]) / 2
-      var best: Double? = nil
-      for f in free(g) where f[1] - f[0] >= w { let x = Swift.min(Swift.max(c, f[0] + w / 2), f[1] - w / 2); if best == nil || abs(x - c) < abs(best! - c) { best = x } }
-      return best
     }
     func seatAt(_ w: Double, left: Bool) -> Double? {
       var best: (x: Double, d: Double)? = nil
@@ -799,7 +793,14 @@ struct TableCanvas: View {
     }
     /* #viewBtn's glyph (--gl), shown in a game, never in the lesson */
     let gl = Swift.min(16, ph + 1), swOn = model.lesson == nil
-    var seatPt: [Int: CGPoint] = [:], swX: Double? = nil, swSet = false
+    /* the replay's items (rpl): while one plays Skip, then the badge (its words, Slow motion, round a moment, dropped when
+       bare); else the offer. Each pill its glyph (--gl), 2 px padding either side and wOf's 1; the badge's words at --rf
+       after a 5 px gap */
+    let rf = ph < 16 ? 11.0 : 12.0, slowW = Double(ctx.resolve(Text("Slow motion").font(.system(size: rf, weight: .bold))).measure(in: CGSize(width: 300, height: 100)).width)
+    let rplIds = model.rp != nil ? ["replaySkip", "replayBadge"] : model.offer != nil ? ["replayBtn"] : []
+    let rpl = rplIds.map { $0 == "replayBadge" ? RailRow.Rpl(w: model.replaySlow ? gl + 5 + 5 + slowW : gl + 5, bare: gl + 5, badge: true) : RailRow.Rpl(w: gl + 5) }
+    var rplX: [Double?] = rplIds.map { _ in nil }, rplBare = false
+    var seatPt: [Int: CGPoint] = [:], swX: Double? = nil
     if many {
       /* placeRail's group() (.many): the seats packed in turn order along the bottom rail's gaps, too many for it the
          last ones along the far rail's (top-down); then the 3D switch clear of them, or it gives way; no room even so:
@@ -807,13 +808,13 @@ struct TableCanvas: View {
       let k = 1 / unit, ws = seatList.map { total($0) }, px = { (sp: [[Double]]) in sp.map { $0.map { $0 * k } } }
       let far = row != nil ? nil : px(cut(farHoles))
       /* the switch's pill: its glyph, 2 px padding either side and wOf's 1 */
-      let place = RailRow.many(ws, near: px(spans), far: far, pockets: px(cut(pocketHoles)), mid: rmid * k, pw: swOn ? gl + 5 : nil)
+      let place = RailRow.many(ws, near: px(spans), far: far, pockets: px(cut(pocketHoles)), mid: rmid * k, pw: swOn ? gl + 5 : nil, rpl: rpl)
       for (i, p) in seatList.enumerated() {
         guard let q = place.seats?[i] else { continue }
         let u = q.x / k
         seatPt[p] = q.far ? (m.upright ? m.pt(s.TL - mid, u) : m.pt(u, mid)) : at(u)
       }
-      swX = place.sw.map { $0 / k }; swSet = true
+      swX = place.sw.map { $0 / k }; rplX = place.rpl.map { $0.map { $0 / k } }; rplBare = place.bare
     }
     var seatX: [Int: Double] = [:]
     if !many { for p in seatList {
@@ -852,11 +853,55 @@ struct TableCanvas: View {
     }
     /* #viewBtn (v3Btn, placeRail's side(viewBtn, left)): the 3D switch, a cube inlaid in the rail, bright while 3D is on;
        shown in a game, never in the lesson */
+    if !many {
+      /* after group(): the replay's items on the right, then the switch on the left, over STEPS (RailRow.ends); a seat with
+         no room (the score keeper's fallback): both give way */
+      if seatList.allSatisfy({ seatX[$0] != nil }) {
+        let k = 1 / unit, e = RailRow.ends(spans.map { $0.map { $0 * k } }, used: used.map { $0.map { $0 * k } }, rpl: rpl, pw: swOn ? gl + 5 : nil)
+        swX = e.sw.map { $0 / k }; rplX = e.rpl.map { $0.map { $0 / k } }; rplBare = e.bare
+      }
+    }
+    /* the replay (5r, placeReplay): the offer (#replayBtn) an arrow, brass for a notable shot, its words for VoiceOver alone;
+       while one plays the badge (the arrow, and Slow motion round a moment unless bare) and Skip (two triangles). Inlaid as
+       the sights: pearl ink cut dark round its edge, the lamp's glow on every glyph (.rpl svg) */
+    model.railReplay = nil
+    var rplAX: [TableModel.SeatAX] = []
+    let glow = Color(.sRGB, red: 1, green: 236 / 255, blue: 190 / 255, opacity: 0.75)
+    for (i, id) in rplIds.enumerated() {
+      guard let x = rplX[i] else { continue }
+      let c = at(x), words = id == "replayBadge" && model.replaySlow && !rplBare
+      let spanW = (words ? rpl[i].w : gl + 5) - 1, left = Double(c.x) - spanW / 2, k = gl / 24, o = CGPoint(x: left + 2, y: Double(c.y) - gl / 2)
+      let col = id == "replayBtn" && model.offer?.notable != nil ? Color(rgb: 0xf0, 0xcc, 0x6e) : ink
+      var e = ctx
+      e.addFilter(.shadow(color: edge, radius: 0.7)); e.addFilter(.shadow(color: edge, radius: 0.7)); e.addFilter(.shadow(color: glow, radius: 3))
+      func V(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: o.x + x * k, y: o.y + y * k) }
+      if id == "replaySkip" {
+        /* M5 5.5v13l9-6.5zM14 5.5v13l9-6.5z */
+        var p = Path()
+        for x0 in [5.0, 14] { p.move(to: V(x0, 5.5)); p.addLine(to: V(x0, 18.5)); p.addLine(to: V(x0 + 9, 12)); p.closeSubpath() }
+        e.fill(p, with: .color(col))
+      } else {
+        /* M3 12a9 9 0 1 0 3-6.7 (round (12, 12) from the left, by the foot, to the upper left) and M3 4v5h5 */
+        /* sweep 0 in the SVG's y-down frame: the angle falls from pi (the left) through pi/2 (the foot) to the end's */
+        var p = Path()
+        let a0 = Double.pi, a1 = atan2(5.3 - 12, 6.0 - 12)
+        for j in 0...48 { let a = a0 + (a1 - a0) * Double(j) / 48, q = V(12 + 9 * cos(a), 12 + 9 * sin(a)); j == 0 ? p.move(to: q) : p.addLine(to: q) }
+        p.move(to: V(3, 4)); p.addLine(to: V(3, 9)); p.addLine(to: V(8, 9))
+        e.stroke(p, with: .color(col), style: StrokeStyle(lineWidth: 2.4 * k, lineCap: .round, lineJoin: .round))
+        if words {
+          var t = ctx; t.addFilter(.shadow(color: edge, radius: 0.7))
+          t.draw(Text("Slow motion").font(.system(size: rf, weight: .bold)).foregroundColor(ink), at: CGPoint(x: left + 2 + gl + 5, y: Double(c.y)), anchor: .leading)
+        }
+      }
+      if id == "replayBtn" { model.railReplay = c }
+      /* VoiceOver: the offer's label (offerReplay's aria-label), the badge's words, Skip's */
+      let say = id == "replayBtn" ? model.offer!.notable.map { "Replay the \(momentWord($0, model.g?.kind ?? "8").lowercased())" } ?? "Replay the last shot"
+        : id == "replaySkip" ? "Skip the replay" : model.replaySlow && !rplBare ? "Replay, Slow motion" : "Replay"
+      rplAX.append(.init(id: id, rect: CGRect(x: c.x - 22, y: c.y - 22, width: 44, height: 44), words: say))
+    }
     model.railSwitch = nil
     if swOn {
-      var sx: Double? = swX
-      if !swSet { outer: for gp in spans { for w in [44.0, gl + 4] { if let x = fitIn(gp, w * unit) { sx = x; used.append([x - w * unit / 2, x + w * unit / 2]); break outer } } } }
-      if let x = sx {
+      if let x = swX {
         let c = at(x), on = model.view3d
         model.railSwitch = c
         var e = ctx
@@ -880,6 +925,7 @@ struct TableCanvas: View {
         ?? SeatWords.seat(g, p, name: Words.nameOf(p), next: p == g.turn ? next : nil, tally: model.rackTally(p))
       ax.append(.init(id: "seat\(p)", rect: CGRect(x: c0.x - w / 2, y: c0.y - 22, width: w, height: 44), words: words))
     }
+    ax += rplAX
     if model.railAX != ax { model.railAX = ax }
     for p in seatList {
       guard let c0 = seatPt[p], let items = seatItems[p], let widths = seatW[p] else { continue }

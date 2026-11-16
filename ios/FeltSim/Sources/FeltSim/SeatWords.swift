@@ -131,17 +131,52 @@ public enum RailRow {
     for f in free(g, used) where f[1] - f[0] >= w { let x = Swift.min(Swift.max(c, f[0] + w / 2), f[1] - w / 2); if best == nil || abs(x - c) < abs(best! - c) { best = x } }
     return best
   }
-  /* placeRail's row for a party (.many): the seats by group() (party), then the 3D switch (side(viewBtn, pw, false): pw
-     its glyph's width, nil when not shown) in the first gap from the left with room for its whole 44 px target, else for
-     its glyph, clear of the bottom rail's seats; no room: the switch gives way (STEPS' sw 0). The seats packed nowhere:
-     the score keeper keeps off the pockets alone (pockets: the bottom rail's gaps between them) and the switch gives way */
-  public static func many(_ ws: [Double], near: [[Double]], far: [[Double]]?, pockets: [[Double]], mid: Double, pw: Double?) -> (seats: [(x: Double, far: Bool)]?, sw: Double?) {
-    guard let pos = party(ws, near: near, far: far, mid: mid) else { return (party(ws, near: pockets, far: far, mid: mid), nil) }
+  /* placeRail's side(): a control in the first gap with room (from the right for the replay's, from the left for the
+     switch) for its whole 44 px target, else for its pill (pw wide), as near the gap's middle as the room allows; taken
+     from the room left (used). nil: no room */
+  public static func side(_ gs: [[Double]], _ pw: Double, right: Bool, _ used: inout [[Double]]) -> Double? {
+    for g in right ? gs.reversed() : gs {
+      for w in pw < 44 ? [44, pw] : [pw] { if let x = fitIn(g, w, used) { used.append([x - w / 2, x + w / 2]); return x } }
+    }
+    return nil
+  }
+  /* the replay's items on the rail (#replayBtn, the offer; while one plays #replaySkip, then #replayBadge): each its pill's
+     width (wOf: the glyph, 2 px padding either side and 1), the badge's bare its width with .bare (its words, Slow motion,
+     dropped) */
+  public struct Rpl: Equatable {
+    public let w: Double, bare: Double, badge: Bool
+    public init(w: Double, bare: Double? = nil, badge: Bool = false) { self.w = w; self.bare = bare ?? w; self.badge = badge }
+  }
+  /* STEPS as they touch the replay and the switch: [bare, badge kept, switch kept], cheapest first */
+  public static let STEPS: [(bare: Bool, badge: Bool, sw: Bool)] = [(false, true, true), (true, true, true), (true, false, true), (true, false, false)]
+  /* placeRail after group(): the replay's items on the right (side(el, wOf, true)), then the 3D switch on the left (pw its
+     pill's width, nil when not shown), over STEPS until all fit (the last step stands whatever fits). Each one's centre
+     (nil: given way), and whether the replay went bare */
+  public static func ends(_ gs: [[Double]], used u0: [[Double]], rpl: [Rpl], pw: Double?) -> (rpl: [Double?], sw: Double?, bare: Bool) {
+    var last: (rpl: [Double?], sw: Double?, bare: Bool) = ([], nil, false)
+    for (i, st) in STEPS.enumerated() {
+      var used = u0, ok = true, xs: [Double?] = []
+      for r in rpl {
+        if r.badge && !st.badge { xs.append(nil); continue }
+        let x = side(gs, st.bare ? r.bare : r.w, right: true, &used)
+        ok = ok && x != nil; xs.append(x)
+      }
+      var sx: Double? = nil
+      if let pw, st.sw { sx = side(gs, pw, right: false, &used); ok = ok && sx != nil }
+      last = (xs, sx, st.bare)
+      if ok || i == STEPS.count - 1 { break }
+    }
+    return last
+  }
+  /* placeRail's row for a party (.many): the seats by group() (party), then the replay's items and the 3D switch (ends),
+     clear of the bottom rail's seats. The seats packed nowhere: the score keeper keeps off the pockets alone (pockets: the
+     bottom rail's gaps between them) and the replay and the switch give way */
+  public static func many(_ ws: [Double], near: [[Double]], far: [[Double]]?, pockets: [[Double]], mid: Double, pw: Double?, rpl: [Rpl] = []) -> (seats: [(x: Double, far: Bool)]?, sw: Double?, rpl: [Double?], bare: Bool) {
+    guard let pos = party(ws, near: near, far: far, mid: mid) else { return (party(ws, near: pockets, far: far, mid: mid), nil, rpl.map { _ in nil }, false) }
     var used: [[Double]] = []
     for (i, q) in pos.enumerated() where !q.far { used.append([q.x - ws[i] / 2, q.x + ws[i] / 2]) }
-    guard let pw else { return (pos, nil) }
-    for g in near { for w in pw < 44 ? [44, pw] : [pw] { if let x = fitIn(g, w, used) { return (pos, x) } } }
-    return (pos, nil)
+    let e = ends(near, used: used, rpl: rpl, pw: pw)
+    return (pos, e.sw, e.rpl, e.bare)
   }
 }
 

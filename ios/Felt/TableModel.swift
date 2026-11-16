@@ -700,6 +700,8 @@ final class TableModel {
   var view3d = Prefs.view == "3d"
   /* the rail's 3D switch: its centre on the stage as last drawn (nil: not shown) */
   @ObservationIgnored var railSwitch: CGPoint?
+  /* the rail's replay offer (#replayBtn): its centre on the stage as last drawn (nil: not shown) */
+  @ObservationIgnored var railReplay: CGPoint?
   /* #viewBtn's tap: 3D on or off, kept as the setting */
   /* v3Sync: the Table View setting changed elsewhere (Settings, from the pause menu): the next frame draws it */
   func syncView(_ on: Bool) {

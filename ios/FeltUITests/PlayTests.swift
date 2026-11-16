@@ -25,6 +25,36 @@ final class PlayTests: XCTestCase {
     let end = XCTAttachment(screenshot: app.screenshot()); end.name = "break-rest"; end.lifetime = .keepAlways; add(end)
   }
 
+  /* 5r on the rail (T7.160): after the break comes to rest the offer is inlaid in the bottom rail (#replayBtn, labelled
+     as offerReplay's aria-label); a real tap on it starts the replay (the badge and Skip on the rail, the bar reads
+     Replay), and a tap on the table ends it */
+  @MainActor func testReplayOnTheRail() throws {
+    let app = XCUIApplication()
+    app.launchArguments = ["-felt-game", "8-Ball"]
+    app.launch()
+    let table = app.otherElements["table"], bar = app.otherElements["power"]
+    XCTAssertTrue(table.waitForExistence(timeout: 10))
+    XCTAssertTrue(bar.waitForExistence(timeout: 5))
+    bar.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)).press(forDuration: 0.1, thenDragTo: bar.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)))
+    expectation(for: NSPredicate(format: "value == %@", "0 percent"), evaluatedWith: bar)
+    waitForExpectations(timeout: 65)
+    let offer = app.otherElements["replayBtn"]
+    XCTAssertTrue(offer.waitForExistence(timeout: 3), "the offer on the rail")
+    XCTAssertTrue(offer.label.hasPrefix("Replay the "), offer.label)
+    let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "replay-offer"; shot.lifetime = .keepAlways; add(shot)
+    offer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    let skip = app.otherElements["replaySkip"]
+    XCTAssertTrue(skip.waitForExistence(timeout: 2), "the tap starts the replay")
+    XCTAssertEqual(skip.label, "Skip the replay")
+    XCTAssertTrue(app.otherElements["replayBadge"].exists)
+    XCTAssertFalse(offer.exists)
+    let play = XCTAttachment(screenshot: app.screenshot()); play.name = "replay-playing"; play.lifetime = .keepAlways; add(play)
+    table.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
+    expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: skip)
+    waitForExpectations(timeout: 3)
+    XCTAssertEqual(bar.value as? String, "0 percent")
+  }
+
   /* 5c at 10-ball past the break: the bar says Call your shot and does not arm; a tap on it opens the call's menu with
      the six pockets, a tap outside closes it, and a pull with no call opens it on the let-go instead of shooting */
   @MainActor func testCallMenu() throws {

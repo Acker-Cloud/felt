@@ -108,6 +108,49 @@ import Testing
     #expect(row([100, 100, 100, 100], near, far, pk, 196.5, 21) == nil)
   }
 
+  /* the replay on the rail row (T7.160): the offer (#replayBtn), or while one plays Skip then the badge, on the right,
+     then the 3D switch on the left, over STEPS (bare, the badge given way, the switch given way), against placeRail's own
+     free, fitIn, seat, pack, group, side and STEPS loop run in node (scratchpad rail.cjs) on the same gaps and widths
+     (px: a pill its glyph, 2 px padding either side and wOf's 1; the badge's words Slow motion while shown, bare without) */
+  @Test func replayRow() {
+    let near = [[12, 70.5], [84.25, 180], [194, 300.75], [314.5, 381]], far = [[12, 70.5], [84.25, 186], [207, 300.75], [314.5, 381]], pk = [[12.0, 180], [194, 381]]
+    let offer = [RailRow.Rpl(w: 21)], playing = { (b: Double) in [RailRow.Rpl(w: 21), RailRow.Rpl(w: b, bare: 21, badge: true)] }
+    /* the seats as group() placed them (seat(): two; pack: one or none), the rest after them */
+    func after(_ seats: [(Double, Double)], _ gs: [[Double]], _ rpl: [RailRow.Rpl]) -> ([Double?], Double?, Bool) {
+      let e = RailRow.ends(gs, used: seats.map { [$0.0 - $0.1 / 2, $0.0 + $0.1 / 2] }, rpl: rpl, pw: 21)
+      return (e.rpl, e.sw, e.bare)
+    }
+    var r = after([(132.125, 27), (206, 13)], near, offer)
+    #expect(r.0 == [347.75] && r.1 == 41.25 && !r.2)
+    /* playing: Skip in the last gap, the badge too wide for the room left by its words: bare (STEPS 2) */
+    r = after([(132.125, 27), (206, 13)], near, playing(95))
+    #expect(r.0 == [347.75, 247.375] && r.1 == 41.25 && r.2)
+    r = after([(105, 40), (188, 40)], [[0, 60], [70, 140], [150, 250], [260, 330]], playing(70))
+    #expect(r.0 == [295, 224.5] && r.1 == 30 && r.2)
+    r = after([(132, 60), (198, 60)], [[20, 50], [60, 270], [280, 310]], playing(60))
+    #expect(r.0 == [295, 85.5] && r.1 == 35 && r.2)
+    r = after([(132, 60), (198, 60)], [[20, 50], [60, 270], [280, 310]], playing(25))
+    #expect(r.0 == [295, 83.5] && r.1 == 35 && !r.2)
+    /* one gap: the room either side of the seats ties, the first found (its left end) stands */
+    r = after([(112, 100), (218, 100)], [[30, 300]], offer)
+    #expect(r.0 == [45.5] && r.1 == 284.5)
+    r = after([(112, 100), (218, 100)], [[30, 310]], offer)
+    #expect(r.0 == [284.5] && r.1 == 45.5)
+    /* a trick shot's or a drill's one seat (pack), practice's none */
+    r = after([(247.375, 13)], near, offer)
+    #expect(r.0 == [347.75] && r.1 == 41.25)
+    r = after([], near, playing(95))
+    #expect(r.0 == [347.75, 247.375] && r.1 == 41.25 && !r.2)
+    /* a party (.many): beside the seats; too many for the bottom rail: the badge and the switch give way (STEPS 7) */
+    var m = RailRow.many([27, 13, 13], near: near, far: far, pockets: pk, mid: 196.5, pw: 21, rpl: offer)
+    #expect(m.seats!.map(\.x) == [132.125, 237.875, 256.875] && m.rpl == [347.75] && m.sw == 41.25 && !m.bare)
+    m = RailRow.many([60, 60, 60, 60], near: near, far: far, pockets: pk, mid: 196.5, pw: 21, rpl: playing(95))
+    #expect(m.seats!.map(\.x) == [132.125, 247.375, 347.75, 253.875] && m.rpl == [41.25, nil] && m.sw == nil && m.bare)
+    /* the score keeper alone: the replay and the switch give way */
+    m = RailRow.many([100, 100, 100], near: [[0, 100], [110, 200]], far: nil, pockets: [[0, 200]], mid: 100, pw: 21, rpl: offer)
+    #expect(m.seats == nil && m.rpl == [nil] && m.sw == nil)
+  }
+
   /* .pchip.busy's chipPulse (1.1s ease-in-out infinite, opacity .6 at 50%) on a lit seat: the computed opacity Chromium
      gives the page's own rules (getAnimations()[0], currentTime set, getComputedStyle; 6 significant digits) */
   @Test func busyPulse() {
