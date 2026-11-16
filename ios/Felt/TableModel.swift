@@ -818,7 +818,9 @@ final class TableModel {
     Words.cpuMode = cpuLevel != nil
     /* nameOf: an exhibition's or a party's players, else (two players) the names given at setup, else Player 1 and 2 */
     let given = Prefs.names
-    Words.names = exhib.map { $0.map { TableModel.FOES[$0] ?? "CPU" } } ?? party?.names
+    /* an exhibition's players are named as the page's exhibitionTerms names them: Career.lib.genPlayer on a fresh seed */
+    var exNames = Set<String>(), exSeed = Int.random(in: 1...0x7fffffff)
+    Words.names = exhib.map { l in l.indices.map { CareerLib.genPlayer(exSeed, $0 + 1, &exNames).name } } ?? party?.names
       ?? (cpuLevel == nil && given.contains { !$0.isEmpty } ? given.enumerated().map { $1.isEmpty ? "Player \($0 + 1)" : $1 } : nil)
     /* start(): the settings' table (every pool game on its size and pockets; snooker's size; the bumper table's shape) */
     let prefSpec: (table: String, shape: String?, pockets: String) = switch game {

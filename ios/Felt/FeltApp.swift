@@ -497,11 +497,18 @@ struct TableScreen: View {
       if ProcessInfo.processInfo.arguments.contains("-felt-edges") { Task { try? await Task.sleep(for: .seconds(1)); Chrome.printEdges() } }
     }
     .overlay { if let h = model.handoff, !model.paused { Handoff(model: model, p: h.p, first: h.first) } }
-    /* the exhibition's bar: the speed (felt.speed), over the table's top */
+    /* the exhibition's bar (#exBar, hudModes): the player to shoot by name (#exLab) and the speed (felt.speed), over the
+       table's top; gone once the game is over */
     .overlay(alignment: .top) {
-      if model.exhib != nil && !model.paused {
-        Picker("Speed", selection: Binding(get: { model.speed }, set: { model.speed = $0 })) { Text("1x").tag(1.0); Text("2x").tag(2.0); Text("4x").tag(4.0) }
-          .pickerStyle(.segmented).frame(width: 180).padding(.top, 54).accessibilityIdentifier("exhibit-speed")
+      if model.exhib != nil && !model.paused, let gm = model.g, gm.winner == nil {
+        HStack(spacing: 6) {
+          Text(Words.nameOf(gm.turn)).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).lineLimit(1)
+            .padding(.leading, 10).padding(.trailing, 2).accessibilityIdentifier("exhibit-name")
+          Picker("Speed", selection: Binding(get: { model.speed }, set: { model.speed = $0 })) { Text("1x").tag(1.0); Text("2x").tag(2.0); Text("4x").tag(4.0) }
+            .pickerStyle(.segmented).frame(width: 180).accessibilityIdentifier("exhibit-speed")
+        }
+        .padding(4).background(.regularMaterial, in: Capsule()).padding(.top, 54)
+        .accessibilityElement(children: .contain).accessibilityLabel("Exhibition")
       }
     }
     /* the call's menu (#callBar, a .seg.pop.open: z-index 60) over every other table overlay: the strip and the rail row,
