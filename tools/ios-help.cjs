@@ -17,11 +17,11 @@ function build() {
     const at = src.indexOf(`<section class="pan" id="${pan}"`), sec = src.slice(at, src.indexOf('</section>', at));
     /* a group or fine print given for keys and touch: the touch one */
     const pick = (re) => [...sec.matchAll(re)].filter(g => !/\bkeys\b/.test(g[1])).map(g => g[2]);
-    const rules = pick(/<ul class="group rules([^"]*)"[^>]*>([\s\S]*?)<\/ul>/g).flatMap(u => [...u.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(li => {
+    const rules = pick(/<ul class="group rules([^"]*)"[^>]*>([\s\S]*?)<\/ul>/g).flatMap(u => [...u.matchAll(/<li(?: class="touch")?>([\s\S]*?)<\/li>/g)].map(li => {
       const h = li[1].match(/<b>([\s\S]*?)<\/b>/), p = li[1].match(/<p>([\s\S]*?)<\/p>/);
       return [h ? text(h[1]) : '', p ? text(p[1]) : text(li[1])];
     }));
-    const fine = pick(/<ul class="fine([^"]*)"[^>]*>([\s\S]*?)<\/ul>/g).flatMap(u => [...u.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(li => text(li[1])));
+    const fine = pick(/<ul class="fine([^"]*)"[^>]*>([\s\S]*?)<\/ul>/g).flatMap(u => [...u.matchAll(/<li(?: class="touch")?>([\s\S]*?)<\/li>/g)].map(li => text(li[1])));
     const act = sec.match(/<div class="howAct"><button class="([^"]*)" id="(\w+)"(?: data-tut="(\w+)")?>([\s\S]*?)<\/button>/);
     topics.push({ id: tab.replace(/^tab/, ''), title: text(b[1]), sub: sm ? text(sm[1]) : '', rules, fine,
       act: act ? { id: act[2], tut: act[3] || null, text: text(act[4]) } : null });

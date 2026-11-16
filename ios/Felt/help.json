@@ -550,6 +550,10 @@
      "The cue raised above the bed, from level up to 60 degrees. Every shot starts level."
     ],
     [
+     "Open It",
+     "Hold the english pad (the cue ball by the power bar) still for half a second. The elevation slider opens beside it."
+    ],
+    [
      "Set It",
      "Drag the slider up to raise the cue, down to lower it. Level puts it back down. A tap anywhere else closes it."
     ],
