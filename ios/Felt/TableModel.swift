@@ -727,8 +727,13 @@ final class TableModel {
   var handoff: (p: Int, first: Bool)? = nil
   @ObservationIgnored private var cpuBusy = false
   private(set) var cpuThinking = false
-  /* the CPU's shot found and its line shown while it thinks on (the page's cpuPlan): the 3D view cuts to it and draws the cue */
+  /* the CPU's shot found and its think time up (the page's cpuPlan): the 3D view cuts to it, the line and the cue show */
   private(set) var cpuPlanned = false
+  /* think's turn and pull (page 5, cpuAnim): the cue turns from where it was onto the line, then draws back to the shot's
+     power, and the stroke follows; el the time run */
+  /* the page's aiming: the player's turn, the stroke, or the CPU's with its plan (never while its search runs) */
+  var cueShown: Bool { !cpuTurn || stroke != nil || cpuPlan != nil }
+  @ObservationIgnored private(set) var cpuPlan: (from: Double, angle: Double, power: Double, el: Double, last: Double, shots: Int, turn: Int)? = nil
 
   /* practice (page 5s): the session's layout and seed, the undo stack (UNDO_MAX), its numbers, editing and the tools strip */
   struct Practice { var layout: String, seed: UInt32, undo: [Game] = [], shots = 0, pots = 0, potting = 0, edit: Bool, tools = false }
@@ -1284,6 +1289,7 @@ final class TableModel {
     if let st = stroke {
       if st.t0 == nil { stroke = (st.power, now) } else if now - st.t0! >= TableModel.STROKE_MS / speed { strikeNow(st.power, now) }
     }
+    cpuAnimStep()
     if cpuTurn && rolling == nil && stroke == nil && !cpuBusy { cpuStep() }
     guard let tab = rolling else { lastT = nil; return }
     /* as frameBody: never backwards, at most 50 ms a frame */
@@ -1477,18 +1483,36 @@ final class TableModel {
       await MainActor.run { self.cpuPlay(shot, gm, t0: t0, seed: seed) }
     }
   }
+  /* the search's answer waits for the think time (the page's cpuReady), then becomes the plan: the cue ball placed, the
+     line, the call and the spin set, and the cue turns onto it and draws back (cpuAnimStep) */
   private func cpuPlay(_ shot: CPUShot, _ gm: Game, t0: TimeInterval, seed: Double) {
-    guard var g0 = g, g0.shots == gm.shots, g0.turn == gm.turn else { cpuBusy = false; cpuThinking = false; return }
-    if let p = shot.place { g0 = engine.placeCue(g0, p[0], p[1]) }
-    if gm.kind == "bumper", let b = shot.ball { g0.striker = b }
-    g0.call = shot.call; g = g0; syncBalls()
-    aim = shot.angle; spin = shot.spin; cpuPlanned = true
+    guard let g1 = g, g1.shots == gm.shots, g1.turn == gm.turn else { cpuBusy = false; cpuThinking = false; return }
     let think = cpuThinkMs(gm, shot, seed) / 1000 / speed, wait = max(0, think - (now - t0))
     Task { @MainActor in
       try? await Task.sleep(for: .milliseconds(Int(wait * 1000)))
+      guard var g0 = g, g0.shots == gm.shots, g0.turn == gm.turn, cpuTurn else { cpuBusy = false; cpuThinking = false; return }
+      if let p = shot.place { g0 = engine.placeCue(g0, p[0], p[1]) }
+      if gm.kind == "bumper", let b = shot.ball { g0.striker = b }
+      g0.call = shot.call; g = g0; syncBalls()
+      spin = shot.spin; cpuPlanned = true
+      cpuPlan = (aim, shot.angle, shot.power, 0, now, g0.shots, g0.turn); power = 0   /* the cue at rest until the pull */
+    }
+  }
+  /* think's second half, each frame (cpuAnim); at the end the stroke, as commit() */
+  private func cpuAnimStep() {
+    guard var P = cpuPlan else { return }
+    guard let gm = g, gm.shots == P.shots, gm.turn == P.turn, cpuTurn, rolling == nil, stroke == nil else {
+      cpuPlan = nil; cpuBusy = false; cpuThinking = false; power = 0; return
+    }
+    P.el += min(0.1, max(0, now - P.last)); P.last = now; cpuPlan = P
+    let u = P.el / (CPU_ANIM_MS / 1000 / speed), a = cpuAnim(u, from: P.from, to: P.angle, power: P.power)
+    aim = a.aim
+    if let p = a.pull { power = p }
+    if u >= 1 {
+      cpuPlan = nil
       cpuThinking = false
-      power = shot.power; markPower = shot.power
-      stroke = (shot.power, nil)
+      power = P.power; markPower = P.power
+      stroke = (P.power, nil)
       cpuBusy = false
     }
   }

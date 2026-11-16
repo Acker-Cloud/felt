@@ -55,4 +55,23 @@ import Testing
     let angles = Set(shots.map { ($0["shot"] as! [String: Any])["angle"] as! String })
     #expect(angles.count > shots.count / 2, "the goldens are many different shots")
   }
+
+  /* page 5's think once the plan is made (cpuAnim): the turn round the short way by 60%, then the pull to the power */
+  @Test func anim() {
+    #expect(CPU_ANIM_MS == 900)
+    let from = 3.0, to = -3.0, pw = 0.8   /* the short way: across pi, 2pi - 6 */
+    let d = 2 * Double.pi - 6
+    let a0 = cpuAnim(0, from: from, to: to, power: pw)
+    #expect(a0.aim == from && a0.pull == nil)
+    let a3 = cpuAnim(0.3, from: from, to: to, power: pw)
+    #expect(abs(a3.aim - (from + d * 0.875)) < 1e-12 && a3.pull == nil)
+    let a6 = cpuAnim(0.6, from: from, to: to, power: pw)
+    #expect(abs(a6.aim - (from + d)) < 1e-12 && a6.pull == nil, "on the line by 60%, the cue still at rest")
+    let a8 = cpuAnim(0.8, from: from, to: to, power: pw)
+    #expect(abs(a8.pull! - pw * 0.75) < 1e-12)
+    let a1 = cpuAnim(1.4, from: from, to: to, power: pw)
+    #expect(a1.aim == to && a1.pull == pw)
+    var last = -1.0
+    for i in 0...100 { let p = cpuAnim(Double(i) / 100, from: 0, to: 1, power: 1); #expect(p.aim >= last); last = p.aim }
+  }
 }

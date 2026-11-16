@@ -227,8 +227,10 @@ struct BallU {
           else if model.aimAnim == nil { yaw = model.aim }
           seatShot = model.shotAt; seatTurn = model.g?.turn ?? 0; seatPlan = nil
         }
-      } else if model.stroke != nil || !model.cpuThinking || model.cpuPlanned {
-        if seatPlan != model.aim { seatPlan = model.aim; cutTo = model.aim }
+      } else if model.cueShown {
+        /* the CPU's plan: one cut to its line as it is made, never a follow of the cue turning onto it */
+        let to = model.cpuPlan?.angle ?? model.aim
+        if seatPlan != to { seatPlan = to; cutTo = to }
       } else if !seatSet { cutTo = model.aim }
       if let a = cutTo { px = c.x; py = c.y; yaw = a; seatSet = true; cut(now) }
     } else if model.cue == nil, !seatSet, let lc = model.lastCue { px = lc.x; py = lc.y; yaw = lc.ang; seatSet = true; cut(now) }
@@ -623,7 +625,7 @@ struct BallU {
       e.setDepthStencilState(depthOn)
     }
     /* the cue: behind the ball on the aim, raised a little at least (it clears the rails), pulled back by power */
-    if full, model.rolling == nil, !model.cpuThinking || model.cpuPlanned, carried == nil || ghostOk, let c = model.cue, let cb = cue3() {
+    if full, model.rolling == nil, model.cueShown, carried == nil || ghostOk, let c = model.cue, let cb = cue3() {
       let rest = R + 0.012, back = 0.27
       var gap = rest + back * min(1, max(0, model.power))
       if let st = model.stroke {

@@ -215,7 +215,7 @@ struct TableCanvas: View {
       if let rc = model.replayCue {
         drawCue(&ctx, m, game: g, dress: model.dress, cx: rc.x, cy: rc.y, ang: rc.ang, gap: rc.gap, alpha: rc.alpha)
       } else if model.rp != nil {
-      } else if model.rolling == nil, let c = model.cue {
+      } else if model.rolling == nil, model.cueShown, let c = model.cue {
         var gap = rest + back * min(1, max(0, model.power))
         if let st = model.stroke {
           let u = min(1, max(0, (st.t0.map { model.now - $0 } ?? 0) * model.speed / TableModel.STROKE_MS)), g0 = rest + back * min(1, max(0, st.power))
@@ -403,7 +403,7 @@ struct TableCanvas: View {
   }
   func drawGuide(_ sink: GuideSink, _ m: Mapper) {
     model.ghostAt = nil
-    if model.guideMode == "off" || model.rp != nil { return }
+    if model.guideMode == "off" || model.rp != nil || (model.rolling == nil && !model.cueShown) { return }
     guard let c = model.cue else { return }
     let gi = model.guide()
     guard let h = gi?.0 ?? (model.rolling == nil ? model.aimHit : nil) else { return }

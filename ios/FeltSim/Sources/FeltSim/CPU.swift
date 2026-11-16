@@ -116,6 +116,18 @@ final class CPULine {
   }
 }
 
+/* page 5's think, once the plan is made: over its 900 ms (over the speed) the cue turns from `from` round the short way
+   onto `to`, (1 - (1 - u / .6)^3) of the way by u .6, then draws back to the power, power x (1 - (1 - (u - .6) / .4)^2);
+   pull nil until u passes .6 (the page's pull is null: the cue at rest). u is clamped to 0...1 */
+public let CPU_ANIM_MS = 900.0
+public func cpuAnim(_ u0: Double, from: Double, to: Double, power: Double) -> (aim: Double, pull: Double?) {
+  let u = Swift.min(1, Swift.max(0, u0))
+  var d = to - from
+  d = JSMath.atan2(JSMath.sin(d), JSMath.cos(d))
+  let aim = u >= 1 ? to : from + d * (u < 0.6 ? 1 - JSMath.pow(1 - u / 0.6, 3) : 1)
+  return (aim, u > 0.6 ? power * (1 - JSMath.pow(1 - (u - 0.6) / 0.4, 2)) : nil)
+}
+
 /* JS's ToUint32 of an integer-valued double (rng's seed >>> 0) */
 func toUint32(_ x: Double) -> UInt32 {
   let m = x.truncatingRemainder(dividingBy: 4294967296)
