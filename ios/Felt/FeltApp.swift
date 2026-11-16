@@ -110,10 +110,7 @@ struct Home: View {
   @State private var leftNote = false
   @State private var booted = false
   @AppStorage("felt.settings.text") private var textSize = 100
-  private var oneCol: Bool {
-    let b = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds ?? .zero
-    return b.height > b.width && ((textSize == 115 && b.width <= 400) || (textSize == 130 && b.width <= 500))
-  }
+  private var oneCol: Bool { HomeLayout.oneCol(textSize) }
   struct PartyGo: Identifiable { let game: TableGame, names: [String], ruleset: String; var id: String { ruleset + names.joined() } }
   struct Exhibit: Identifiable { let game: TableGame, levels: [String]; var archs: [String] = ["allround", "allround"]; var id: String { game.rawValue + levels.joined() + archs.joined() } }
   var body: some View {
@@ -2613,7 +2610,8 @@ struct ModeCard<Mark: View>: View {
     }
     .foregroundStyle(.white)
     .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
-    .aspectRatio(1.7, contentMode: .fit)
+    /* one card to a row: no fixed aspect, the card its minimum (--cc-min) */
+    .modifier(CardAspect(on: !HomeLayout.oneCol()))
     .background {
       GeometryReader { g in
         ZStack {
@@ -2658,12 +2656,16 @@ struct SoloRow: View {
         Text(name).font(.system(size: 17, weight: .medium)).foregroundStyle(.white)
         Text(line).font(.system(size: 13)).foregroundStyle(Color(white: 0.92).opacity(0.66))
       }
-      .lineLimit(1)
+      /* Large and Larger text: the words wrap rather than cut off (.solo :is(b, small) white-space: normal); the count
+         beside them keeps to one line */
+      .lineLimit(Prefs.int("text", 100) > 100 ? nil : 1)
+      .fixedSize(horizontal: false, vertical: Prefs.int("text", 100) > 100)
+      .layoutPriority(1)
       Spacer(minLength: 4)
       if let acc {
         HStack(spacing: 5) {
           if let accIcon { Image(systemName: accIcon).font(.system(size: 13)).foregroundStyle(accTint) }
-          Text(acc).monospacedDigit()
+          Text(acc).monospacedDigit().lineLimit(1).fixedSize()
         }
         .font(.system(size: 15)).foregroundStyle(Color(white: 0.92).opacity(0.66))
       }
@@ -2688,4 +2690,17 @@ struct Zoomed: ViewModifier {
       }
     }
   }
+}
+
+/* the home's media rules for the text size: Large on a phone 400 pt wide or less, Larger on one 500 pt or less, upright:
+   one card to a row, no fixed aspect (game cards 84 pt, modes --cc-min 92 pt) */
+enum HomeLayout {
+  @MainActor static func oneCol(_ text: Int = Prefs.int("text", 100)) -> Bool {
+    let b = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds ?? .zero
+    return b.height > b.width && ((text == 115 && b.width <= 400) || (text == 130 && b.width <= 500))
+  }
+}
+struct CardAspect: ViewModifier {
+  let on: Bool
+  func body(content: Content) -> some View { if on { content.aspectRatio(1.7, contentMode: .fit) } else { content.frame(height: 92) } }
 }

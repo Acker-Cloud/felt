@@ -9,7 +9,8 @@ import SwiftUI
 enum Prefs {
   static var d: UserDefaults { .standard }
   static func str(_ k: String, _ def: String) -> String { d.string(forKey: "felt.settings." + k) ?? def }
-  static func int(_ k: String, _ def: Int) -> Int { d.object(forKey: "felt.settings." + k) as? Int ?? def }
+  /* an Int, or a numeric string (a launch argument's default arrives as one; @AppStorage converts it too) */
+  static func int(_ k: String, _ def: Int) -> Int { d.object(forKey: "felt.settings." + k) as? Int ?? d.string(forKey: "felt.settings." + k).flatMap { Int($0) } ?? def }
   static func bool(_ k: String, _ def: Bool) -> Bool { d.object(forKey: "felt.settings." + k) as? Bool ?? def }
   static var rules8: String { str("rules8", DEFAULT_RULESET["8"]!) }
   static var rules9: String { str("rules9", DEFAULT_RULESET["9"]!) }
