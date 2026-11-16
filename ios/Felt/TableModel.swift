@@ -1093,7 +1093,7 @@ final class TableModel {
       var b = bench ?? (now, now, 0, 0)
       b.n += 1; b.worst = max(b.worst, now - b.prev); b.prev = now
       if now - b.t0 >= 2 {
-        print(String(format: "felt-aimbench %.1f frames/s, worst gap %.1f ms, %@, bodies %@", Double(b.n) / (now - b.t0), b.worst * 1000, Bench.drawWords(), Bench.bodies.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")))
+        print(String(format: "felt-aimbench %.1f frames/s, worst gap %.1f ms, %@, %@, bodies %@", Double(b.n) / (now - b.t0), b.worst * 1000, Bench.drawWords(), Bench.pvWords(), Bench.bodies.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")))
         Bench.bodies = [:]; b = (now, now, 0, 0)
       }
       bench = b
@@ -1753,7 +1753,7 @@ final class TableModel {
      and with none of this layout yet the work runs up to PV_SYNC ms at once, so a turn's first frame has its paths.
      The ghost ball and the aim line come from aimTrace every frame. pvShift: a preview a frame or two behind a moving
      aim that still meets the same ball or cushion moves its cue ball path with the ghost ball (guideLines' same). */
-  static let PV_BUDGET = 3.0, PV_SYNC = 12.0, PV_STALE = 2, PV_SNAP = 2e-5
+  static let PV_BUDGET = 3.0, PV_BUDGET_MAX = 5.0, PV_SYNC = 12.0, PV_STALE = 2, PV_SNAP = 2e-5
   final class PvWork {
     let P: Preview, key: [Double], lay: [Double], ang: Double, gx: Double, gy: Double, hk: String, hb: Int
     var frames = 0
@@ -1788,17 +1788,20 @@ final class TableModel {
         let P = sim.previewStart(balls, cueN: cueN, aim, pw, spin, h, lens, caromNeed: game == .carom ? (g?.need ?? 3) : 0)
         pvWork = PvWork(P: P, key: key, lay: lay, ang: aim, gx: c.x + dx * h.t, gy: c.y + dy * h.t, hk: h.kind, hb: h.ball?.n ?? -1)
       }
-      /* the budget is a share of the frame: 3 ms of a 60 Hz frame, so 1.5 ms of a 120 Hz one (ProMotion) */
-      let W = pvWork!, ms = have ? TableModel.PV_BUDGET * min(1, max(0.4, frameGap / (1.0 / 60))) : TableModel.PV_SYNC
+      /* the budget: 55% of the frame, 3 to 5 ms (at 120 Hz 4.6 of 8.3 ms, the draw about 1.5): at 1.5 ms a long
+         preview took 10-16 frames on the phone and the paths ran 16 deg behind a sweep */
+      let W = pvWork!, ms = have ? min(TableModel.PV_BUDGET_MAX, max(TableModel.PV_BUDGET, frameGap * 1000 * 0.55)) : TableModel.PV_SYNC
       W.frames += 1
       sim.previewRun(W.P) { (CACurrentMediaTime() - t0) * 1000 > ms }
-      if W.P.done { pvDone = W; pvWork = nil }
+      if TableModel.aimBench || TableModel.touchBench { Bench.pvMs += (CACurrentMediaTime() - t0) * 1000 }
+      if W.P.done { if TableModel.aimBench || TableModel.touchBench { Bench.pvFrames.append(W.frames) }; pvDone = W; pvWork = nil }
     }
     aimHit = h
     guard let D = pvDone, D.lay == lay else { pvLast = nil; pvShift = (0, 0); return nil }
     let gx = c.x + dx * h.t, gy = c.y + dy * h.t
     let same = D.hb == (h.ball?.n ?? -1) && D.hk == h.kind && (h.kind == "ball" || h.kind == "rail") && D.P.cuePot < 0 && abs(D.ang - aim) < 0.03
     pvShift = same ? (gx - D.gx, gy - D.gy) : (0, 0)
+    if TableModel.aimBench || TableModel.touchBench { Bench.pvLag = max(Bench.pvLag, abs(AimFeel.wrap(D.ang - aim)) * 180 / .pi); Bench.pvN += 1 }
     pvLast = (h, D.P)
     return pvLast
   }
@@ -1811,6 +1814,12 @@ final class TableModel {
   /* the table canvas's draw times since the last print (seconds) */
   static var draws: [Double] = []
   static func draw(_ d: Double) { draws.append(d) }
+  static var pvFrames: [Int] = [], pvLag = 0.0, pvMs = 0.0, pvN = 0
+  static func pvWords() -> String {
+    defer { pvFrames = []; pvLag = 0; pvMs = 0; pvN = 0 }
+    let f = pvFrames.sorted()
+    return String(format: "previews %d (frames each median %d, max %d), worst lag %.2f deg, preview work %.1f ms/frame", f.count, f.isEmpty ? 0 : f[f.count / 2], f.last ?? 0, pvLag, pvMs / Double(max(1, pvN)))
+  }
   static func drawWords() -> String {
     guard !draws.isEmpty else { return "no draws" }
     let s = draws.sorted(), mean = s.reduce(0, +) / Double(s.count)

@@ -3,11 +3,18 @@
 import FeltSim
 import QuartzCore
 import SwiftUI
+import UIKit
 
 @main
 struct FeltApp: App {
   var body: some Scene {
-    WindowGroup { Home().preferredColorScheme(.dark).statusBarHidden() }
+    WindowGroup {
+      Home().preferredColorScheme(.dark).statusBarHidden()
+        /* at a table, an edge swipe takes two (the first only shows the home bar): set at the window's root, where
+           UIKit asks, as the table's own cover did not reach it */
+        .defersSystemGestures(on: Chrome.shared.atTable > 0 ? .all : [])
+        .persistentSystemOverlays(Chrome.shared.atTable > 0 ? .hidden : .automatic)
+    }
   }
 }
 
@@ -369,7 +376,12 @@ struct TableScreen: View {
     .overlay(alignment: model.coachAtTop ? .top : .bottom) { if let L = model.lesson, !model.lessonDone, !model.paused { LessonCard(s: L).padding(.horizontal, 12).padding(.vertical, model.coachAtTop ? 8 : 96) } }
     .overlay { if model.lessonDone, !model.paused { LessonDoneView(home: { dismiss() }) } }
     .overlay { if model.tutDone, let t = tutById(model.tut!.id), !model.paused { TutDoneView(t: t, home: { dismiss() }) } }
-    .onDisappear { model.abandonCpuGame() }
+    .onDisappear { model.abandonCpuGame(); Chrome.shared.atTable -= 1 }
+    .onAppear {
+      Chrome.shared.atTable += 1
+      /* `-felt-edges`: what UIKit is told about the screen edges, a second after the table opens */
+      if ProcessInfo.processInfo.arguments.contains("-felt-edges") { Task { try? await Task.sleep(for: .seconds(1)); Chrome.printEdges() } }
+    }
     .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
     .overlay { if let h = model.handoff, !model.paused { Handoff(model: model, p: h.p, first: h.first) } }
     /* the exhibition's bar: the speed (felt.speed), over the table's top */
@@ -2789,5 +2801,17 @@ struct LinkTimeline<Content: View>: View {
       .onAppear { clock.run(!paused) }
       .onChange(of: paused) { _, p in clock.run(!p) }
       .onDisappear { clock.run(false) }
+  }
+}
+
+/* the window's chrome while a table is open (TableScreen counts itself in and out) */
+@MainActor @Observable final class Chrome {
+  static let shared = Chrome()
+  var atTable = 0
+  static func printEdges() {
+    guard let w = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first, var vc = w.rootViewController else { print("felt-edges no window"); return }
+    var out = ["root \(vc.preferredScreenEdgesDeferringSystemGestures.rawValue) hidden \(vc.prefersHomeIndicatorAutoHidden)"]
+    while let p = vc.presentedViewController { vc = p; out.append("presented \(type(of: p)) \(p.preferredScreenEdgesDeferringSystemGestures.rawValue) hidden \(p.prefersHomeIndicatorAutoHidden)") }
+    print("felt-edges " + out.joined(separator: "; "))
   }
 }
