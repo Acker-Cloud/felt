@@ -858,6 +858,26 @@ final class TableModel {
     }
     /* a test hook: `-felt-elev` opens the elevation sheet at 45 degrees */
     if ProcessInfo.processInfo.arguments.contains("-felt-elev") { setElev(45); elevOpen = true }
+    /* a test hook: `-felt-poplayout` takes the break off (so a shot is called), opens the call's menu, then the
+       elevation sheet; TableScreen's PopLayer prints each one's frame by its control's */
+    if ProcessInfo.processInfo.arguments.contains("-felt-poplayout") {
+      Task { @MainActor [weak self] in
+        try? await Task.sleep(for: .seconds(1.5))
+        guard let s = self, var gm = s.g else { return }
+        gm.breakShot = false; gm.inHand = nil; gm.pushAvail = false; s.g = gm
+        s.callMenu = true
+        try? await Task.sleep(for: .seconds(1.5))
+        s.callMenu = false; s.elevOpen = true
+      }
+    }
+    /* a test hook: `-felt-over` ends the game a moment after the table opens, player 1 the winner (the game over card) */
+    if ProcessInfo.processInfo.arguments.contains("-felt-over") {
+      Task { @MainActor [weak self] in
+        try? await Task.sleep(for: .seconds(1.5))
+        guard let s = self, var gm = s.g else { return }
+        gm.winner = 0; s.g = gm
+      }
+    }
     /* a test hook: `-felt-showme` plays the trick's stored solution a moment after it opens */
     if trick != nil && ProcessInfo.processInfo.arguments.contains("-felt-showme") {
       Task { @MainActor [weak self] in try? await Task.sleep(for: .seconds(1.5)); self?.showMe() }
@@ -1745,6 +1765,11 @@ final class TableModel {
   var callPushOn = false
   var callAutoOff = false
   var callMenu = false
+  /* the frames the pop-ups stand by (callMenuPlace, openElev): the power bar, the english pad and the stage, in the
+     screen's own space (TableScreen.UI, before a phone on its side turns it a quarter), the column's [0] and the strip's [1] */
+  var barUI: [CGRect] = [.zero, .zero]
+  var padUI: [CGRect] = [.zero, .zero]
+  var stageUI = CGRect.zero
   func resetCall() { callMan = nil; callSafe = false; callPushOn = false; callAutoOff = false; callMenu = false }
   var callable: Bool { rolling == nil && stroke == nil && !cpuTurn && g?.winner == nil && g?.option == nil && g?.mode == nil }
   var callOn: Bool {

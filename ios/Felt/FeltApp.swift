@@ -437,46 +437,31 @@ struct TableScreen: View {
          right. The upright insets are modelled from the side ones: the island's inset is the upright top, the foot
          HOME_UP (34 pt) with a home indicator, else 4. A tablet or desktop on its side keeps the column. */
       let side = W > H && H < 600
-      if side {
-        /* islandSide(): unequal insets, the larger; equal (as iOS gives them), the interface's orientation: landscape
-           right has the island on the left (anticlockwise, the column right), landscape left on the right */
-        let ccw = ins.leading != ins.trailing ? ins.leading > ins.trailing : interface != .landscapeLeft
-        /* upright a phone has no side insets: the sides' padding is the upright one's (2 pt) */
-        let up = EdgeInsets(top: max(ins.leading, ins.trailing), leading: 0, bottom: ins.bottom > 0 ? 34 : 4, trailing: 0)
-        screen(W: H, H: W, ins: up, upright: true)
-          .frame(width: H, height: W)
-          .rotationEffect(.degrees(ccw ? -90 : 90))
-          .frame(width: W, height: H)
-          .offset(x: -ins.leading, y: -ins.top)
-      } else {
-        screen(W: W, H: H, ins: ins, upright: H > W)
-          .frame(width: W, height: H)
-          .offset(x: -ins.leading, y: -ins.top)
+      /* islandSide(): unequal insets, the larger; equal (as iOS gives them), the interface's orientation: landscape
+         right has the island on the left (anticlockwise, the column right), landscape left on the right */
+      let ccw = side && (ins.leading != ins.trailing ? ins.leading > ins.trailing : interface != .landscapeLeft)
+      ZStack(alignment: .topLeading) {
+        if side {
+          /* upright a phone has no side insets: the sides' padding is the upright one's (2 pt) */
+          let up = EdgeInsets(top: max(ins.leading, ins.trailing), leading: 0, bottom: ins.bottom > 0 ? 34 : 4, trailing: 0)
+          screen(W: H, H: W, ins: up, upright: true)
+            .frame(width: H, height: W)
+            .rotationEffect(.degrees(ccw ? -90 : 90))
+            .frame(width: W, height: H)
+        } else {
+          screen(W: W, H: H, ins: ins, upright: H > W)
+            .frame(width: W, height: H)
+        }
+        /* the call's menu and the elevation sheet, placed in the window by their controls' frames */
+        PopLayer(model: model, W: W, H: H, turn: side ? (ccw ? -1 : 1) : 0)
       }
+      .offset(x: -ins.leading, y: -ins.top)
     }
     .background(Color(rgb: 9, 9, 10).ignoresSafeArea())
     .onAppear { model.reduceMotion = reduceMotion || Prefs.reduceMotion }
     .onChange(of: reduceMotion) { _, v in model.reduceMotion = v || Prefs.reduceMotion }
     .overlay(alignment: .topTrailing) { if model.prac != nil && !model.paused { PracticeTools(model: model).padding(.top, 8).padding(.trailing, 12) } }
-    /* the elevation sheet over the pad (upright: above it, at the strip's leading end), a tap anywhere else closing it */
-    .overlay(alignment: .bottomLeading) {
-      if model.elevOpen && model.spinOk && !model.paused {
-        /* over the pad: the strip's leading end, or its trailing end left-handed (the strip reversed) */
-        let lefty = UserDefaults.standard.string(forKey: "felt.settings.hand") == "left"
-        ZStack(alignment: lefty ? .bottomTrailing : .bottomLeading) {
-          Color.black.opacity(0.001).ignoresSafeArea().onTapGesture { model.elevOpen = false }
-          ElevPop(model: model).padding(lefty ? .trailing : .leading, 8).padding(.bottom, 84)
-        }
-      }
-    }
     .onChange(of: model.spinOk) { _, ok in if !ok { model.elevOpen = false; model.hideElevTip() } }
-    /* #elevTip: beside the pad as the elevation sheet stands (over it), once ever; gone with the turn or a pause (spinOk) */
-    .overlay(alignment: .bottomLeading) {
-      if model.elevTip && !model.elevOpen && !model.paused {
-        let lefty = UserDefaults.standard.string(forKey: "felt.settings.hand") == "left"
-        ElevTip(model: model).frame(maxWidth: .infinity, alignment: lefty ? .trailing : .leading).padding(.horizontal, 8).padding(.bottom, 88)
-      }
-    }
     .onChange(of: model.paused) { _, p in if p { model.hideElevTip() } }
     .overlay { Overlays(model: model, back: { model.abandonCpuGame(); dismiss() }) }
     .overlay(alignment: .top) { CalloutView(model: model).padding(.top, 0) }
@@ -494,7 +479,6 @@ struct TableScreen: View {
       /* `-felt-edges`: what UIKit is told about the screen edges, a second after the table opens */
       if ProcessInfo.processInfo.arguments.contains("-felt-edges") { Task { try? await Task.sleep(for: .seconds(1)); Chrome.printEdges() } }
     }
-    .overlay(alignment: .bottomTrailing) { if model.callMenu && model.callMenuOffered { CallMenu(model: model) } }
     .overlay { if let h = model.handoff, !model.paused { Handoff(model: model, p: h.p, first: h.first) } }
     /* the exhibition's bar: the speed (felt.speed), over the table's top */
     .overlay(alignment: .top) {
@@ -621,6 +605,7 @@ struct TableScreen: View {
         .overlay { FlashBanner(model: model, size: tg.size) }
         .onAppear { model.bake(tg.size, scale: scale) }
         .onChange(of: tg.size) { _, s in model.bake(s, scale: scale) }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TableScreen.UI)) } action: { model.stageUI = $0 }
         .contentShape(Rectangle())
         /* v3Pinch: two fingers move the 3D camera in or out (its distance by their spread, kept). A UIKit pinch beside the
            drag, never delaying it: SwiftUI's MagnifyGesture waiting to begin held back every event of the table's drag to
@@ -664,7 +649,9 @@ struct TableScreen: View {
     .padding(.top, max(pad, ins.top)).padding(.bottom, max(strip && !F.big ? 4 : 8, ins.bottom))
     .padding(.leading, max(pad, ins.leading)).padding(.trailing, max(pad, ins.trailing))
     .frame(width: W, height: H)
+    .coordinateSpace(.named(TableScreen.UI))
   }
+  static let UI = "feltUI"
 
   private func lift(_ at: CGPoint, _ time: TimeInterval, _ size: CGSize) {
     let tt0 = CACurrentMediaTime()
@@ -920,6 +907,105 @@ struct TableScreen: View {
   }
 }
 
+/* the pop-ups by their controls, in the window: the call's menu (callMenuPlace) and the elevation sheet (openElev). The
+   controls' frames come in the screen's own space (TableScreen.UI) and turn with it on a phone on its side (turn -1
+   anticlockwise, the column right; 1 clockwise, the column left). A tap anywhere else closes either */
+struct PopLayer: View {
+  let model: TableModel
+  let W: CGFloat, H: CGFloat, turn: Int
+  @State private var menuH: CGFloat = 0
+  @State private var elevSize = CGSize.zero
+  @State private var tipSize = CGSize.zero
+  /* `-felt-poplayout` (or `-felt-poplog` alone, for the tip on a jump trick): each pop-up's frame printed by its control's */
+  static let log = ProcessInfo.processInfo.arguments.contains { $0 == "-felt-poplayout" || $0 == "-felt-poplog" }
+  /* the strip's frames (upright, or a phone on its side) or the column's */
+  private var up: Int { turn != 0 || H > W ? 1 : 0 }
+  var body: some View {
+    ZStack(alignment: .topLeading) {
+      if model.elevOpen && model.spinOk && !model.paused {
+        Color.black.opacity(0.001).onTapGesture { model.elevOpen = false }
+        let at = padAt(elevSize)
+        ElevPop(model: model).fixedSize()
+          .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { f in
+            elevSize = f.size
+            if Self.log { print("felt-poplayout elev \(Self.box(f)) pad \(Self.box(win(model.padUI[up]))) W \(W) H \(H)"); fflush(stdout) }
+          }
+          .opacity(elevSize == .zero ? 0 : 1)
+          .padding(.leading, at.x).padding(.top, at.y)
+      }
+      /* #elevTip: by the pad as the elevation sheet stands, 12 from it (placeElevTip), once ever */
+      if model.elevTip && !model.elevOpen && !model.paused {
+        let at = padAt(tipSize, gap: 12)
+        ElevTip(model: model).frame(width: min(300, W - 32))
+          .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { f in
+            tipSize = f.size
+            if Self.log { print("felt-poplayout tip \(Self.box(f)) pad \(Self.box(win(model.padUI[up]))) W \(W) H \(H)"); fflush(stdout) }
+          }
+          .opacity(tipSize == .zero ? 0 : 1)
+          .padding(.leading, at.x).padding(.top, at.y)
+      }
+      if model.callMenu && model.callMenuOffered {
+        Color.black.opacity(0.001).onTapGesture { model.callMenu = false }
+        let at = menuAt()
+        CallMenu(model: model, maxH: H - 16, natural: $menuH)
+          .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { f in
+            if Self.log { print("felt-poplayout menu \(Self.box(f)) bar \(Self.box(win(model.barUI[up]))) railTop \(railTop()) W \(W) H \(H)"); fflush(stdout) }
+          }
+          .opacity(menuH == 0 ? 0 : 1)
+          .padding(.leading, at.x).padding(.top, at.y)
+      }
+    }
+    .frame(width: W, height: H, alignment: .topLeading)
+  }
+  static func box(_ r: CGRect) -> String { String(format: "[%.1f,%.1f,%.1f,%.1f]", r.minX, r.minY, r.width, r.height) }
+  /* a frame in the screen's own space as the window has it: turned a quarter about the window's centre (the screen
+     H wide and W tall before it) */
+  func win(_ r: CGRect) -> CGRect {
+    guard turn != 0 else { return r }
+    func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+      let dx = x - H / 2, dy = y - W / 2
+      return turn < 0 ? CGPoint(x: W / 2 + dy, y: H / 2 - dx) : CGPoint(x: W / 2 - dy, y: H / 2 + dx)
+    }
+    let a = p(r.minX, r.minY), b = p(r.maxX, r.maxY)
+    return CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
+  }
+  /* railTop (placeRail): 22 over the rail row's middle, in the screen's own space: top-down the bottom rail's wood band
+     (never under 22 from the stage's foot), in 3D the row pinned 26 up; none when the row is not drawn */
+  func railTop() -> CGFloat {
+    let st = model.stageUI, s = model.sim
+    guard let g = model.g, g.winner == nil, (model.party?.names.count ?? 2) <= 2, st.height > 0 else { return .infinity }
+    if model.view3d && !model.v3Top2d { return st.minY + st.height - 26 - 22 }
+    let m = Mapper(size: st.size, TL: s.TL, TW: s.TW), band = model.potGeometry(m).railBand, mid = -(band.co + band.rail) / 2
+    let p = m.upright ? m.pt(mid, s.TW / 2) : m.pt(s.TL / 2, s.TW - mid)
+    return st.minY + min(p.y, st.height - 22) - 22
+  }
+  /* callMenuPlace: upright over the bar, its trailing edge on the bar's (under it when there is no room over); on its
+     side beside the column, level with the bar; clear of the rail row; inside the window by 8, and a menu taller than
+     the window less 16 scrolls */
+  func menuAt() -> CGPoint {
+    let r = win(model.barUI[up]), m: CGFloat = 8, gap: CGFloat = 8, w = CallMenu.W, h = menuH, side = r.height > r.width
+    var x: CGFloat, y: CGFloat
+    if side { x = r.minX - gap - w; if x < m { x = r.maxX + gap }; y = r.midY - h / 2 }
+    else { x = r.maxX - w; y = r.minY - gap - h; if y < m { y = r.maxY + gap } }
+    /* the rail row turns with the screen: upright it is under the menu, on its side beside the column */
+    let rt = railTop()
+    switch turn {
+    case 0: if y + h > rt - 6 && rt - 6 - h >= m { y = rt - 6 - h }
+    case -1: if x + w > rt - 6 && rt - 6 - w >= m { x = rt - 6 - w }
+    default: if x < W - rt + 6 && W - rt + 6 + w <= W - m { x = W - rt + 6 }
+    }
+    return CGPoint(x: max(m, min(W - m - w, x)), y: max(m, min(H - m - min(h, H - 2 * m), y)))
+  }
+  /* openElev and placeElevTip: upright over the pad, centred on it; otherwise beside it, on the side towards the
+     window's middle; gap from the pad (the sheet 8, the tip 12) */
+  func padAt(_ s: CGSize, gap: CGFloat = 8) -> CGPoint {
+    let r = win(model.padUI[up]), b = win(model.barUI[up]), w = s.width, h = s.height
+    let x = b.width > b.height ? r.midX - w / 2 : r.midX > W / 2 ? r.minX - w - gap : r.maxX + gap
+    let y = b.width > b.height ? r.minY - h - gap : r.midY - h / 2
+    return CGPoint(x: max(8, min(max(8, W - w - 8), x)), y: max(8, min(max(8, H - h - 8), y)))
+  }
+}
+
 /* 6b's strip, upright left to right: english (56), power (the biggest, flex), the fine-aim wheel (72-96) and pause
    (44 x 56); on its side the same as a column */
 struct Controls: View {
@@ -958,7 +1044,7 @@ struct Controls: View {
          first), from the top (flex-start: the room left over at the foot) */
       VStack(spacing: 10) {
         pause
-        SpinPad(model: model, size: col)
+        SpinPad(model: model, size: col, upright: false)
         if bar == "edge" { wheelCol; powerCol } else { powerCol; wheelCol }
       }
       .frame(maxHeight: .infinity, alignment: .top)
@@ -1055,6 +1141,8 @@ struct SpinPad: View {
   let model: TableModel
   /* #spinPad: 56; 60 in a bigger screen's strip, the column's width in a column */
   var size: CGFloat = 56
+  /* in the strip (upright) or the column: which frame it reports (PopLayer) */
+  var upright = true
   /* the press: when and where it began, how far it has gone, the tip before it (a hold puts it back) */
   @State private var down: (t: Date, p: CGPoint, far: CGFloat, before: Spin)? = nil
   @State private var hold: Task<Void, Never>? = nil
@@ -1113,6 +1201,7 @@ struct SpinPad: View {
       .onTapGesture(count: 2) { if model.spinOk { model.spin = spinOf(x: 0, y: 0, e: model.spin.e) } }
     }
     .frame(width: size, height: size)
+    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TableScreen.UI)) } action: { model.padUI[upright ? 1 : 0] = $0 }
     .accessibilityLabel("English")
     .accessibilityValue("side \(Int(model.spin.x * 100)), follow \(Int(model.spin.y * 100))" + (model.elevDeg > 0 ? ", cue up \(model.elevDeg) degrees" : ""))
     .accessibilityAction(named: "Cue Elevation") { if model.spinOk { model.elevOpen = true } }
@@ -1286,6 +1375,7 @@ struct PowerBar: View {
       })
     }
     .frame(minWidth: upright ? 136 : 64, maxWidth: .infinity, minHeight: upright ? 56 : 96, maxHeight: upright ? .infinity : 440)
+    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TableScreen.UI)) } action: { model.barUI[upright ? 1 : 0] = $0 }
     .layoutPriority(1)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("Power")
@@ -1925,14 +2015,19 @@ struct Dot: View {
    under a detailed call, Safety where the rules allow one, Push Out when it is on offer. A pick or a tap outside closes it. */
 struct CallMenu: View {
   let model: TableModel
+  /* the most the window gives it (callMenuPlace's max-height), and its whole height, for placing it (PopLayer) */
+  let maxH: CGFloat
+  @Binding var natural: CGFloat
+  /* #callBar.open's min-width */
+  static let W: CGFloat = 220
   var body: some View {
     let c = model.humanCall(), gm = model.g!, need = model.engine.callNeed(gm)
     let open = model.callOn, push = model.pushOffer
     let change = open && !model.callSafe && !(model.callPushOn && push) && c?.ball != nil && !model.callLocked
     let showPk = open && !model.callSafe && !(model.callPushOn && push) && !model.callLocked && need?.pocket == true
     let flags = need?.flags == true && !model.callSafe && !(model.callPushOn && push)
-    ZStack(alignment: .bottomTrailing) {
-      Color.black.opacity(0.001).ignoresSafeArea().onTapGesture { model.callMenu = false }
+    /* a short screen (a phone on its side, the pockets listed): it scrolls in what the window leaves */
+    ScrollView {
       VStack(alignment: .leading, spacing: 0) {
         if change { row(c?.auto == true ? "Change Call" : "Clear Call", false) { model.changeCall() } }
         if showPk {
@@ -1948,11 +2043,13 @@ struct CallMenu: View {
         if open && gm.rules.safetyCall { row("Safety", model.callSafe) { model.toggleSafety() } }
         if push { row("Push Out", model.callPushOn) { model.togglePush() } }
       }
-      .frame(width: 250)
-      .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-      .accessibilityElement(children: .contain).accessibilityIdentifier("callMenu")
-      .padding(.trailing, 60).padding(.bottom, 70)
+      .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { natural = $0 }
     }
+    .scrollBounceBehavior(.basedOnSize)
+    .frame(width: Self.W, height: max(1, min(natural, maxH)))
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+    .clipShape(RoundedRectangle(cornerRadius: 14))
+    .accessibilityElement(children: .contain).accessibilityIdentifier("callMenu")
   }
   private func row(_ t: String, _ on: Bool, _ act: @escaping () -> Void) -> some View {
     Button { act(); model.callMenu = false } label: {
@@ -2094,22 +2191,26 @@ struct Overlays: View {
         }
       }
     } else if let g = model.g, g.winner != nil, model.rolling == nil, model.tut == nil {
-      card {
-        OverHead(model: model, g: g)
-        if let t = model.tmatch {
-          /* a tournament match: the racks, then the next rack or back to the bracket */
-          Text("You \(t.score[0]), \(t.foe) \(t.score[1]), race to \(t.need)").font(.subheadline).foregroundStyle(.secondary)
-          if t.done {
-            Button(action: back) { Text(model.tmatch?.career == true ? "Back to Career" : "Back to Tournament").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
-              .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("tourney-back")
+      GeometryReader { geo in
+        /* a short screen (max-height 520, min-width 600): the words, the chips and the buttons on the left, the numbers on
+           the right, in a card up to 800 wide */
+        let i = geo.safeAreaInsets, two = geo.size.height + i.top + i.bottom <= 520 && geo.size.width + i.leading + i.trailing >= 600
+        card(maxW: two ? 800 : 440, short: two) {
+          if two {
+            HStack(alignment: .top, spacing: 22) {
+              VStack(alignment: .leading, spacing: 12) {
+                OverHead(model: model, g: g, part: .head)
+                Spacer(minLength: 2)
+                overActs
+              }
+              .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+              OverHead(model: model, g: g, part: .stats).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .fixedSize(horizontal: false, vertical: true)
           } else {
-            Button { model.tourneyNextRack() } label: { Text("Next Rack").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
-              .background(Capsule().fill(.white)).foregroundStyle(.black)
+            OverHead(model: model, g: g)
+            overActs
           }
-        } else {
-          Button { model.party != nil ? model.partyAgain() : model.rerack() } label: { Text("Play Again").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
-            .background(Capsule().fill(.white)).foregroundStyle(.black)
-          Button(action: back) { Text("Home").frame(maxWidth: .infinity, minHeight: 44) }
         }
       }
     } else if let g = model.g, let o = g.option, model.rolling == nil {
@@ -2167,11 +2268,30 @@ struct Overlays: View {
   }
   /* .overlay .sheet: the panel (#1b1b1d, a #3a3a41 hairline, 22 pt corners, at most 440 wide) over a plain dim
      (rgba(8,8,9,.74), no blur: the table behind stays sharp) */
-  private func card<C: View>(@ViewBuilder _ c: () -> C) -> some View {
+  /* the game over's actions: a tournament match's racks and the next rack or back to the bracket, else Play Again and Home */
+  @ViewBuilder private var overActs: some View {
+    if let t = model.tmatch {
+      Text("You \(t.score[0]), \(t.foe) \(t.score[1]), race to \(t.need)").font(.subheadline).foregroundStyle(.secondary)
+      if t.done {
+        Button(action: back) { Text(model.tmatch?.career == true ? "Back to Career" : "Back to Tournament").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+          .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("tourney-back")
+      } else {
+        Button { model.tourneyNextRack() } label: { Text("Next Rack").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+          .background(Capsule().fill(.white)).foregroundStyle(.black)
+      }
+    } else {
+      Button { model.party != nil ? model.partyAgain() : model.rerack() } label: { Text("Play Again").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+        .background(Capsule().fill(.white)).foregroundStyle(.black)
+      Button(action: back) { Text("Home").frame(maxWidth: .infinity, minHeight: 44) }
+    }
+  }
+  /* maxW: the game over is 800 wide on a short screen, its padding 18 by 20 (short); a card taller than the screen scrolls */
+  private func card<C: View>(maxW: CGFloat = 440, short: Bool = false, @ViewBuilder _ c: () -> C) -> some View {
     ZStack {
       Color(.sRGB, red: 8 / 255, green: 8 / 255, blue: 9 / 255, opacity: 0.74).ignoresSafeArea()
-      VStack(spacing: 12, content: c)
-        .padding(.horizontal, 20).padding(.top, 22).padding(.bottom, 20).frame(maxWidth: 440)
+      let inner = VStack(spacing: 12, content: c).padding(.horizontal, 20).padding(.top, short ? 18 : 22).padding(.bottom, short ? 18 : 20)
+      ViewThatFits(in: .vertical) { inner; ScrollView { inner }.scrollBounceBehavior(.basedOnSize) }
+        .frame(maxWidth: maxW)
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color(rgb: 0x1b, 0x1b, 0x1d)))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
         .shadow(color: .black.opacity(0.55), radius: 40, y: 24)
@@ -2216,8 +2336,14 @@ struct GameSetup: View {
   @AppStorage("felt.settings.rules9") private var rules9 = DEFAULT_RULESET["9"]!
   @AppStorage("felt.settings.race141") private var race141 = 50
   @AppStorage("felt.settings.stalemate") private var stalemate = false
-  /* the form's measured height (setupRoom), which the hero gives way to */
-  @State private var formContent = 0.0
+  /* setupRoom's measures: each list's content (one, or the two columns), Break's bar and the hero's words; fit is the
+     data-fit step (fitSetupRows) */
+  @State private var colH = [0.0, 0.0]
+  @State private var footH = 70.0
+  @State private var txtH = 70.0
+  @State private var fit = 0
+  static let FIT_STEPS = 4, HERO_MIN = 0.2, HERO_MAX = 0.5, CARD_HERO = 262.0
+  static let fitLog = ProcessInfo.processInfo.arguments.contains("-felt-setupfit")
   @State private var names = Prefs.names
   @State private var showRules = false
   /* the home card's morph (6m), when a card opened this setup */
@@ -2249,44 +2375,57 @@ struct GameSetup: View {
   var pool: Bool { ["8", "9", "10", "straight", "rotation"].contains(kind) }
   var body: some View {
     GeometryReader { g in
-      VStack(spacing: 0) {
-        /* heroFit: the room the form leaves (each row 44 pt, the groups' gaps, Break's bar), 20% to 50% of the sheet */
-        let formH = (formContent > 0 ? formContent : Double(rows) * 55 + 44) + 70 + g.safeAreaInsets.bottom
-        HeroView(game: game, txt: 104, hold: mo?.heroHold ?? false, under: mo?.under, underScale: mo?.underScale ?? 3, onFrame: mo.map { m in { m.heroFrame = $0 } })
-          .opacity(mo?.hideHero == true ? 0 : 1)
-          .frame(height: min(g.size.height * 0.5, max(g.size.height * 0.2, g.size.height + g.safeAreaInsets.top - formH)))
-          .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo?.heroRect = $0 }
-          .overlay(alignment: .bottomLeading) {
-            VStack(alignment: .leading, spacing: 4) {
-              HStack(alignment: .center) {
-                Text(game.rawValue).font(.largeTitle.bold()).foregroundStyle(.white)
-                  .opacity(mo?.hideTitle == true ? 0 : 1)
-                  .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo?.titleRect = $0 }
-                Spacer()
-                /* #rulesInfo: the (i) at the title's trailing end, the rules' words in a popover */
-                Button { showRules = true } label: { Image(systemName: "info.circle").font(.title2).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).frame(width: 44, height: 44) }
-                  .accessibilityLabel("About \(game.rawValue) Rules").accessibilityIdentifier("rulesInfo")
-                  .popover(isPresented: $showRules, arrowEdge: .top) { rulesPop.presentationCompactAdaptation(.popover) }
-              }
-              Text(Self.SUB[game] ?? game.line).font(.subheadline).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).lineLimit(2)
-            }
-            .padding(.horizontal, 16).padding(.bottom, 8)
+      let ins = g.safeAreaInsets, W = g.size.width, S = g.size.height, H = S + ins.bottom
+      /* a phone (max-width 600 or max-height 500) has the whole screen, on its side (max-height 500) the hero a 32% panel
+         down the leading side and the form in two columns over Break; anything bigger a card of at most 480, 860 with
+         two columns on a short wide window (min-width 700, max-height 620) */
+      let phone = W <= 600 || H <= 500, side = W > H && H <= 500, wide = !phone && W > H && W >= 700 && H <= 620
+      let cols = side || wide ? 2 : 1, content = cols == 2 ? max(colH[0], colH[1]) : colH[0]
+      /* heroFit (portrait phone): the room the form leaves, from its floor (HERO_MIN of the sheet, or its words and the
+         back button's room if more) up to HERO_MAX */
+      let floor = max(Self.HERO_MIN * S, ins.top + (fit >= 1 ? 58 : 64) + txtH + 8), spare = S - footH - content
+      let cardMax = H - max(16, ins.top) - max(16, ins.bottom), cardWant = Self.CARD_HERO + content + footH
+      /* setupRoom's fits: the form and Break with the hero at its floor or more; on its side or in a card, the form in its own box */
+      let fits = side ? content <= S - footH + 1 : phone ? spare >= floor - 0.5 : cardWant <= cardMax + 1
+      Group {
+        if side {
+          HStack(spacing: 0) {
+            hero(top: 0, lead: max(16, ins.leading)).frame(width: W * 0.32)
+            VStack(spacing: 0) { form(2); foot }.padding(.trailing, ins.trailing)
           }
-          .overlay(alignment: .topTrailing) {
-            /* #setupBall: the game's ball, 40 pt, top right of the hero */
-            Group { if let st = Self.BALL[game] { BallDot(style: st) } else { BallDot(n: Self.NUM[game] ?? 8) } }
-              .frame(width: 40, height: 40).padding(.top, g.safeAreaInsets.top + 12).padding(.trailing, 16).accessibilityHidden(true)
+        } else if phone {
+          VStack(spacing: 0) {
+            hero(top: ins.top, lead: 16).frame(height: content > 0 ? min(max(spare, floor), Self.HERO_MAX * S) : Self.HERO_MAX * S)
+            form(1)
+            foot
           }
-          .id(setupKey)
-          .onChange(of: setupKey) { _, _ in mo?.under = nil }
-        form
-        Button { if let k = tutKind, learn != nil, TutStore.offer(k) { offer = true } else { go() } } label: { Text("Break").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
-          .background(Capsule().fill(.white)).foregroundStyle(.black).padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 12)
-          .accessibilityIdentifier("break")
+        } else {
+          VStack(spacing: 0) {
+            hero(top: 0, lead: 16).frame(height: Self.CARD_HERO)
+            form(cols)
+            foot
+          }
+          /* as tall as its form (the room it may take until the list has measured), at most the screen less its margins */
+          .frame(width: min(wide ? 860 : 480, W - 32), height: content > 0 ? min(cardWant, cardMax) : cardMax)
+          .background(Color.black)
+          .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+          .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 0.5))
+          .shadow(color: .black.opacity(0.55), radius: 40, y: 24)
+          .frame(width: W, height: S)
+          .background(Color(rgb: 8, 8, 9))
+        }
       }
+      /* fitSetupRows: the spacing gives in steps (fit 1 to FIT_STEPS), each only as needed; a new size or form starts over */
+      .task(id: "\(fitKey(W, H))|\(fit)|\(Int(content))|\(Int(footH))|\(Int(txtH))") {
+        try? await Task.sleep(for: .milliseconds(30))
+        if Task.isCancelled { return }
+        if !fits && fit < Self.FIT_STEPS { fit += 1 }
+        if Self.fitLog { print(String(format: "felt-setupfit %@ %.0fx%.0f fit %d content %.1f foot %.1f spare %.1f floor %.1f fits %d", side ? "side" : phone ? "phone" : "card", W, H, fit, content, footH, spare, floor, fits ? 1 : 0)); fflush(stdout) }
+      }
+      .onChange(of: fitKey(W, H)) { fit = 0 }
     }
     .background(Color.black)
-    .ignoresSafeArea(edges: .top)
+    .ignoresSafeArea(edges: [.top, .horizontal])
     /* #tutOffer: the first Break of a game whose tutorial is neither done nor turned down */
     .sheet(isPresented: $offer) {
       let k = tutKind ?? "8"
@@ -2309,102 +2448,157 @@ struct GameSetup: View {
   /* the hero is rebuilt when the table changes */
   /* .wl: the record against that CPU, after the level ("Medium · 3 won, 1 lost") */
   func wl(_ lv: String) -> String { let r = Rec.load().kinds[kind]?.cpu[lv] ?? RecLevel(); return r.w + r.l > 0 ? " \u{00b7} \(r.w) won, \(r.l) lost" : "" }
-  /* the form's rows: Opponent, the CPU's three, then the game's table and rules rows */
-  var rows: Int {
-    let foes = opponent == "two" ? 0 : 3
-    let more = pool ? 2 + (kind == "8" || kind == "9" ? 2 : kind == "straight" ? 1 : 0) : kind == "heyball" ? 0 : 2
-    return 1 + foes + more
-  }
   var setupKey: String { [table, pockets, bumperTable, snookerTable].joined(separator: "|") }
-  var form: some View {
-    List {
-      /* #tutLink: Learn 8-Ball, until that tutorial is done */
-      if let k = tutKind, let learn, !TutStore.rec.done.contains(k) {
-        Section {
-          Button { learn(k) } label: {
-            HStack(spacing: 12) {
-              Image(systemName: "graduationcap").foregroundStyle(Color(rgb: 0x3d, 0xdc, 0x84)).accessibilityHidden(true)
-              Text(titleCaseWords("Learn \(game.rawValue)")).foregroundStyle(.primary)
-              Spacer(); Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
-            }
+  /* what the fit steps start over on: the size, and the rows (Opponent's, the tutorial's link) */
+  func fitKey(_ W: CGFloat, _ H: CGFloat) -> String { "\(Int(W))x\(Int(H))|\(opponent == "two")|\(tutKind.map { TutStore.rec.done.contains($0) } ?? true)" }
+  /* the hero (4m): the game's table, the Large Title with its (i) and the game's line on its lower edge (one line from
+     fit 2), the game's ball at its top right; top is the status bar's room over it, lead the words' leading inset */
+  func hero(top: CGFloat, lead: CGFloat) -> some View {
+    /* the home's morph (Morph): the hero built under the flight, its frame and the title's reported for the landing */
+    HeroView(game: game, txt: 104, hold: mo?.heroHold ?? false, under: mo?.under, underScale: mo?.underScale ?? 3, onFrame: mo.map { m in { m.heroFrame = $0 } })
+      .opacity(mo?.hideHero == true ? 0 : 1)
+      .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo?.heroRect = $0 }
+      .overlay(alignment: .bottomLeading) {
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(alignment: .center) {
+            Text(game.rawValue).font(.largeTitle.bold()).foregroundStyle(.white)
+              .opacity(mo?.hideTitle == true ? 0 : 1)
+              .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { mo?.titleRect = $0 }
+            Spacer()
+            /* #rulesInfo: the (i) at the title's trailing end, the rules' words in a popover */
+            Button { showRules = true } label: { Image(systemName: "info.circle").font(.title2).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).frame(width: 44, height: 44) }
+              .accessibilityLabel("About \(game.rawValue) Rules").accessibilityIdentifier("rulesInfo")
+              .popover(isPresented: $showRules, arrowEdge: .top) { rulesPop.presentationCompactAdaptation(.popover) }
           }
-          .accessibilityIdentifier("tutLink").frame(minHeight: 44).listRowInsets(Self.ROW)
+          Text(Self.SUB[game] ?? game.line).font(.subheadline).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).lineLimit(fit >= 2 ? 1 : 2)
         }
+        .onGeometryChange(for: Double.self) { $0.size.height } action: { txtH = $0 }
+        .padding(.leading, lead).padding(.trailing, 16).padding(.bottom, 8)
       }
+      .overlay(alignment: .topTrailing) {
+        /* #setupBall: the game's ball, 40 pt, top right of the hero */
+        Group { if let st = Self.BALL[game] { BallDot(style: st) } else { BallDot(n: Self.NUM[game] ?? 8) } }
+          .frame(width: 40, height: 40).padding(.top, top + 12).padding(.trailing, 16).accessibilityHidden(true)
+      }
+      .clipped()
+      .id(setupKey)
+      .onChange(of: setupKey) { _, _ in mo?.under = nil }
+  }
+  /* .setFoot: Break, pinned under the form */
+  var foot: some View {
+    Button { if let k = tutKind, learn != nil, TutStore.offer(k) { offer = true } else { go() } } label: { Text("Break").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+      .background(Capsule().fill(.white)).foregroundStyle(.black).padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 12)
+      .accessibilityIdentifier("break")
+      .onGeometryChange(for: Double.self) { $0.size.height } action: { footH = $0 }
+  }
+  /* the form: one inset grouped list, or on its side two (who plays on the left, the table and rules on the right) */
+  @ViewBuilder func form(_ cols: Int) -> some View {
+    if cols == 2 {
+      HStack(alignment: .top, spacing: 0) { styled(List { colA }, 0); styled(List { colB }, 1) }
+    } else { styled(List { colA; colB }, 0) }
+  }
+  func styled(_ list: some View, _ i: Int) -> some View {
+    list
+      .pickerStyle(.menu)
+      .tint(.primary)
+      .font(.system(size: 17))
+      .environment(\.defaultMinListRowHeight, 44)
+      .listSectionSpacing(16)
+      .contentMargins(.top, fit >= 1 ? 0 : 12, for: .scrollContent)
+      .contentMargins(.bottom, 0, for: .scrollContent)
+      .scrollBounceBehavior(.basedOnSize)
+      .onScrollGeometryChange(for: Double.self) { $0.contentSize.height + $0.contentInsets.top } action: { _, h in colH[i] = h }
+  }
+  /* who plays: the tutorial's link, Opponent and the CPU's three (one line each from fit 3) or the two names */
+  @ViewBuilder var colA: some View {
+    /* #tutLink: Learn 8-Ball, until that tutorial is done */
+    if let k = tutKind, let learn, !TutStore.rec.done.contains(k) {
       Section {
-        Picker("Opponent", selection: Binding(get: { opponent == "two" ? "two" : "cpu" }, set: { opponent = $0 == "two" ? "two" : (opponent == "two" ? "medium" : opponent) })) {
-          Text("Two Players").tag("two"); Text("CPU").tag("cpu")
-        }
-        .pickerStyle(.segmented).accessibilityIdentifier("opponent").frame(minHeight: 44).listRowInsets(Self.ROW)
-        /* #nameRow: the two players' names, two fields (36 pt, the fill, Player 1 and Player 2 until given) */
-        if opponent == "two" {
+        Button { learn(k) } label: {
           HStack(spacing: 12) {
-            Text("Names")
-            HStack(spacing: 8) {
-              ForEach(0..<2, id: \.self) { i in
-                TextField("Player \(i + 1)", text: Binding(get: { names[i] }, set: { v in names[i] = String(v.prefix(12)); Prefs.names = names }))
-                  .textInputAutocapitalization(.words).autocorrectionDisabled().submitLabel(.done)
-                  .padding(.horizontal, 10).frame(height: 36)
-                  .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(white: 0.46, opacity: 0.24)))
-                  .accessibilityLabel("Player \(i + 1)").accessibilityIdentifier("name\(i + 1)")
-              }
+            Image(systemName: "graduationcap").foregroundStyle(Color(rgb: 0x3d, 0xdc, 0x84)).accessibilityHidden(true)
+            Text(titleCaseWords("Learn \(game.rawValue)")).foregroundStyle(.primary)
+            Spacer(); Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+          }
+        }
+        .accessibilityIdentifier("tutLink").frame(minHeight: 44).listRowInsets(Self.ROW)
+      }
+    }
+    Section {
+      Picker("Opponent", selection: Binding(get: { opponent == "two" ? "two" : "cpu" }, set: { opponent = $0 == "two" ? "two" : (opponent == "two" ? "medium" : opponent) })) {
+        Text("Two Players").tag("two"); Text("CPU").tag("cpu")
+      }
+      .pickerStyle(.segmented).accessibilityIdentifier("opponent").frame(minHeight: 44).listRowInsets(Self.ROW)
+      /* #nameRow: the two players' names, two fields (36 pt, the fill, Player 1 and Player 2 until given) */
+      if opponent == "two" {
+        HStack(spacing: 12) {
+          Text("Names")
+          HStack(spacing: 8) {
+            ForEach(0..<2, id: \.self) { i in
+              TextField("Player \(i + 1)", text: Binding(get: { names[i] }, set: { v in names[i] = String(v.prefix(12)); Prefs.names = names }))
+                .textInputAutocapitalization(.words).autocorrectionDisabled().submitLabel(.done)
+                .padding(.horizontal, 10).frame(height: 36)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(white: 0.46, opacity: 0.24)))
+                .accessibilityLabel("Player \(i + 1)").accessibilityIdentifier("name\(i + 1)")
             }
           }
-          .frame(minHeight: 44).listRowInsets(Self.ROW)
         }
-        if opponent != "two" {
-          ForEach(Self.FOES, id: \.id) { f in
-            Button { opponent = f.id } label: {
-              /* .foe: ball, the name over its level and record, a checkmark in the accent */
-              HStack(spacing: 12) {
-                BallDot(n: f.n).frame(width: 28, height: 28)
+        .frame(minHeight: 44).listRowInsets(Self.ROW)
+      }
+      if opponent != "two" {
+        ForEach(Self.FOES, id: \.id) { f in
+          Button { opponent = f.id } label: {
+            /* .foe: ball, the name over its level and record (fit 3: on one line, the level as the row's value), a
+               checkmark in the accent */
+            HStack(spacing: 12) {
+              BallDot(n: f.n).frame(width: 28, height: 28)
+              if fit >= 3 {
+                Text(f.name).font(.system(size: 17)).foregroundStyle(.primary).fixedSize()
+                Text(f.level + wl(f.id)).font(.system(size: 17)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).lineLimit(1)
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+              } else {
                 VStack(alignment: .leading, spacing: 0) {
                   Text(f.name).font(.system(size: 17)).foregroundStyle(.primary)
                   Text(f.level + wl(f.id)).font(.system(size: 15)).foregroundStyle(Color(rgb: 0xeb, 0xeb, 0xf5).opacity(0.6)).lineLimit(1)
                 }
                 Spacer()
-                if opponent == f.id { Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(rgb: 0x3d, 0xdc, 0x84)) }
               }
-              .frame(minHeight: 54)
+              if opponent == f.id { Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(rgb: 0x3d, 0xdc, 0x84)) }
             }
-            .accessibilityAddTraits(opponent == f.id ? .isSelected : []).accessibilityIdentifier("foe-" + f.id)
-            .listRowInsets(Self.ROW)
+            .frame(minHeight: fit >= 3 ? 44 : 54)
           }
+          .accessibilityAddTraits(opponent == f.id ? .isSelected : []).accessibilityIdentifier("foe-" + f.id)
+          .listRowInsets(Self.ROW)
         }
-      }
-      Section {
-        if pool {
-          Picker("Table", selection: $table) { Text("7 ft Bar").tag("7"); Text("9 ft Pro").tag("9") }.listRowInsets(Self.ROW)
-          Picker("Pockets", selection: $pockets) { Text("Regulation").tag("regulation"); Text("Generous").tag("generous") }.listRowInsets(Self.ROW)
-        }
-        if kind == "bumper" { Picker("Table", selection: $bumperTable) { Text("Octagon").tag("octagon"); Text("Rectangle").tag("rect") }.listRowInsets(Self.ROW) }
-        if kind == "carom" {
-          Picker("Race To", selection: $caromRace) { Text("5").tag(5); Text("10").tag(10); Text("15").tag(15) }.listRowInsets(Self.ROW)
-          Picker("Cushions", selection: $caromCush) { Text("Three").tag(3); Text("1-Cushion (Easier)").tag(1) }.listRowInsets(Self.ROW)
-        }
-        if kind == "snooker" {
-          Picker("Table", selection: $snookerTable) { Text("Compact 10 ft").tag("compact"); Text("Full 12 ft").tag("full") }.listRowInsets(Self.ROW)
-          Picker("Frames", selection: $snookerFrames) { Text("One Frame").tag(1); Text("Best of 3").tag(3) }.listRowInsets(Self.ROW)
-        }
-      }
-      /* the rules' group, apart from the table's */
-      Section {
-        if kind == "8" { Picker("Rules", selection: $rules8) { Text("House Rules").tag("8-house"); Text("WPA").tag("8-wpa") }.listRowInsets(Self.ROW) }
-        if kind == "9" { Picker("Rules", selection: $rules9) { Text("House Rules").tag("9-house"); Text("WPA, Push Out").tag("9-wpa") }.listRowInsets(Self.ROW) }
-        if kind == "straight" { Picker("Race To", selection: $race141) { ForEach([25, 50, 100, 150], id: \.self) { Text("\($0)").tag($0) } }.listRowInsets(Self.ROW) }
-        if kind == "8" || kind == "9" { Picker("Stalemate", selection: $stalemate) { Text("Play On").tag(false); Text("Re-Rack (House)").tag(true) }.listRowInsets(Self.ROW) }
       }
     }
-    .pickerStyle(.menu)
-    .tint(.primary)
-    .font(.system(size: 17))
-    .environment(\.defaultMinListRowHeight, 44)
-    .listSectionSpacing(16)
-    .contentMargins(.top, 12, for: .scrollContent)
-    .contentMargins(.bottom, 0, for: .scrollContent)
-    .scrollBounceBehavior(.basedOnSize)
-    .onScrollGeometryChange(for: Double.self) { $0.contentSize.height + $0.contentInsets.top } action: { _, h in formContent = h }
   }
+  /* the game's table and rules: two groups, one from fit 4 */
+  @ViewBuilder var colB: some View {
+    if fit >= 4 { Section { tableRows; rulesRows } } else { Section { tableRows }; Section { rulesRows } }
+  }
+  @ViewBuilder var tableRows: some View {
+    if pool {
+      Picker("Table", selection: $table) { Text("7 ft Bar").tag("7"); Text("9 ft Pro").tag("9") }.listRowInsets(Self.ROW)
+      Picker("Pockets", selection: $pockets) { Text("Regulation").tag("regulation"); Text("Generous").tag("generous") }.listRowInsets(Self.ROW)
+    }
+    if kind == "bumper" { Picker("Table", selection: $bumperTable) { Text("Octagon").tag("octagon"); Text("Rectangle").tag("rect") }.listRowInsets(Self.ROW) }
+    if kind == "carom" {
+      Picker("Race To", selection: $caromRace) { Text("5").tag(5); Text("10").tag(10); Text("15").tag(15) }.listRowInsets(Self.ROW)
+      Picker("Cushions", selection: $caromCush) { Text("Three").tag(3); Text("1-Cushion (Easier)").tag(1) }.listRowInsets(Self.ROW)
+    }
+    if kind == "snooker" {
+      Picker("Table", selection: $snookerTable) { Text("Compact 10 ft").tag("compact"); Text("Full 12 ft").tag("full") }.listRowInsets(Self.ROW)
+      Picker("Frames", selection: $snookerFrames) { Text("One Frame").tag(1); Text("Best of 3").tag(3) }.listRowInsets(Self.ROW)
+    }
+}
+  /* the rules' group, apart from the table's */
+  @ViewBuilder var rulesRows: some View {
+        if kind == "8" { Picker("Rules", selection: $rules8) { Text("House Rules").tag("8-house"); Text("WPA").tag("8-wpa") }.listRowInsets(Self.ROW) }
+    if kind == "9" { Picker("Rules", selection: $rules9) { Text("House Rules").tag("9-house"); Text("WPA, Push Out").tag("9-wpa") }.listRowInsets(Self.ROW) }
+    if kind == "straight" { Picker("Race To", selection: $race141) { ForEach([25, 50, 100, 150], id: \.self) { Text("\($0)").tag($0) } }.listRowInsets(Self.ROW) }
+    if kind == "8" || kind == "9" { Picker("Stalemate", selection: $stalemate) { Text("Play On").tag(false); Text("Re-Rack (House)").tag(true) }.listRowInsets(Self.ROW) }
+}
 }
 
 /* a little ball for a row (the page's .ball classes: .b1, .b5, .b8 solids; .b9, .b10, .b14, .b15 stripes; "bb" bumper
@@ -2870,6 +3064,9 @@ struct ReplayPill: View {
 struct OverHead: View {
   let model: TableModel
   let g: Game
+  /* a short screen lays the card out in two columns (#over .sheet's grid): the words and chips (head) apart from the numbers (stats) */
+  enum Part { case all, head, stats }
+  var part = Part.all
   static let NOTE_WORDS = ["bank": "Bank", "kick": "Kick", "combo": "Combo", "long": "Long pot", "double": "Double", "triple": "Triple", "cleanBreak": "Clean break", "point": "Point",
     "golden": "Golden break", "runOut": "Run out", "breakRun": "Break and run"]
   var body: some View {
@@ -2878,40 +3075,44 @@ struct OverHead: View {
     let foe = model.cpuLevel.flatMap { Rec.FOES[$0] }
     let top = st.lastP == w && g.verdict?.why != "forced" ? st.last : []
     VStack(alignment: .leading, spacing: 10) {
-      Text(kind + (foe.map { " vs \($0)" } ?? (model.exhib != nil ? ", exhibition" : "")) + ", \(n) shot\(n == 1 ? "" : "s")").font(.footnote).foregroundStyle(.secondary)
-      HStack(spacing: 12) {
-        /* overBallOf: the game ball for the celebration (the 8, the 9, the winner's colour at bumper pool, snooker's black,
-           the winner's own cue ball at carom) */
-        ballIcon(overBall(w), 40).frame(width: 40, height: 40).accessibilityHidden(true)
-        Text(model.cpuLevel != nil ? (w == 0 ? "You win" : "The CPU wins") : "\(Words.nameOf(w)) wins").font(.title2.bold())
-      }
-      Text(Words.overLine(g)).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-      if !top.isEmpty {
-        HStack(spacing: 6) {
-          ForEach(Array(top.enumerated()), id: \.offset) { i, k in
-            Text(momentWord(k, g.kind)).font(.footnote.weight(.semibold)).padding(.horizontal, 10).padding(.vertical, 4)
-              .background(Capsule().fill(i == 0 ? Color(rgb: 0x3d, 0xdc, 0x84).opacity(0.22) : Color(white: 0.2)))
-              .overlay(Capsule().strokeBorder(i == 0 ? Color(rgb: 0x3d, 0xdc, 0x84).opacity(0.7) : .clear, lineWidth: 1))
-          }
+      if part != .stats {
+        Text(kind + (foe.map { " vs \($0)" } ?? (model.exhib != nil ? ", exhibition" : "")) + ", \(n) shot\(n == 1 ? "" : "s")").font(.footnote).foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+          /* overBallOf: the game ball for the celebration (the 8, the 9, the winner's colour at bumper pool, snooker's black,
+             the winner's own cue ball at carom) */
+          ballIcon(overBall(w), 40).frame(width: 40, height: 40).accessibilityHidden(true)
+          Text(model.cpuLevel != nil ? (w == 0 ? "You win" : "The CPU wins") : "\(Words.nameOf(w)) wins").font(.title2.bold())
         }
-        .accessibilityElement(children: .combine).accessibilityLabel("Shots of the game: " + top.map { momentWord($0, g.kind) }.joined(separator: ", "))
+        Text(Words.overLine(g)).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        if !top.isEmpty {
+          HStack(spacing: 6) {
+            ForEach(Array(top.enumerated()), id: \.offset) { i, k in
+              Text(momentWord(k, g.kind)).font(.footnote.weight(.semibold)).padding(.horizontal, 10).padding(.vertical, 4)
+                .background(Capsule().fill(i == 0 ? Color(rgb: 0x3d, 0xdc, 0x84).opacity(0.22) : Color(white: 0.2)))
+                .overlay(Capsule().strokeBorder(i == 0 ? Color(rgb: 0x3d, 0xdc, 0x84).opacity(0.7) : .clear, lineWidth: 1))
+            }
+          }
+          .accessibilityElement(children: .combine).accessibilityLabel("Shots of the game: " + top.map { momentWord($0, g.kind) }.joined(separator: ", "))
+        }
       }
-      Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-        GridRow { Text(""); ForEach(P, id: \.self) { p in Text(Words.nameOf(p)).font(.footnote.weight(p == w ? .bold : .semibold)).foregroundStyle(p == w ? .primary : .secondary) } }
-        ForEach(rows(st, P), id: \.0) { r in
-          GridRow {
-            Text(r.0).font(.footnote).foregroundStyle(.secondary)
-            ForEach(P, id: \.self) { p in
-              /* the potted balls as little balls (dotEl), wrapping */
-              if r.0 == "Potted", r.1[p] != "None" {
-                let ns = r.1[p].split(separator: " ").compactMap { Int($0) }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 17), spacing: 3)], alignment: .leading, spacing: 3) {
-                  ForEach(ns, id: \.self) { n in ballIcon(n, 16).frame(width: 16, height: 16) }
+      if part != .head {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+          GridRow { Text(""); ForEach(P, id: \.self) { p in Text(Words.nameOf(p)).font(.footnote.weight(p == w ? .bold : .semibold)).foregroundStyle(p == w ? .primary : .secondary) } }
+          ForEach(rows(st, P), id: \.0) { r in
+            GridRow {
+              Text(r.0).font(.footnote).foregroundStyle(.secondary)
+              ForEach(P, id: \.self) { p in
+                /* the potted balls as little balls (dotEl), wrapping */
+                if r.0 == "Potted", r.1[p] != "None" {
+                  let ns = r.1[p].split(separator: " ").compactMap { Int($0) }
+                  LazyVGrid(columns: [GridItem(.adaptive(minimum: 17), spacing: 3)], alignment: .leading, spacing: 3) {
+                    ForEach(ns, id: \.self) { n in ballIcon(n, 16).frame(width: 16, height: 16) }
+                  }
+                  .frame(minWidth: 60, maxWidth: 120, alignment: .leading)
+                  .accessibilityElement().accessibilityLabel(ns.map(String.init).joined(separator: ", "))
+                } else {
+                  Text(r.1[p]).font(.footnote).monospacedDigit().fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(minWidth: 60, maxWidth: 120, alignment: .leading)
-                .accessibilityElement().accessibilityLabel(ns.map(String.init).joined(separator: ", "))
-              } else {
-                Text(r.1[p]).font(.footnote).monospacedDigit().fixedSize(horizontal: false, vertical: true)
               }
             }
           }
