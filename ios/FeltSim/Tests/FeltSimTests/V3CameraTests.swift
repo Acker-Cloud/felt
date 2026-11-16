@@ -76,4 +76,70 @@ private func ds(_ a: Any?) -> [Double]? { (a as? [Any])?.map { d($0) } }
     }
     #expect(n == 512 && names.isSuperset(of: ["far left corner", "near right corner", "left side", "far side", "near side"]), "\(n) poses, \(names.sorted())")
   }
+  /* 4o's air against v3Scene's own lines: a ball's shadow (on the bed, a jump at three heights, carried, dropping: where
+     it falls, its grow, its two alphas) and the cue's tip and axis (level and raised, on the bed and in the air) */
+  @Test func air() throws {
+    let url = try #require(Bundle.module.url(forResource: "v3.json", withExtension: nil, subdirectory: "Fixtures"))
+    let fx = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    var n = 0
+    for c in fx["cams"] as! [[String: Any]] {
+      let s = Sim()
+      s.setPockets(c["pockets"] as! String); s.setTable(c["table"] as! String, c["shape"] as? String)
+      for k in c["casts"] as! [[String: Any]] {
+        let i = ds(k["in"])!, o = V3.cast(s, x: i[0], y: i[1], z: i[2], air: i[3], a: i[4], liftH: 0.045, lampH: 1.1, light: [-0.55, -0.835])
+        #expect([o.bx, o.by, o.grow, o.ao, o.ca] == ds(k["out"])!, "\(c["table"]!) cast \(i)")
+        n += 1
+      }
+      for t in c["tips"] as! [[String: Any]] {
+        let i = ds(t["in"])!, o = V3.cueTip(s, x: i[0], y: i[1], air: i[2], aim: i[3], sx: i[4], sy: i[5], el: i[6], gap: i[7])
+        #expect(o.tip == ds(t["tip"])! && o.ax == ds(t["ax"])!, "\(c["table"]!) tip \(i)")
+        n += 1
+      }
+    }
+    #expect(n == 108 && V3.air(nil) == 0 && V3.air(-0.0) == 0 && V3.air(0.02) == 0.02)
+  }
+  /* 6b3 against the page's potPlan, potPlace and potCovered: on the pool tables and two boxes, the plan top-down and in
+     3D (every slot's place, spot and room), then through four poses every 3D slot's projected window and, for each one
+     shown, whether a ball, the cue or the loupe lies over it */
+  @Test func pots() throws {
+    let url = try #require(Bundle.module.url(forResource: "v3.json", withExtension: nil, subdirectory: "Fixtures"))
+    let fx = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    var n = 0, shown = 0, hid = [0, 0, 0]
+    for c in fx["cams"] as! [[String: Any]] {
+      guard let p = c["pots"] as? [String: Any] else { continue }
+      let s = Sim()
+      s.setPockets(c["pockets"] as! String); s.setTable(c["table"] as! String, c["shape"] as? String)
+      let b = (c["box"] as! [NSNumber]).map { $0.doubleValue }, box = V3.Box(left: b[0], top: b[1], width: b[2], height: b[3]), name = "\(c["table"]!) \(Int(b[2]))x\(Int(b[3]))"
+      let v = ds(p["view"])!, rail = d(p["rail"]), co = d(p["co"]), sights = (p["sights"] as! [Any]).map { ds($0)! }, z = d(p["z"]), len = d(p["len"])
+      func same(_ P: PotRail.Plan, _ w: [String: Any], _ what: String) {
+        let sides = (w["sides"] as! [[Any]]).map { $0.map { ds($0)! } }
+        #expect(P.sides.map { $0.map { [$0.x, $0.y, $0.t[0], $0.t[1], $0.room] } } == sides, "\(name) \(what) slots")
+        #expect(P.s == d(w["s"]) && P.ball == d(w["ball"]) && P.up == (w["up"] as! [NSNumber]).map { $0.doubleValue } && P.k == d(w["k"]) && P.half == d(w["half"]), "\(name) \(what) sizes")
+      }
+      let flat = PotRail.plan(s, k: v[0], ox: v[1], oy: v[2], portrait: true, live: false, rail: rail, co: co, sights: sights, screen: (b[2], b[3]))
+      let P = PotRail.plan(s, k: v[0], ox: v[1], oy: v[2], portrait: true, live: true, rail: rail, co: co, sights: sights)
+      same(flat, p["flat"] as! [String: Any], "top-down"); same(P, p["live"] as! [String: Any], "3D")
+      let balls = (p["balls"] as! [[Any]]).filter { $0[3] as! Bool }.map { (x: d($0[0]), y: d($0[1]), z: d($0[2])) }
+      for a in p["at"] as! [[String: Any]] {
+        let C = V3.pose(s, box, px: d(a["px"]), py: d(a["py"]), yaw: d(a["yaw"]), pitch: (a["pitch"] as! NSNumber).doubleValue, dist: (a["dist"] as! NSNumber).doubleValue)
+        let cue = (a["cue"] as! [Any]).map { ds($0)! }, places = (a["places"] as! [Any]).map { ds($0) }, cover = a["cover"] as! [[Bool]]
+        let mine = P.sides.flatMap { $0 }.map { PotRail.place(P, $0, C, box, z: z) }
+        #expect(mine == places, "\(name) pose \(n): places")
+        var j = 0
+        for f in mine.compactMap({ $0 }) {
+          let lp = (x: box.left + box.width * 0.25, y: box.top + box.height * 0.55, r: 70.0)
+          let got = [PotRail.covered(f[0], f[1], f[2] / 2, loupe: nil, cue: nil, cueLen: len, balls: balls, C, box, R: s.BALL_R),
+                     PotRail.covered(f[0], f[1], f[2] / 2, loupe: nil, cue: (cue[0], cue[1]), cueLen: len, balls: [], C, box, R: s.BALL_R),
+                     PotRail.covered(f[0], f[1], f[2] / 2, loupe: lp, cue: nil, cueLen: len, balls: [], C, box, R: s.BALL_R)]
+          #expect(j < cover.count && got == cover[j], "\(name) pose \(n): window \(j) covered")
+          for q in 0..<3 where got[q] { hid[q] += 1 }
+          j += 1; shown += 1
+        }
+        #expect(j == cover.count)
+        n += 1
+      }
+    }
+    /* every table's poses ran, windows showed, and each of the ball, the cue and the loupe hid one or more */
+    #expect(n == 24 && shown > 40 && hid.allSatisfy { $0 > 0 }, "\(n) poses, \(shown) windows, hidden \(hid)")
+  }
 }

@@ -705,6 +705,9 @@ final class TableModel {
   @ObservationIgnored var v3Pitch = Prefs.viewPitch
   @ObservationIgnored var v3Dist = Prefs.viewDist
   @ObservationIgnored var v3Cam: (V3.Cam, V3.Box)? = nil
+  /* 6b3 in 3D: the cue as last drawn (its tip and axis, potCue), and each window's fade (.tw.hid's opacity .12s) */
+  @ObservationIgnored var potCue: (tip: [Double], ax: [Double])? = nil
+  @ObservationIgnored var potHid: [Int: (a: Double, t: Double)] = [:]
   /* V3.k: the input's scale at the camera's pivot, as last drawn */
   @ObservationIgnored var v3K = 100.0
   /* After the Shot 'top': the roll drawn top-down, the setting staying 3D (V3.top2d), until the turn's end */

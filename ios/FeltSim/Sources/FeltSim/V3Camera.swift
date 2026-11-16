@@ -176,6 +176,28 @@ public enum V3 {
   public static func pocketOrder(_ words: [String]) -> [Int] {
     words.indices.sorted { a, b in let ra = pocketRank(words[a]), rb = pocketRank(words[b]); return ra != rb ? ra < rb : a < b }
   }
+  /* a ball in the air (jump shots, b.z: its bottom's height; absent on the bed): v3Air; airOf 0 on the cloth to 1 at
+     AIR_TOP up, its shadow smaller (AIR_SHRINK) and fainter (AIR_FADE) the higher it is */
+  public static let AIR_TOP = 0.12, AIR_SHRINK = 0.35, AIR_FADE = 0.55
+  public static func air(_ z: Double?) -> Double { if let z, z > 0 { return z }; return 0 }
+  public static func airOf(_ z: Double) -> Double { clamp(z / AIR_TOP, 0, 1) }
+  /* v3Scene's shadow of a ball drawn with its centre at z (air: v3Air; lift: the carried ball's rise over liftH, V3_LIFT):
+     drawCast's lamp lampH over the bed's middle and the key light's lean; where it falls (bx, by), its grow and the
+     contact shade's and the cast's alphas (a: the drop's fade times the ball's own) */
+  public static func cast(_ s: Sim, x: Double, y: Double, z: Double, air a0: Double, a: Double, liftH: Double, lampH: Double, light: [Double]) -> (bx: Double, by: Double, grow: Double, ao: Double, ca: Double) {
+    let R = s.BALL_R, key = [-light[0], -light[1]]
+    let air = a0 != 0 ? airOf(a0) : 0, lift = a0 != 0 ? 0 : clamp((z - R) / liftH, 0, 1), dx = x - s.TL / 2, dy = y - s.TW / 2, zc = M.max(R, z), t = zc / (lampH - zc), lean = R * (0.2 + 0.7 * M.max(lift, air))
+    let bx = x + dx * t + key[0] * lean, by = y + dy * t + key[1] * lean, grow = (1 + 0.6 * lift) * (1 - AIR_SHRINK * air) * (1 + 0.1 * M.min(1, M.hypot(dx, dy) / 1.2))
+    return (bx, by, grow, a * (1 - lift) * (1 - air), a * (1 - 0.5 * lift) * (1 - AIR_FADE * air))
+  }
+  /* the cue's tip and axis (v3Scene): the tip's contact on the cue ball (the english: sx right of the line, sy above the
+     middle, the ball at its height in the air), then back along the cue, raised el, gap from the ball's centre */
+  public static func cueTip(_ s: Sim, x: Double, y: Double, air: Double, aim: Double, sx: Double, sy: Double, el: Double, gap: Double) -> (tip: [Double], ax: [Double]) {
+    let R = s.BALL_R, dx = M.cos(aim), dy = M.sin(aim)
+    let qx = x - dx * R + (-dy) * sx * R * 0.5, qy = y - dy * R + dx * sx * R * 0.5, qz = R + air + sy * R * 0.5, back3 = gap - R
+    let ax = [-dx * M.cos(el), -dy * M.cos(el), -M.sin(el)], tip = [qx + ax[0] * back3, qy + ax[1] * back3, -qz + ax[2] * back3]
+    return (tip, ax)
+  }
 }
 
 /* 4o's overlays: the 2D view's strokes laid on the bed as ribbons (v3Line, v3Strip, v3Push, v3PathZ): each polyline at one

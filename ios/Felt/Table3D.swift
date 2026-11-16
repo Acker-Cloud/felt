@@ -405,6 +405,7 @@ struct BallU {
       }
     }
     guard let e = cb.makeRenderCommandEncoder(descriptor: pass) else { return }
+    model.potCue = nil
     scene(e, C, G, full: true, sc: sc, vp: (Double(view.drawableSize.width), Double(view.drawableSize.height)), size: view.bounds.size, ghostC: C)
     /* the lens on the view: a quad round the circle, out to the shadow's reach */
     if let st, let lt = lensTex {
@@ -528,32 +529,31 @@ struct BallU {
     let balls = (model.rolling?.balls ?? model.balls).filter { $0.on && !(ghostOk && $0.n == model.cueN) }
     let sh = model.rolling == nil ? model.settleH(model.now) : 0
     /* v3Drops: each pot falls on toward the pocket's middle and below the bed, darkening and fading, over HERO_DROP_MS */
-    struct Drawn { let n: Int, x: Double, y: Double, z: Double, a: Double, dark: Double, drop: (k: Int, u: Double)? }
-    var drawn = balls.map { Drawn(n: $0.n, x: $0.x, y: $0.y, z: R + ($0.n == model.cueN && sh > 0 ? BallPainter.LIFT_H * sh : 0), a: 1, dark: 0, drop: nil) }
-    if let at = carried { drawn.append(Drawn(n: model.cueN, x: at.0, y: at.1, z: R + BallPainter.LIFT_H * model.bihH, a: ghostOk ? 0.96 : 0.5, dark: 0, drop: nil)) }
+    /* a ball in the air (v3Air: a jump shot's b.z) drawn at its height */
+    struct Drawn { let n: Int, x: Double, y: Double, z: Double, a: Double, dark: Double, drop: (k: Int, u: Double)?, air: Double }
+    var drawn = balls.map { Drawn(n: $0.n, x: $0.x, y: $0.y, z: R + V3.air($0.z) + ($0.n == model.cueN && sh > 0 ? BallPainter.LIFT_H * sh : 0), a: 1, dark: 0, drop: nil, air: V3.air($0.z)) }
+    if let at = carried { drawn.append(Drawn(n: model.cueN, x: at.0, y: at.1, z: R + BallPainter.LIFT_H * model.bihH, a: ghostOk ? 0.96 : 0.5, dark: 0, drop: nil, air: 0)) }
     let dur = 260 / model.speed, tnow = model.now
     for p in model.pots where p.k >= 0 && p.k < s.POCKETS.count && !balls.contains(where: { $0.n == p.n }) {
       let u = (tnow - p.t) * 1000 / dur, P = s.POCKETS[p.k]
       if !(u >= 0 && u < 1) { continue }
       let e1 = 1 - (1 - u) * (1 - u)
-      drawn.append(Drawn(n: p.n, x: p.from.0 + (P[0] - p.from.0) * e1, y: p.from.1 + (P[1] - p.from.1) * e1, z: R * (1 - 2.6 * u * u), a: 1 - pow(u, 1.4), dark: min(1, 1.6 * u), drop: (p.k, u)))
+      drawn.append(Drawn(n: p.n, x: p.from.0 + (P[0] - p.from.0) * e1, y: p.from.1 + (P[1] - p.from.1) * e1, z: R * (1 - 2.6 * u * u), a: 1 - pow(u, 1.4), dark: min(1, 1.6 * u), drop: (p.k, u), air: 0))
     }
     var vis = drawn.map { b -> (Drawn, Double) in (b, V3.dot(V3.sub([b.x, b.y, -b.z], C.Er), C.f)) }.filter { $0.1 > V3.NEAR + R }
     vis.sort { $0.1 > $1.1 }
-    /* their shadows on the bed (drawCast's lamp and lean); a lifted ball's leans further, grows and fades */
+    /* their shadows on the bed (drawCast's lamp and lean); a lifted ball's leans further, grows and fades; a ball in the
+       air casts a smaller, fainter one, further off (V3.cast) */
     e.setDepthStencilState(depthRead)
     e.setRenderPipelineState(shadowP)
     var q = quad
     e.setVertexBytes(&q, length: 32, index: 0)
-    let key = [-LIGHT[0], -LIGHT[1]]
     for (o, _) in vis {
       if let d = o.drop, d.u > 0.4 { continue }
       let fa = o.drop.map { max(0, 1 - 2.5 * $0.u) } ?? 1
-      let lift = min(1, max(0, (o.z - R) / BallPainter.LIFT_H)), zc = max(R, o.z)
-      let dx = o.x - s.TL / 2, dy = o.y - s.TW / 2, t = zc / (BallPainter.LAMP_H - zc), lean = R * (0.2 + 0.7 * lift)
-      let bx = o.x + dx * t + key[0] * lean, by = o.y + dy * t + key[1] * lean, grow = (1 + 0.6 * lift) * (1 + 0.1 * min(1, JSMath.hypot(dx, dy) / 1.2))
+      let (bx, by, grow, ao, ca) = V3.cast(s, x: o.x, y: o.y, z: o.z, air: o.air, a: fa * o.a, liftH: BallPainter.LIFT_H, lampH: BallPainter.LAMP_H, light: LIGHT)
       var u = ShU(M: M, S: SIMD3<Float>(Float((o.x + bx) / 2), Float((o.y + by) / 2), -0.0008), ext: Float(R * 1.6 * grow + JSMath.hypot(bx - o.x, by - o.y)),
-                  A: SIMD2<Float>(Float(o.x), Float(o.y)), B: SIMD2<Float>(Float(bx), Float(by)), R: Float(R), grow: Float(grow), ao: Float(fa * o.a * (1 - lift)), ca: Float(fa * o.a * (1 - 0.5 * lift)))
+                  A: SIMD2<Float>(Float(o.x), Float(o.y)), B: SIMD2<Float>(Float(bx), Float(by)), R: Float(R), grow: Float(grow), ao: Float(ao), ca: Float(ca))
       e.setVertexBytes(&u, length: MemoryLayout<ShU>.stride, index: 1); e.setFragmentBytes(&u, length: MemoryLayout<ShU>.stride, index: 1)
       e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
@@ -628,9 +628,10 @@ struct BallU {
         let u = min(1, max(0, (st.t0.map { model.now - $0 } ?? 0) / TableModel.STROKE_MS)), g0 = rest + back * min(1, max(0, st.power))
         gap = g0 + (R - g0) * u * u
       }
-      let sp = model.spin, el = Swift.max(sp.e, 5 * Double.pi / 180), a = model.aim, dx = cos(a), dy = sin(a)
-      let qx = c.x - dx * R + (-dy) * sp.x * R * 0.5, qy = c.y - dy * R + dx * sp.x * R * 0.5, qz = R + sp.y * R * 0.5, back3 = gap - R
-      let ax = [-dx * cos(el), -dy * cos(el), -sin(el)], tip = [qx + ax[0] * back3, qy + ax[1] * back3, -qz + ax[2] * back3]
+      /* the tip on the cue ball at its height in the air (v3Air) */
+      let sp = model.spin, a = model.aim, dx = cos(a), dy = sin(a)
+      let (tip, ax) = V3.cueTip(s, x: c.x, y: c.y, air: V3.air(c.z), aim: a, sx: sp.x, sy: sp.y, el: Swift.max(sp.e, 5 * Double.pi / 180), gap: gap)
+      model.potCue = (tip, ax)   /* the rails' windows give way where it lies over them (6b3) */
       let side = [-dy, dx, 0.0], up = V3.norm(V3.cross(ax, side))
       var mv = MeshV(M: M, W: m4([ax[0], ax[1], ax[2], 0, side[0], side[1], side[2], 0, up[0], up[1], up[2], 0, tip[0], tip[1], tip[2], 1]))
       var u = MeshU(L: f3(lamp), E: f3(C.Er), lit: 1, alpha: 1)

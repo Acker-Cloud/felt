@@ -921,47 +921,18 @@ struct TableCanvas: View {
      (potPlan's slots: the gaps between the holes and sights, packed for POT_PER_RAIL, filling from the foot), 8-ball's
      solids up the left and stripes up the right, the 8 up its potter's group's side; 9 and 10-ball in pot order up the
      left, then the right. A dark recess (POT_RECESS) cut dark round its edge, the rail's true little ball in it, a rim
-     of light on a ball under 3:1 on the recess. */
-  private func drawPotRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter) {
+     of light on a ball under 3:1 on the recess. live: the 3D view's camera and the rail row's top (potPlace): the
+     windows on the long rails, each its slot on the rail top projected, none on the row or off the stage, faded where
+     the cue, the loupe or a ball lies over it (potCovered). */
+  func drawPotRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter, live: (C: V3.Cam, box: V3.Box, rowTop: Double)? = nil) {
     /* potGame: a game with no mode, or practice; never a trick shot or a drill */
     guard let g = model.g, !model.potOrder.isEmpty, g.mode == nil || g.mode == "practice", model.tut == nil else { return }
-    let s = model.sim, T = model.potGeometry(m), band = T.railBand, k = m.k
-    let wk = (band.rail - band.co) * k, mid = (band.co + band.rail) / 2
-    let a = m.pt(0, 0), b = m.pt(s.TL, s.TW)
-    let left = Double(min(a.x, b.x)), right = Double(max(a.x, b.x)), top = Double(min(a.y, b.y)), bottom = Double(max(a.y, b.y))
-    let sz = max(9, (wk - 2).rounded(.down)), ballD = sz - 3, POT_GAP = 3.0, PER = 8
-    /* the obstacles on screen: each pocket's hole and jaws (RAIL_PAD 4), each sight (POT_SIGHT_PAD 3) */
-    var holes: [[Double]] = []
-    func box(_ pts: [[Double]], _ pad: Double) {
-      let ps = pts.map { m.pt($0[0], $0[1]) }
-      holes.append([Double(ps.map(\.x).min()!), Double(ps.map(\.x).max()!), Double(ps.map(\.y).min()!), Double(ps.map(\.y).max()!), pad])
-    }
-    for (i, p) in s.POCKETS.enumerated() {
-      let r = s.POCKET_R[i]
-      var pts = [[p[0] - r, p[1]], [p[0] + r, p[1]], [p[0], p[1] - r], [p[0], p[1] + r]]
-      if s.MOUTHS.indices.contains(i) { for j in s.MOUTHS[i] { pts.append(j.p); pts.append(j.e) } }
-      box(pts, 4)
-    }
-    for q in T.railSights() { box([[q[0] - q[2], q[1] - q[3]], [q[0] + q[2], q[1] + q[3]]], 3) }
-    let sides: [[CGPoint]] = [left - mid * k, right + mid * k].map { cx in
-      var gaps = [[top, bottom]]
-      for h in holes {
-        if h[1] < cx - wk / 2 || h[0] > cx + wk / 2 { continue }
-        gaps = gaps.flatMap { [[$0[0], min($0[1], h[2] - h[4])], [max($0[0], h[3] + h[4]), $0[1]]] }.filter { $0[1] - $0[0] >= sz }
-      }
-      gaps.sort { $0[0] > $1[0] }
-      let cap = gaps.map { Int((($0[1] - $0[0] + POT_GAP) / (sz + POT_GAP)).rounded(.down)) }
-      var mm = 1
-      while mm < max(1, cap.max() ?? 1) && cap.reduce(0, { $0 + min(mm, $1) }) < PER { mm += 1 }
-      var slots: [CGPoint] = []
-      for (i, gp) in gaps.enumerated() {
-        let kk = min(mm, cap[i]), run = Double(kk) * sz + Double(kk - 1) * POT_GAP
-        for j in 0..<kk { slots.append(CGPoint(x: cx, y: (gp[0] + gp[1]) / 2 + run / 2 - sz / 2 - Double(j) * (sz + POT_GAP))) }
-      }
-      return slots
-    }
+    let s = model.sim, T = model.potGeometry(m), band = T.railBand
+    /* potPlan: the slots, packed for POT_PER_RAIL between the holes (RAIL_PAD) and sights (POT_SIGHT_PAD) */
+    let P = PotRail.plan(s, k: m.k, ox: m.ox, oy: m.oy, portrait: m.upright, live: live != nil, rail: band.rail, co: band.co, sights: T.railSights())
+    let sides = P.sides
     /* potSeats */
-    var seats: [(Int, CGPoint)] = []
+    var seats: [(Int, PotRail.Slot)] = []
     if is8(g.kind) {
       var n8 = [0, 0]
       for n in model.potOrder {
@@ -974,9 +945,25 @@ struct TableCanvas: View {
         if i < sides[0].count { seats.append((n, sides[0][i])) } else if i - sides[0].count < sides[1].count { seats.append((n, sides[1][i - sides[0].count])) }
       }
     }
+    /* 3D: what may lie over a window (the cue as last drawn, the loupe while shown, the balls on the table) */
+    let cueLen = CueGeo.of(game: model.game.table.2).len, now = model.now
+    let lp = model.loupeA > 0.02 ? model.loupe.map { (x: $0.x, y: $0.y, r: $0.r) } : nil
+    let onTable = live == nil ? [] : (model.rolling?.balls ?? model.balls).filter { $0.on }.map { (x: $0.x, y: $0.y, z: $0.z ?? 0) }
     let recess = Color(rgb: 16, 11, 8), edge = Color(.sRGB, red: 20 / 255, green: 8 / 255, blue: 3 / 255, opacity: 0.85), f = model.scaleFactor
-    for (n, c) in seats {
+    for (n, slot) in seats {
       if let t = model.potAt[n], model.now < t { continue }   /* still dropping into its pocket */
+      var c = CGPoint(x: slot.x, y: slot.y), sz = P.s, ballD = P.ball, ctx = ctx
+      if let L = live {
+        guard let f = PotRail.place(P, slot, L.C, L.box, z: s.cushionTop()) else { model.potHid[n] = nil; continue }
+        c = CGPoint(x: f[0], y: f[1]); sz = f[2]; ballD = Swift.max(5, (sz * P.ball / P.s).rounded())
+        let r = sz / 2, cut = f[1] + r > L.rowTop - 2 || f[0] - r < 0 || f[0] + r > L.box.width || f[1] - r < 0
+        let hid = cut || PotRail.covered(f[0], f[1], r, loupe: lp, cue: model.potCue, cueLen: cueLen, balls: onTable, L.C, L.box, R: s.BALL_R)
+        /* .hid: opacity 0 over .12s */
+        let h = model.potHid[n] ?? (a: hid ? 0 : 1, t: now), u = Swift.min(1, Swift.max(0, now - h.t) / 0.12), a = hid ? Swift.max(0, h.a - u) : Swift.min(1, h.a + u)
+        model.potHid[n] = (a, now)
+        if a <= 0.001 { continue }
+        ctx.opacity = a
+      }
       let rr = CGRect(x: c.x - sz / 2, y: c.y - sz / 2, width: sz, height: sz)
       ctx.fill(Path(ellipseIn: rr), with: .color(recess))
       ctx.stroke(Path(ellipseIn: rr), with: .color(edge), lineWidth: 1)

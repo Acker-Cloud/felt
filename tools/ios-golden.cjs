@@ -33,6 +33,26 @@ function v3Source() {
     /* 5c's pocket words, the 3D view's from the camera's axes (pocketFrame), and the picture's order and cells */
     cut('/* where pocket k lies from the table', 'const callName = ');
 }
+/* 6b3's windows (potPlan, potPlace, potCovered with railHoles, railSights, cushionDepth) and 4o's air: a ball's shadow
+   and the cue's tip as v3Scene works them (its lines cut into functions), the page's own source; the layout's RAIL,
+   viewBase, the loupe, the cue and the balls are the harness's */
+function potSource() {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const line = a => { const i = html.indexOf('\n' + a); if (i < 0) throw new Error('ios-golden: 6b3 moved: ' + a); return html.slice(i + 1, html.indexOf('\n', i + 1)) + '\n'; };
+  const cut = (a, b) => { const i = html.indexOf(a), j = html.indexOf(b, i); if (i < 0 || j < 0) throw new Error('ios-golden: 6b3 moved: ' + a); return html.slice(i, j); };
+  const ul = line('    gl.uniform1f(pr.u.ao, ').replace(/gl\.uniform1f\(pr\.u\.(ao|ca), /g, 'out.$1 = (');
+  return 'let RAIL = 0.115, viewBase = null, innerWidth = 0, innerHeight = 0, loupe = null, loupeA = 0, potCue = null, tab = null, state = "aim";\n' +
+    'const pw = { plan: null, planKey: "" }; let __cueLen = 0; const cueGeo = () => ({ len: __cueLen });\n' +
+    line('const LIGHT = ') + line('const RAIL_PAD = ') + line('const screenIn = ') + (l => { if (!l.includes(', LIFT_H = 0.045;')) throw new Error('ios-golden: LIFT_H changed'); return l.replace(', LIFT_H = 0.045;', ';'); })(line('const LAMP_H = ')) + line('const AIR_EYE = ') + line('const airOf = ') + line('const v3Air = ') +
+    line('const CUE_LEN = ') + line('const POT_KINDS = ') +
+    cut('function cushionDepth() {', 'function pageColor()') + cut('function sightsAt(co) {', 'function paintSights(') + cut('function railHoles(', 'function placeRail(') +
+    cut('function potPlan() {', '/* which window each ball down') + cut('function potPlace(', '/* a ball\'s window: the recess') +
+    'function __cast(o) { const R = BALL_R, key = [-LIGHT[0], -LIGHT[1]], out = {};\n' + line('    const air = o.air ? airOf(o.air)') + line('    const bx = o.x + dx * t + key[0] * lean') +
+    line('    const mx = (o.x + bx) / 2') + ul + 'return [bx, by, grow, out.ao, out.ca]; }\n' +
+    'function __tip(c, cueSpin, gap, aimAngle) { const R = BALL_R;\n' + line('    const sp = cueSpin || ') + line('    const qx = c.x - dx * R') + line('    const ax = [-dx * Math.cos(el)') + 'return [tip, ax]; }\n' +
+    'function __covered(x, y, r, balls, cue, lp) { const g0 = game; game = { balls }; potCue = cue; loupe = lp; loupeA = lp ? 1 : 0; try { return potCovered(x, y, r); } finally { game = g0; potCue = null; loupe = null; } }\n' +
+    'function __potSet(o) { RAIL = o.rail; viewBase = o.view; innerWidth = o.w; innerHeight = o.h; __cueLen = o.len; pw.plan = null; pw.planKey = ""; }\n';
+}
 /* 4m's recorded roll (heroRunStart, heroSample) with 4b's rotate and artTilt, the page's own source */
 function heroSource() {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
@@ -52,7 +72,7 @@ function tourneySource() {
   return html.slice(i, j);
 }
 function loadFd() {
-  let src = regionSource() + '\n;let game = null; const cueBall = () => game.balls.find(b => b.n === game.cue); const performance = { now: () => 0 };\n' + guideSource() + '\n' + tourneySource() + '\n' + v3Source() + '\n' + heroSource();
+  let src = regionSource() + '\n;let game = null; const cueBall = () => game.balls.find(b => b.n === game.cue); const performance = { now: () => 0 };\n' + guideSource() + '\n' + tourneySource() + '\n' + v3Source() + '\n' + potSource() + '\n' + heroSource();
   const pw = [['clamp(power, 0, 1) ** POWER_EXP', 'Math.pow(clamp(power, 0, 1), POWER_EXP)'],
     ['clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1) ** (1 / POWER_EXP)', 'Math.pow(clamp((v - MIN_V) / (MAX_V - MIN_V), 0, 1), 1 / POWER_EXP)']];
   for (const [a, b] of pw) { if (!src.includes(a)) throw new Error('ios-golden: sim changed, update the pow rewrite: ' + a); src = src.replace(a, b); }
@@ -75,7 +95,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'pocketWords', 'pocketOrder', 'pocketCell', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf', 'newPractice', 'practiceJudge', 'scatter', 'addBall', 'removeBall', 'rng', 'canDrop', 'onTable', 'TRICKS', 'trickJudge', 'trickPoints', 'trickSol', 'trickGame', 'programMax', 'TRICK_VAL', 'trickPts', 'trickScoreFromStars', 'trickStars', 'newBall', 'shotMoments', 'concedeSnooker', 'suggestAim', 'DRILL_LIB', 'drillRun', 'drillShot', 'drillTier', 'drillTotal', 'drillJudge', 'drillBalls', 'drillOver', 'TUTORIALS', 'tutGame', 'tutJudge', 'tutNum', 'tutSol'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'pocketWords', 'pocketOrder', 'pocketCell', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf', 'newPractice', 'practiceJudge', 'scatter', 'addBall', 'removeBall', 'rng', 'canDrop', 'onTable', 'TRICKS', 'trickJudge', 'trickPoints', 'trickSol', 'trickGame', 'programMax', 'TRICK_VAL', 'trickPts', 'trickScoreFromStars', 'trickStars', 'newBall', 'shotMoments', 'concedeSnooker', 'suggestAim', 'DRILL_LIB', 'drillRun', 'drillShot', 'drillTier', 'drillTotal', 'drillJudge', 'drillBalls', 'drillOver', 'TUTORIALS', 'tutGame', 'tutJudge', 'tutNum', 'tutSol', '__cast', '__tip', '__covered', '__potSet', 'potPlan', 'potPlace', 'cushionDepth', 'railSights', 'CUE_LEN', 'cushionTop', 'v3Air', 'LIFT_H'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -695,7 +715,49 @@ ${D.NAT.map(n => `    (${q(n.id)}, ${q(n.name)}, ${q(n.first)}, ${q(n.last)}, ${
           words.push({ px: bits(px), py: bits(py), yaw: bits(yaw), pitch, words: S.POCKET_AIM.map((_, k) => S.pocketWords(k)), order: S.pocketOrder(), cells: S.POCKET_AIM.map((_, k) => S.pocketCell(k)) });
           Object.assign(S.V3, { live: false, cam: null });
         }
-        v3cams.push({ table: T[0], shape: T[1], pockets: T[2], box: [box.left, box.top, box.width, box.height], poses, ovs, words });
+        /* 4o's air: a ball's shadow (on the bed, in the air, carried, dropping) and the cue's tip (level and raised, the cue
+           ball on the bed and in the air), each input and output by its bits */
+        const R = S.BALL_R, casts = [], tips = [];
+        for (const [x, y, z, drop] of [[S.TL * 0.3, S.TW * 0.5, undefined], [S.TL * 0.3, S.TW * 0.5, 0.004], [S.TL * 0.82, S.TW * 0.2, 0.05], [S.TL * 0.1, S.TW * 0.9, 0.31], [0.2, 0.3, 'lift'], [S.TL * 0.6, S.TW * 0.7, undefined, 0.3]]) {
+          const lift = z === 'lift', air = lift ? 0 : S.v3Air({ z }), o = { n: 1, x, y, z: lift ? R + S.LIFT_H * 0.7 : R + air, air: lift ? undefined : air, a: lift ? 0.96 : 1, drop: drop === undefined ? undefined : { u: drop } };
+          casts.push({ in: [bits(o.x), bits(o.y), bits(o.z), bits(air), bits((o.drop ? Math.max(0, 1 - 2.5 * o.drop.u) : 1) * o.a)], out: arr(S.__cast(o)) });
+        }
+        for (const [z, sp, gap, aim] of [[undefined, { x: 0, y: 0 }, R + 0.012, 0.4], [0.03, { x: 0.4, y: -0.3, e: 0.5 }, R + 0.2, -2.2], [0.11, { x: -0.2, y: 0.6, e: 0.02 }, R, 3.1]]) {
+          const c = { x: S.TL * 0.4, y: S.TW * 0.35, z }, [tip, ax] = S.__tip(c, sp, gap, aim);
+          tips.push({ in: [bits(c.x), bits(c.y), bits(S.v3Air(c)), bits(aim), bits(sp.x), bits(sp.y), bits(Math.max(sp.e || 0, 5 * Math.PI / 180)), bits(gap)], tip: arr(tip), ax: arr(ax) });
+        }
+        /* 6b3: the windows' plan top-down (a fitted upright view, the slots on the screen) and in 3D (the long rails as
+           upright), then for each pose every 3D slot's place and, for each window shown, whether a ball, the cue or the
+           loupe lies over it */
+        let pots = null;
+        if (['7', '9', 'heyball'].includes(T[0])) {
+          const rail = 0.115, k = Math.min(box.width / (S.TW + 2 * rail), box.height / (S.TL + 2 * rail)), view = { k, ox: rail * k + 3, oy: rail * k + 5, portrait: true };
+          const set = () => S.__potSet({ rail, view, w: box.width, h: box.height, len: S.CUE_LEN });
+          const sl = P => ({ sides: P.sides.map(q => q.map(o => [bits(o.x), bits(o.y), ...arr(o.t), bits(o.room)])), s: bits(P.s), ball: bits(P.ball), up: P.up, k: bits(P.k), half: bits(P.half) });
+          S.V3.live = false; set(); const flat = sl(S.potPlan());
+          S.V3.live = true; set(); const P = S.potPlan(), live = sl(P);
+          const balls = [{ n: 0, x: S.TL * 0.3, y: S.TW * 0.5, on: true }, { n: 1, x: S.TL * 0.05, y: S.TW * 0.95, z: 0.04, on: true }, { n: 2, x: S.TL * 0.85, y: S.TW * 0.04, on: true },
+            { n: 3, x: S.TL * 0.97, y: S.TW * 0.5, on: true }, { n: 4, x: 0.1, y: 0.05, on: false },
+            { n: 5, x: S.TL * 0.35, y: R, on: true }, { n: 6, x: S.TL * 0.55, y: S.TW - R, on: true },
+            /* in flight over the rails (a jump off the table) */
+            { n: 7, x: S.TL * 0.42, y: -0.07, z: 0.06, on: true }, { n: 9, x: S.TL * 0.15, y: S.TW + 0.08, z: 0.03, on: true }, { n: 10, x: S.TL * 0.8, y: S.TW + 0.08, z: 0.02, on: true }];
+          const at = [];
+          for (const [px, py, yaw, pitch, dist] of [[S.TL * 0.25, S.TW * 0.5, 0, 24, 1.1], [S.TL * 0.6, S.TW * 0.3, 2.1, 8, 0.45], [S.TL * 0.1, S.TW * 0.9, -1.3, 70, 3.2], [S.TL * 0.5, S.TW * 0.5, 3.14, 40, 1.8]]) {
+            Object.assign(S.V3, { px, py, yaw, mv: null, ovOn: false }); S.settings.viewPitch = pitch; S.settings.viewDist = dist;
+            S.V3.cam = S.v3Pose(0);
+            const cue = S.__tip({ x: px, y: py }, { x: 0.2, y: -0.1, e: 0.35 }, R + 0.15, yaw), places = [], cover = [];
+            for (const q of P.sides) for (const slot of q) {
+              const f = S.potPlace(P, slot);
+              places.push(f ? arr(f) : null);
+              if (f) { const lp = { x: box.left + box.width * 0.25, y: box.top + box.height * 0.55, r: 70 }; cover.push([S.__covered(f[0], f[1], f[2] / 2, balls, null, null), S.__covered(f[0], f[1], f[2] / 2, [], cue, null), S.__covered(f[0], f[1], f[2] / 2, [], null, lp)]); }
+            }
+            at.push({ px: bits(px), py: bits(py), yaw: bits(yaw), pitch, dist, cue: [arr(cue[0]), arr(cue[1])], places, cover });
+          }
+          S.V3.live = false; S.V3.cam = null;
+          pots = { rail: bits(rail), view: [bits(view.k), bits(view.ox), bits(view.oy)], co: bits(S.cushionDepth()), sights: S.railSights().map(arr), len: bits(S.CUE_LEN), z: bits(S.cushionTop()),
+            balls: balls.map(b => [bits(b.x), bits(b.y), bits(b.z || 0), b.on]), flat, live, at };
+        }
+        v3cams.push(Object.assign({ table: T[0], shape: T[1], pockets: T[2], box: [box.left, box.top, box.width, box.height], poses, ovs, words, casts, tips }, pots ? { pots } : {}));
       }
     }
   }

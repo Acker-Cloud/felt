@@ -594,7 +594,10 @@ struct TableScreen: View {
                   _ = tl.date
                   guard let (C, box) = model.v3Cam else { return }
                   let tc = TableCanvas(model: model, look: Look.of(model.dress, game: model.game)), m = Mapper(size: size, TL: model.sim.TL, TW: model.sim.TW)
-                  tc.drawRail(&ctx, m, model.ballPainter(upright: m.upright, scale: scale), row: (Double(size.height) - 26, Double(size.width), C, box))
+                  let bp = model.ballPainter(upright: m.upright, scale: scale)
+                  /* 6b3 in 3D: the potted windows on the long rails as projected, never on the row (railTop: 22 over its middle) */
+                  tc.drawPotRail(&ctx, m, bp, live: (C, box, Double(size.height) - 26 - 22))
+                  tc.drawRail(&ctx, m, bp, row: (Double(size.height) - 26, Double(size.width), C, box))
                 }
                 .allowsHitTesting(false)
               }
