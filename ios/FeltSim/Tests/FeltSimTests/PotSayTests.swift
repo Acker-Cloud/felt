@@ -56,9 +56,9 @@ import Testing
   /* zoomed (cam.z > 1.02) the windows hide and the words hold: potTick writes #potSay before vis; the element stands
      where the windows do unzoomed (the fitted view's slots) */
   @Test func zoomed() {
-    #expect(PotRail.windows(live: false, z: 1) && PotRail.windows(live: false, z: 1.02))
-    #expect(!PotRail.windows(live: false, z: 1.03) && !PotRail.windows(live: false, z: 3))
-    #expect(PotRail.windows(live: true, z: 3))
+    #expect(PotRail.windows(replay: false, live: false, z: 1) && PotRail.windows(replay: false, live: false, z: 1.02))
+    #expect(!PotRail.windows(replay: false, live: false, z: 1.03) && !PotRail.windows(replay: false, live: false, z: 3))
+    #expect(PotRail.windows(replay: false, live: true, z: 3))
     let s = Sim()
     s.setTable("9")
     let k = 393 / (s.TW + 2 * 0.1), P = PotRail.plan(s, k: k, ox: 0.1 * k, oy: 40, portrait: true, live: false, rail: 0.1, co: 0.05, sights: [])
@@ -69,5 +69,12 @@ import Testing
     let sl = P.sides[0]
     #expect(box == [sl[0].x - P.s / 2, sl[2].y - P.s / 2, sl[0].x + P.s / 2, sl[0].y + P.s / 2])
     #expect(SeatWords.potted(order) == "Potted: 1, 9, 12")
+  }
+
+  /* a replay (potTick's !rp): the windows hide whatever the view, top-down or 3D, zoomed or not; the words hold */
+  @Test func replay() {
+    for live in [false, true] { for z in [1.0, 1.02, 3] { #expect(!PotRail.windows(replay: true, live: live, z: z)) } }
+    #expect(PotRail.windows(replay: false, live: false, z: 1))
+    #expect(SeatWords.potted(PotRail.order([1, 9], off: [9, 1, 12])) == "Potted: 1, 9, 12")
   }
 }

@@ -95,9 +95,9 @@ public enum PotRail {
     }
     return out
   }
-  /* potTick's vis: the windows show in 3D, or top-down while the 2D camera is not zoomed (cam.z > 1.02: the rails are off
-     its window). #potSay's words are written before this and hold either way */
-  public static func windows(live: Bool, z: Double) -> Bool { live || !(z > 1.02) }
+  /* potTick's vis (!rp && (V3.live || !(cam.z > 1.02))): never while a replay plays; else in 3D, or top-down while the
+     2D camera is not zoomed (the rails are off its window). #potSay's words are written before this and hold either way */
+  public static func windows(replay: Bool, live: Bool, z: Double) -> Bool { !replay && (live || !(z > 1.02)) }
   /* top-down: where each seated ball's window stands in the plan's view, per side ([x0, y0, x1, y1]) */
   public static func planned(_ P: Plan, _ seats: [(n: Int, side: Int, i: Int)]) -> [[[Double]]] {
     var out: [[[Double]]] = [[], []]

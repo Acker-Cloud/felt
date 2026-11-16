@@ -203,8 +203,8 @@ struct TableCanvas: View {
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       ctx.scaleBy(x: sc, y: sc)
       /* the rail row and the potted windows sit on the fitted view (the page's DOM over the canvas); the windows hide
-         while zoomed (potTick: cam.z > 1.02) */
-      if PotRail.windows(live: false, z: m.z) { drawPotRail(&ctx, base, bp) } else {
+         while a replay plays or while zoomed (potTick: !rp, cam.z > 1.02) */
+      if PotRail.windows(replay: model.rp != nil, live: false, z: m.z) { drawPotRail(&ctx, base, bp) } else {
         model.potSlideDue = []   /* hidden: a pot then never rolls in */
         /* the words hold (potTick writes #potSay before it hides the windows): the element where the windows stand unzoomed */
         if model.potOn, !model.potOrder.isEmpty { let (P, q) = potSeats(base, live: false); potSay(base, PotRail.sayBox(shown: [[], []], planned: PotRail.planned(P, q))) }
