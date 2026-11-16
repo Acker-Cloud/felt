@@ -30,20 +30,22 @@ final class PlayTests: XCTestCase {
      Replay), and a tap on the table ends it */
   @MainActor func testReplayOnTheRail() throws {
     let app = XCUIApplication()
-    app.launchArguments = ["-felt-game", "8-Ball"]
+    /* the CPU's turn follows a dry break: its think held (-felt-cputhink) so its stroke never clears the offer first */
+    app.launchArguments = ["-felt-game", "8-Ball", "-felt-cputhink", "8000"]
     app.launch()
     let table = app.otherElements["table"], bar = app.otherElements["power"]
     XCTAssertTrue(table.waitForExistence(timeout: 10))
     XCTAssertTrue(bar.waitForExistence(timeout: 5))
     bar.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5)).press(forDuration: 0.1, thenDragTo: bar.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)))
-    expectation(for: NSPredicate(format: "value == %@", "0 percent"), evaluatedWith: bar)
-    waitForExpectations(timeout: 65)
-    let offer = app.otherElements["replayBtn"]
-    XCTAssertTrue(offer.waitForExistence(timeout: 3), "the offer on the rail")
+    /* the break rolls first ("0 percent" alone also matches the moment before the stroke); the offer comes as it rests
+       and stays REPLAY_OFFER_MS (3.5 s), so the test waits on the offer itself, not on the bar */
+    expectation(for: NSPredicate(format: "value == %@", "Rolling"), evaluatedWith: bar)
+    waitForExpectations(timeout: 5)
+    let offer = app.buttons["replayBtn"]
+    XCTAssertTrue(offer.waitForExistence(timeout: 65), "the offer on the rail")
     XCTAssertTrue(offer.label.hasPrefix("Replay the "), offer.label)
-    let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "replay-offer"; shot.lifetime = .keepAlways; add(shot)
     offer.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-    let skip = app.otherElements["replaySkip"]
+    let skip = app.buttons["replaySkip"]
     XCTAssertTrue(skip.waitForExistence(timeout: 2), "the tap starts the replay")
     XCTAssertEqual(skip.label, "Skip the replay")
     XCTAssertTrue(app.otherElements["replayBadge"].exists)
@@ -92,11 +94,11 @@ final class PlayTests: XCTestCase {
 
   /* F8 by real touch: in an exhibition (both players the CPU) a tap on the table during the break's think hurries it (the
      page's cpuSkip): the wait cut, the cue's turn and pull 250 ms, so the break is rolling well inside the unhurried
-     think (at least 900 x 0.85 ms) and swing (900 ms). The stroke's think and skip are read from the cpu-probe
+     think (held at 8 s by -felt-cputhink, so the tap lands in it) and swing (900 ms). The stroke's think and skip are read from the cpu-probe
      (-felt-aimprobe); the log (-felt-touchlog) records the tap ("cpuskip") and the stroke ("cpustroke think <s> skip 1") */
   @MainActor func testCpuSkip() throws {
     let app = XCUIApplication()
-    app.launchArguments = ["-felt-exhibit", "8-Ball", "-felt-touchlog", "-felt-aimprobe"]
+    app.launchArguments = ["-felt-exhibit", "8-Ball", "-felt-touchlog", "-felt-aimprobe", "-felt-cputhink", "8000"]
     app.launch()
     let table = app.otherElements["table"], probe = app.staticTexts["cpu-probe"]
     XCTAssertTrue(table.waitForExistence(timeout: 10))

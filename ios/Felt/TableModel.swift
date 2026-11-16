@@ -1215,6 +1215,9 @@ final class TableModel {
   static let aimBench = ProcessInfo.processInfo.arguments.contains("-felt-aimbench")
   /* `-felt-aimprobe`: the aim and its hold in an element's value for the UI tests (PointerTests) */
   static let aimProbe = ProcessInfo.processInfo.arguments.contains("-felt-aimprobe")
+  /* `-felt-cputhink <ms>`: every CPU think held that long (testCpuSkip: a real tap reaches the app seconds after launch,
+     later than a quick break's think) */
+  static let thinkHold: Double? = { let a = ProcessInfo.processInfo.arguments; return a.firstIndex(of: "-felt-cputhink").flatMap { $0 + 1 < a.count ? Double(a[$0 + 1]) : nil } }()
   static let pointerBench = ProcessInfo.processInfo.arguments.contains("-felt-pointerbench")
   static let touchBench = ProcessInfo.processInfo.arguments.contains("-felt-touchbench") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-hand") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-slow")
   @ObservationIgnored private var bench: (t0: Double, prev: Double, n: Int, worst: Double)?
@@ -1589,6 +1592,7 @@ final class TableModel {
   /* cpuThinkMs: short on the break or an easy pot, longer on a hard one, longest on a safety or kick */
   private func cpuThinkMs(_ gm: Game, _ shot: CPUShot, _ seed: Double) -> Double {
     let T = ["break": 900.0, "pot": 650, "carom": 1500, "bumper": 1100, "bank": 2000, "combo": 2200, "safety": 1900, "kick": 2300, "push": 1600, "blind": 1300, "kickpot": 2300, "jump": 2100, "swerve": 2100]
+    if let h = TableModel.thinkHold { return h }
     var ms = T[shot.intent.type] ?? 1300
     if shot.intent.type == "pot" || shot.intent.type == "carom" { ms += 1900 * pow(1 - min(1, max(0, shot.intent.q.isFinite ? shot.intent.q : 0.5)), 1.5) }
     if gm.inHand != nil && !gm.breakShot { ms += 500 }
