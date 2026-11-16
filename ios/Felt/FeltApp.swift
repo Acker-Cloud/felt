@@ -1965,13 +1965,11 @@ struct CallMenu: View {
     }
     .buttonStyle(.plain)
   }
-  /* the pockets laid out as the table is seen: upright the long table's six (corners top and bottom, sides at the middle) */
+  /* the pockets laid out as the table is seen (pocketCell: each in its cell of a 3 x 3 grid by its words, the empty row or
+     column closed up): top-down from the screen, in 3D from the player's camera */
   private func pockets(_ c: ShotCall?) -> some View {
     let s = model.sim, up = model.uprightView
-    let cells: [(Int, Int, Int)] = s.POCKET_AIM.indices.map { k in
-      let p = s.POCKET_AIM[k], f = up ? p[0] - s.TL / 2 : s.TW / 2 - p[1], r = up ? p[1] - s.TW / 2 : p[0] - s.TL / 2
-      return (k, f > 0.01 ? 0 : f < -0.01 ? 2 : 1, r < -0.01 ? 0 : r > 0.01 ? 2 : 1)
-    }
+    let cells: [(Int, Int, Int)] = s.POCKET_AIM.indices.map { k in let q = model.pocketCell(k, upright: up); return (k, q[0], q[1]) }
     let rows = Array(Set(cells.map { $0.1 })).sorted(), cols = Array(Set(cells.map { $0.2 })).sorted()
     return Grid(horizontalSpacing: 10, verticalSpacing: 10) {
       ForEach(rows, id: \.self) { rr in

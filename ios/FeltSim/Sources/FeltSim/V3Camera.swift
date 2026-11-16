@@ -144,6 +144,38 @@ public enum V3 {
   public static func table(_ C: Cam, _ box: Box, _ sx: Double, _ sy: Double, _ R: Double) -> [Double] { unproj(C, box, sx, sy, R) ?? [-10, -10] }
   /* V3.k: the input's scale (tap reach, grab radius), CSS px per metre at the pivot (px, py) */
   public static func k(_ C: Cam, _ px: Double, _ py: Double, _ R: Double) -> Double { C.F / Swift.max(0.05, dot(sub([px, py, -R], C.Er), C.f)) }
+  /* pocketFrame in 3D (5c): where pocket k lies from the table's middle along the camera's own axes, metres (f ahead,
+     r to the right), so a pocket off the screen or behind the eye has its place too */
+  public static func pocketFrame(_ s: Sim, _ C: Cam, _ k: Int) -> (f: Double, r: Double)? {
+    guard k >= 0 && k < s.POCKET_AIM.count else { return nil }
+    let p = s.POCKET_AIM[k], fh = M.hypot(C.f[0], C.f[1]), rh = M.hypot(C.r[0], C.r[1]), fl = fh != 0 ? fh : 1, rl = rh != 0 ? rh : 1
+    let vx = p[0] - s.TL / 2, vy = p[1] - s.TW / 2
+    return ((vx * C.f[0] + vy * C.f[1]) / fl, (vx * C.r[0] + vy * C.r[1]) / rl)
+  }
+  /* pocketWords in 3D: "far left corner", "near side". The corners ranked, never two of a name: the two farthest are
+     far, of a pair the one more to the left left; the side pockets (opposite each other) by the axis they lie along */
+  public static func pocketWords(_ s: Sim, _ C: Cam, _ k: Int) -> String {
+    guard let q = pocketFrame(s, C, k) else { return "pocket" }
+    if k == 1 || k == 4 { return "\(abs(q.r) >= abs(q.f) ? (q.r >= 0 ? "right" : "left") : (q.f >= 0 ? "far" : "near")) side" }
+    let cs = s.POCKET_AIM.indices.filter { $0 != 1 && $0 != 4 }.compactMap { j in pocketFrame(s, C, j).map { (j: j, f: $0.f, r: $0.r) } }
+      .enumerated().sorted { $0.element.f != $1.element.f ? $0.element.f > $1.element.f : $0.offset < $1.offset }.map { $0.element }
+    let i = cs.firstIndex { $0.j == k } ?? 0, pair = i < 2 ? Array(cs.prefix(2)) : Array(cs.dropFirst(2)), o = pair.first { $0.j != k }
+    return "\(i < 2 ? "far" : "near") \(q.r <= (o?.r ?? q.r) ? "left" : "right") corner"
+  }
+  /* POCKET_RANK, pocketCell, pocketOrder: the pockets in reading order as the player sees them (the far corners left then
+     right, the sides, the near corners), each in its cell [row, column] of a 3 x 3 picture; top-down words read as far
+     and near */
+  public static let POCKET_RANK = ["far left corner", "far side", "far right corner", "left side", "right side", "near left corner", "near side", "near right corner"]
+  static let POCKET_CELL = [[0, 0], [0, 1], [0, 2], [1, 0], [1, 2], [2, 0], [2, 1], [2, 2]]
+  public static func pocketRank(_ words: String) -> Int {
+    var w = words
+    if w.hasPrefix("top") { w = "far" + w.dropFirst(3) } else if w.hasPrefix("bottom") { w = "near" + w.dropFirst(6) }
+    return POCKET_RANK.firstIndex(of: w) ?? -1
+  }
+  public static func pocketCell(_ words: String) -> [Int] { let r = pocketRank(words); return r >= 0 ? POCKET_CELL[r] : [1, 1] }
+  public static func pocketOrder(_ words: [String]) -> [Int] {
+    words.indices.sorted { a, b in let ra = pocketRank(words[a]), rb = pocketRank(words[b]); return ra != rb ? ra < rb : a < b }
+  }
 }
 
 /* 4o's overlays: the 2D view's strokes laid on the bed as ribbons (v3Line, v3Strip, v3Push, v3PathZ): each polyline at one
@@ -169,6 +201,37 @@ public struct V3Ribbons {
       push(A, Ap, B, -1, w, c); push(B, A, Bn, 1, w, c); push(B, A, Bn, -1, w, c)
     }
   }
+  /* v3Tri: a filled triangle at height z (width 0: the shader lays it as it is), a colour at each corner; none unless all
+     three are in front of the eye */
+  public mutating func tri(_ ps: [[Double]], _ cs: [[Double]], z: Double = 0.0012) {
+    let P = ps.map { [$0[0], $0[1], -z] }
+    if !P.allSatisfy({ depth($0) > 0 }) { return }
+    for i in 0..<3 { push(P[i], P[i], P[i], 0, 0, cs[i]) }
+  }
+  /* V3R.fill: a closed path of table points at height z as a fan from its middle, the colour per vertex (col: a flat
+     colour or a gradient's at that point; rings 4 for a gradient, so it is evaluated across the shape) */
+  public mutating func fill(_ pts: [[Double]], z: Double, rings: Int = 1, _ col: ([Double]) -> [Double]) {
+    if pts.count < 3 { return }
+    var mx = 0.0, my = 0.0
+    for p in pts { mx += p[0]; my += p[1] }
+    let m = [mx / Double(pts.count), my / Double(pts.count)]
+    func L(_ u: [Double], _ f: Double) -> [Double] { [m[0] + (u[0] - m[0]) * f, m[1] + (u[1] - m[1]) * f] }
+    for i in pts.indices {
+      let p = pts[i], q = pts[(i + 1) % pts.count]
+      for j in 0..<rings {
+        let f0 = Double(j) / Double(rings), f1 = Double(j + 1) / Double(rings), qd = [L(p, f0), L(q, f0), L(q, f1), L(p, f1)], cs = qd.map(col)
+        if j == 0 { tri([qd[0], qd[2], qd[3]], [cs[0], cs[2], cs[3]], z: z) }
+        else { tri([qd[0], qd[1], qd[2]], [cs[0], cs[1], cs[2]], z: z); tri([qd[0], qd[2], qd[3]], [cs[0], cs[2], cs[3]], z: z) }
+      }
+    }
+  }
+  /* V3R.arc's ring: as many points as keep each chord about V3_ARC_PX device px where the camera sees its near side
+     (scale: device px per CSS px) */
+  public func arc(_ x: Double, _ y: Double, _ rm: Double, scale: Double) -> [[Double]] {
+    let dd = V3.dot(V3.sub([x, y, 0], C.Er), C.f), n = Swift.max(8, Swift.min(720, Int((2 * Double.pi * rm * C.F * scale / Swift.max(V3.NEAR * 4, dd - rm) / V3Ribbons.ARC_PX).rounded(.up))))
+    return (0..<n).map { i in let a = Double(i) / Double(n) * 2 * Double.pi; return [x + rm * cos(a), y + rm * sin(a)] }
+  }
+  public static let ARC_PX = 2.5
   /* v3PathZ: a closed path round a pocket (or outside the bed) sits on the rail tops, the rest on the bed */
   public static func pathZ(_ s: Sim, _ pts: [[Double]], _ closed: Bool, topH: Double) -> Double {
     if !closed || pts.isEmpty { return 0.0012 }

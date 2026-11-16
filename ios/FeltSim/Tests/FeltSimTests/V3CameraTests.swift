@@ -55,4 +55,25 @@ private func ds(_ a: Any?) -> [Double]? { (a as? [Any])?.map { d($0) } }
       #expect(V3.table(C, box, box.width / 2, -1e4, R) == [-10, -10])
     }
   }
+  /* 5c's pocket words in 3D (pocketFrame, pocketWords) and the call menu's picture (pocketOrder, pocketCell) against the
+     page's own functions on every table, round the table from two pivots at a low and a high pitch */
+  @Test func pocketWords() throws {
+    let url = try #require(Bundle.module.url(forResource: "v3.json", withExtension: nil, subdirectory: "Fixtures"))
+    let fx = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    var n = 0, names = Set<String>()
+    for c in fx["cams"] as! [[String: Any]] {
+      let s = Sim()
+      s.setPockets(c["pockets"] as! String); s.setTable(c["table"] as! String, c["shape"] as? String)
+      let b = (c["box"] as! [NSNumber]).map { $0.doubleValue }, box = V3.Box(left: b[0], top: b[1], width: b[2], height: b[3])
+      for w in c["words"] as! [[String: Any]] {
+        let C = V3.pose(s, box, px: d(w["px"]), py: d(w["py"]), yaw: d(w["yaw"]), pitch: (w["pitch"] as! NSNumber).doubleValue, dist: 1.1)
+        let words = s.POCKET_AIM.indices.map { V3.pocketWords(s, C, $0) }
+        #expect(words == w["words"] as! [String], "\(c["table"]!) yaw \(d(w["yaw"])) pitch \(w["pitch"]!)")
+        #expect(V3.pocketOrder(words) == (w["order"] as! [NSNumber]).map { $0.intValue } && words.map(V3.pocketCell) == (w["cells"] as! [[NSNumber]]).map { $0.map { $0.intValue } })
+        if words.count == 6 { #expect(Set(words).count == 6, "two pockets of one name: \(words)") }
+        names.formUnion(words); n += 1
+      }
+    }
+    #expect(n == 512 && names.isSuperset(of: ["far left corner", "near right corner", "left side", "far side", "near side"]), "\(n) poses, \(names.sorted())")
+  }
 }

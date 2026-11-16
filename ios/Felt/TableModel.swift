@@ -711,6 +711,8 @@ final class TableModel {
   var v3Top2d = false
   /* v3Want: the view is wanted (the setting) and has a place (not a replay, not the lesson, not the roll top-down) */
   var v3Live: Bool { view3d && !v3Top2d && rp == nil && lesson == nil }
+  /* pocketWords in 3D: each pocket's words from the camera of the last frame drawn (Renderer3D sets them when they change) */
+  var v3Words: [String]? = nil
   @ObservationIgnored var onReport: ((Int, Int, Int, Bool) -> Void)?
   /* the handoff: the player the device is passed to (the breaker at a rack's start), until they are ready */
   var handoff: (p: Int, first: Bool)? = nil
@@ -1819,13 +1821,17 @@ final class TableModel {
   }
   func toggleSafety() { guard callOn else { return }; callSafe.toggle(); callPushOn = false }
   func togglePush() { guard pushOffer else { return }; callPushOn.toggle(); callSafe = false }
-  /* a pocket in words as the player sees the table (pocketWords, top-down): "top left corner", "right side" */
+  /* a pocket in words as the player sees the table (pocketWords): top-down from the screen, "top left corner", "right
+     side"; in 3D from the player's camera (pocketFrame), "far left corner", "near side" */
   func pocketWords(_ k: Int, upright: Bool) -> String {
+    if v3Live, let w = v3Words, w.count == sim.POCKET_AIM.count { return w[k] }
     let p = sim.POCKET_AIM[k]
     let f = upright ? p[0] - sim.TL / 2 : sim.TW / 2 - p[1], r = upright ? p[1] - sim.TW / 2 : p[0] - sim.TL / 2
     let e = 0.01, v = f > e ? "top" : f < -e ? "bottom" : "", h = r < -e ? "left" : r > e ? "right" : ""
     return k == 1 || k == 4 ? "\(v.isEmpty ? h : v) side" : "\(v) \(h) corner"
   }
+  /* pocketCell: pocket k's cell [row, column] in a 3 x 3 picture of the table as the player sees it */
+  func pocketCell(_ k: Int, upright: Bool) -> [Int] { V3.pocketCell(pocketWords(k, upright: upright)) }
   func pocketShort(_ k: Int, upright: Bool) -> String {
     pocketWords(k, upright: upright).replacingOccurrences(of: " corner", with: "").split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
   }

@@ -2,7 +2,9 @@
    art laid on the bed and the tops, the faces and posts), and the page's programs in MSL: tex (the planes, the tops cut
    where the art's alpha is under 0.75), mesh (the faces unlit, the posts lit), shadow (drawCast's two pools on the bed)
    and ball (each ball ray-traced in a quad: its paint, caps and number, the lamp's diffuse and highlights, the cloth's
-   bounce, the rim). Not yet: the room, the cue, the overlays, the flashes, the loupe, the drops. */
+   bounce, the rim). Then the room (v3RoomTex: the wall, the floor, the neighbours' cards, the lamp), the cue, the
+   overlays (v3Overlays through Sink3D: the 2D code's paths as ribbons and fills at one height each), the hit flashes, the
+   loupe (v3Loupe) and the drops (v3Drops). */
 import FeltRender
 import FeltSim
 import MetalKit
@@ -190,6 +192,8 @@ struct BallU {
   var numTex: MTLTexture!
   var markTex: MTLTexture!
   let quad: [SIMD2<Float>] = [[-1, -1], [1, -1], [-1, 1], [1, 1]]
+  /* V3.geo.co: the cushions' depth the overview frames round the bed */
+  var geoCo: Double? = nil
   /* V3's seat and moves (v3Update, v3Go): the pivot and yaw, what the seat was set for, the overview and a move */
   var px = Double.nan, py = Double.nan, yaw = 0.0, seatSet = false, seatShot = -1.0, seatTurn = -1, seatPlan: Double? = nil
   var ovOn = false, ovYaw = 0.0, ov: (key: String, o: V3.Overview)? = nil, mv: (from: V3.Orbit, t0: Double, ms: Double)? = nil, rolled = false
@@ -236,7 +240,7 @@ struct BallU {
       var goal: V3.Orbit? = nil
       if ovOn {
         let key = "\(s.TL)|\(s.TW)|\(box.width)|\(box.height)|\(ovYaw)"
-        if ov?.key != key { ov = (key, V3.overview(s, box, ovYaw)) }
+        if ov?.key != key { ov = (key, V3.overview(s, box, ovYaw, co: geoCo ?? 0.05)) }
         goal = ov!.o.o
       }
       if let m = mv {
@@ -332,7 +336,7 @@ struct BallU {
     if let g = geo, g.key == key { return g }
     let G = V3Geo.build(s, look: TableLook.of(d))
     guard let tex = texture(G.image), let pb = device.makeBuffer(bytes: G.planes, length: G.planes.count * 4), let mb = device.makeBuffer(bytes: G.mesh.isEmpty ? [0] : G.mesh, length: max(4, G.mesh.count * 4)) else { return nil }
-    geo = (key, tex, pb, G.nBed, G.nTop, mb, G.nFaces, G.nPosts, G.bounce, G.outline)
+    geo = (key, tex, pb, G.nBed, G.nTop, mb, G.nFaces, G.nPosts, G.bounce, G.outline); geoCo = G.co
     return geo
   }
 
@@ -381,6 +385,9 @@ struct BallU {
     update(now)
     let C = pose(box, now)
     model.v3Cam = (C, box); model.v3K = V3.k(C, px, py, R)
+    /* pocketWords in 3D, from this camera: kept when they change, so the call's label and its menu follow the camera */
+    let pw = s.POCKET_AIM.indices.map { V3.pocketWords(s, C, $0) }
+    if model.v3Words != pw { model.v3Words = pw }
     let sc = Double(view.contentScaleFactor)
     /* the fine-aim loupe (v3Loupe): the same eye, looking at the ghost ball's middle, LOUPE_MAG times closer, rendered
        into a small target first (the room, the cue, the lamp and the flashes left out) */
@@ -550,10 +557,11 @@ struct BallU {
       e.setVertexBytes(&u, length: MemoryLayout<ShU>.stride, index: 1); e.setFragmentBytes(&u, length: MemoryLayout<ShU>.stride, index: 1)
       e.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
-    /* the overlays (the guide's strokes, premultiplied), laid on the bed */
+    /* the overlays (v3Overlays: the kitchen or the D, the halo, the hint, the solo marks, the call, the guide, ball in
+       hand's marks; premultiplied), each at one height on the bed or the rail tops */
     let m2 = Mapper(size: size, TL: s.TL, TW: s.TW)
     let sink = Sink3D(C, s: s, m: m2, scale: sc, topH: R * 1.42)
-    if model.rolling == nil { TableCanvas(model: model, look: Look.of(model.dress, game: model.game)).drawGuide(sink, m2) }
+    TableCanvas(model: model, look: Look.of(model.dress, game: model.game)).drawOverlays(sink, m2, balls: balls)
     if !sink.rib.v.isEmpty, let ob = device.makeBuffer(bytes: sink.rib.v, length: sink.rib.v.count * 4) {
       e.setRenderPipelineState(overP)
       var ou = OverU(M: M, VP: SIMD2<Float>(Float(vp.0 / 2), Float(vp.1 / 2)))

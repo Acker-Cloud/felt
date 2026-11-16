@@ -29,7 +29,9 @@ function v3Source() {
   return 'const LIFT_H = 0.045; const V3 = { box: null, geo: null }; let settings = { viewPitch: 24, viewDist: 1.1 }; const reducedMotion = () => true;\n' +
     line('const V3_PITCH = ') + line('const V3_PITCH_PX = ') + line('const V3_GHOST_A = ') + line('const V3_ROOM_R = ') +
     cut('const v3Sub = (a, b)', 'function v3Layout()') + cut('function v3Mats(', '/* the overview for this box') + cut('/* the camera\'s pose:', '/* a move to the overview') +
-    cut('function v3Proj(', '/* once a frame (frameBody)');
+    cut('function v3Proj(', '/* once a frame (frameBody)') +
+    /* 5c's pocket words, the 3D view's from the camera's axes (pocketFrame), and the picture's order and cells */
+    cut('/* where pocket k lies from the table', 'const callName = ');
 }
 /* 4m's recorded roll (heroRunStart, heroSample) with 4b's rotate and artTilt, the page's own source */
 function heroSource() {
@@ -73,7 +75,7 @@ function loadFd() {
   const ctx = vm.createContext({});
   ctx.__fd = F.fdMath(vm.runInContext('Math', ctx));
   const names = ['setTable', 'setPockets', 'rack', 'snookerRack', 'newBall', 'newTable', 'strike', 'stepTable', 'resultOf', 'spinOf',
-    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf', 'newPractice', 'practiceJudge', 'scatter', 'addBall', 'removeBall', 'rng', 'canDrop', 'onTable', 'TRICKS', 'trickJudge', 'trickPoints', 'trickSol', 'trickGame', 'programMax', 'TRICK_VAL', 'trickPts', 'trickScoreFromStars', 'trickStars', 'newBall', 'shotMoments', 'concedeSnooker', 'suggestAim', 'DRILL_LIB', 'drillRun', 'drillShot', 'drillTier', 'drillTotal', 'drillJudge', 'drillBalls', 'drillOver', 'TUTORIALS', 'tutGame', 'tutJudge', 'tutNum', 'tutSol'];
+    'caromGame', 'snookerGame', 'snkFreeBalls', 'D_R', 'cpuShot', 'cpuOption', 'newGame', 'judge', 'chooseOption', 'callNeed', 'legalTargets', 'canPlace', 'placeCue', 'simulateShot', 'makeRules', 'POCKET_AIM', 'aimTrace', 'previewStart', 'previewRun', 'PV_FULL', 'PV_SHORT', 'PV_CAROM', 'setGame', 'TL', 'TW', 'HEAD_X', 'FOOT', 'BALL_R', 'CUSH', 'POCKETS', 'POCKET_R', 'POCKET_AIM', 'JAW_ARCS', 'CUSHION_POLYS', 'SPOTS', 'D_R', 'BUMPERS', 'bumperRack', 'bumperFree', 'bumperStrikers', 'Career', 'tourneyNew', 'tSettle', 'tMine', 'tCtx', 'tTpl', 'cpuProfile', '__trace', 'V3', 'settings', 'v3Mats', 'v3Pose', 'v3Proj', 'v3Unproj', 'v3Overview', 'v3OrbitOf', 'v3EyeOf', 'v3Lerp', 'pocketWords', 'pocketOrder', 'pocketCell', 'heroRunStart', 'heroSample', 'heroSetup', 'heroKey', 'resultOf', 'newPractice', 'practiceJudge', 'scatter', 'addBall', 'removeBall', 'rng', 'canDrop', 'onTable', 'TRICKS', 'trickJudge', 'trickPoints', 'trickSol', 'trickGame', 'programMax', 'TRICK_VAL', 'trickPts', 'trickScoreFromStars', 'trickStars', 'newBall', 'shotMoments', 'concedeSnooker', 'suggestAim', 'DRILL_LIB', 'drillRun', 'drillShot', 'drillTier', 'drillTotal', 'drillJudge', 'drillBalls', 'drillOver', 'TUTORIALS', 'tutGame', 'tutJudge', 'tutNum', 'tutSol'];
   src += '\n;function setGame(g) { game = g; }';
   const exp = names.map(n => `get ${n}() { return typeof ${n} === 'undefined' ? undefined : ${n}; }`).join(',');
   vm.runInContext(`globalThis.__sim = (function () { 'use strict'; const Math = globalThis.__fd; const { Object, JSON, Number, Array } = globalThis;\n${src}\n;return { ${exp} }; })();`, ctx);
@@ -683,7 +685,17 @@ ${D.NAT.map(n => `    (${q(n.id)}, ${q(n.name)}, ${q(n.first)}, ${q(n.last)}, ${
             orbit: [...arr(o.T), bits(o.yaw), bits(o.pitch), bits(o.dist)], eye: [...arr(e.E), ...arr(e.T)], lerp: [...arr(l.T), bits(l.yaw), bits(l.pitch), bits(l.dist)] });
         }
         const ovs = [0, 1.2, -2.6].map(y => { const o = S.v3Overview(y); return { yaw0: bits(y), T: arr(o.T), yaw: bits(o.yaw), pitch: bits(o.pitch), dist: bits(o.dist), fill: bits(o.fill), ok: o.ok }; });
-        v3cams.push({ table: T[0], shape: T[1], pockets: T[2], box: [box.left, box.top, box.width, box.height], poses, ovs });
+        /* 5c's pocket words in 3D (pocketFrame: the camera's axes), the picture's order and cells, round the table: sixteen
+           aims from two pivots at a low and a high pitch (the pocket tables: carom has none, bumper pool calls nothing) */
+        const words = [];
+        if (S.POCKET_AIM.length >= 6) for (const [px, py] of [[S.TL * 0.3, S.TW * 0.45], [S.TL * 0.7, S.TW * 0.8]]) for (const pitch of [8, 56]) for (let i = 0; i < 16; i++) {
+          const yaw = -Math.PI + i * Math.PI / 8 + 0.01;
+          Object.assign(S.V3, { px, py, yaw, mv: null, ovOn: false }); S.settings.viewPitch = pitch; S.settings.viewDist = 1.1;
+          Object.assign(S.V3, { live: true, cam: S.v3Pose(0) });
+          words.push({ px: bits(px), py: bits(py), yaw: bits(yaw), pitch, words: S.POCKET_AIM.map((_, k) => S.pocketWords(k)), order: S.pocketOrder(), cells: S.POCKET_AIM.map((_, k) => S.pocketCell(k)) });
+          Object.assign(S.V3, { live: false, cam: null });
+        }
+        v3cams.push({ table: T[0], shape: T[1], pockets: T[2], box: [box.left, box.top, box.width, box.height], poses, ovs, words });
       }
     }
   }

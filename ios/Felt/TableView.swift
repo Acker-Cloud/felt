@@ -181,13 +181,16 @@ struct TableCanvas: View {
         }
       }
       ctx.scaleBy(x: sc, y: sc)
-      drawHandZone(&ctx, m)
-      drawHint(&ctx, m)
-      drawGuide(&ctx, m)
-      drawSolo(&ctx, m)
+      let pen = Sink2D(ctx: ctx, m: m)
+      drawHandZone(pen, m)
+      drawHint(pen, m)
+      drawGuide(pen, m)
+      drawSolo(pen, m)
       defer { drawLoupe(&ctx, m, bp) }
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       drawPots(&ctx, m, bp, rb, sc)
+      /* the game ball's halo, under the balls */
+      if let gb = gameBall { for b in list where b.n == gb { drawHalo(pen, m.pt(b.x, b.y), s.BALL_R * m.k) } }
       for b in list {
         let p = m.pt(b.x, b.y), z = b.z ?? 0, air = z > 0 ? 0.6 / (0.6 - min(z, 0.3)) : 1, grow = b.n == model.cueN && sh > 0 ? 1 + TableModel.LIFT_GROW * sh : 1
         let (img, x, y) = model.ballImage(bp, b.n, Double(p.x) * sc, Double(p.y) * sc, rb * air * grow)
@@ -203,7 +206,7 @@ struct TableCanvas: View {
          while zoomed (potTick: cam.z > 1.02) */
       if m.z <= 1.02 { drawPotRail(&ctx, base, bp) }
       drawRail(&ctx, base, bp)
-      drawCall(&ctx, m)
+      drawCall(Sink2D(ctx: ctx, m: m), m)
       ctx.scaleBy(x: 1 / sc, y: 1 / sc)
       /* the cue (4f): pulled back by power while aiming, driven through during the stroke, carried a
          few centimetres on and faded as the shot starts */
@@ -232,11 +235,11 @@ struct TableCanvas: View {
      contact is legal, and only the cue ball's pot is not. */
   /* drawSolo: a trick shot's marks, the cue ball's target ring (filled faintly, a dashed edge) and the pocket the goal names
      (a gold ring) */
-  private func drawSolo(_ ctx: inout GraphicsContext, _ m: Mapper) {
+  func drawSolo(_ pen: OverlayPen, _ m: Mapper) {
+    defer { pen.alpha = 1 }
     /* the lesson's step 1: a gold ring round the 1 */
     if let L = model.lesson, L.step == 1, !model.lessonDone, let b = model.g?.balls.first(where: { $0.n == 1 && $0.on }) {
-      let c = m.pt(b.x, b.y), rad = model.sim.BALL_R * m.k + 10
-      ctx.stroke(Path(ellipseIn: CGRect(x: c.x - rad, y: c.y - rad, width: 2 * rad, height: 2 * rad)), with: .color(Color(rgb: 0xf2, 0xc9, 0x4c)), lineWidth: 2.5)
+      pen.circle(m.pt(b.x, b.y), model.sim.BALL_R * m.k + 10, Color(rgb: 0xf2, 0xc9, 0x4c), 2.5, dash: [])
     }
     /* #coachRing: what the coach rings (tutMarks): a ball, a pocket, a colour's spot, the rail's mark, the D */
     if let r = model.tutRing, r.kind != "none", let gm = model.g {
@@ -248,44 +251,40 @@ struct TableCanvas: View {
       case "spot": if let p = s.SPOTS[r.n] { c = m.pt(p[0], p[1]); rad = s.BALL_R * k + 12 }
       case "rail": if let q = model.tutRail() { c = m.pt(q[0], q[1]); rad = 16 }
       case "d":
-        var p = Path()
-        for i in 0...24 { let a = Double.pi / 2 + Double(i) / 24 * Double.pi, q = m.pt(s.HEAD_X + (s.D_R + s.BALL_R) * cos(a), s.TW / 2 + (s.D_R + s.BALL_R) * sin(a)); i == 0 ? p.move(to: q) : p.addLine(to: q) }
-        p.closeSubpath()
-        ctx.stroke(p, with: .color(.white.opacity(0.9)), lineWidth: 2.5)
+        let pts = (0...24).map { i -> CGPoint in let a = Double.pi / 2 + Double(i) / 24 * Double.pi; return m.pt(s.HEAD_X + (s.D_R + s.BALL_R) * cos(a), s.TW / 2 + (s.D_R + s.BALL_R) * sin(a)) }
+        pen.stroke(pts, closed: true, .white.opacity(0.9), 2.5, dash: [], round: false)
       default: break
       }
-      if let c { let box = CGRect(x: c.x - rad, y: c.y - rad, width: 2 * rad, height: 2 * rad); ctx.stroke(Path(ellipseIn: box), with: .color(.white.opacity(0.9)), lineWidth: 2.5) }
+      if let c { pen.circle(c, rad, .white.opacity(0.9), 2.5, dash: []) }
     }
     /* drawDrill: the ring (its full-marks edge, and faint where it scores nothing), the line, the break's box, the pocket */
     if let gm = model.g, gm.mode == "drill", let S = model.drill?.S {
-      let dash = StrokeStyle(lineWidth: 2, dash: [6, 5]), W = Color.white.opacity(0.85), R = model.sim.BALL_R
+      let dash: [CGFloat] = [6, 5], W = Color.white.opacity(0.85), R = model.sim.BALL_R
       if let z = S.zone {
         let p = m.pt(z.at[0], z.at[1]), r = (z.full + R) * m.k, r0 = (z.zero + R) * m.k
-        let box = CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)
-        ctx.fill(Path(ellipseIn: box), with: .color(.white.opacity(0.08)))
-        ctx.stroke(Path(ellipseIn: box), with: .color(W), style: dash)
-        var c = ctx; c.opacity = 0.3; c.stroke(Path(ellipseIn: CGRect(x: p.x - r0, y: p.y - r0, width: 2 * r0, height: 2 * r0)), with: .color(W), style: dash)
+        pen.fillCircle(p, r, .white.opacity(0.08))
+        pen.circle(p, r, W, 2, dash: dash)
+        pen.alpha = 0.3; pen.circle(p, r0, W, 2, dash: dash); pen.alpha = 1
       }
-      if let L = S.line { var p = Path(); p.move(to: m.pt(L.x, 0)); p.addLine(to: m.pt(L.x, model.sim.TW)); ctx.stroke(p, with: .color(W), style: dash) }
-      if let B = S.box { var p = Path(); p.move(to: m.pt(B[0], B[1])); p.addLine(to: m.pt(B[2], B[1])); p.addLine(to: m.pt(B[2], B[3])); p.addLine(to: m.pt(B[0], B[3])); p.closeSubpath(); ctx.stroke(p, with: .color(W), style: dash) }
+      if let L = S.line { pen.stroke([m.pt(L.x, 0), m.pt(L.x, model.sim.TW)], closed: false, W, 2, dash: dash, round: false) }
+      if let B = S.box { pen.stroke([m.pt(B[0], B[1]), m.pt(B[2], B[1]), m.pt(B[2], B[3]), m.pt(B[0], B[3])], closed: true, W, 2, dash: dash, round: false) }
       if let k = S.pocket, k < model.sim.POCKETS.count {
-        let P = model.sim.POCKETS[k], p = m.pt(P[0], P[1]), r = model.sim.POCKET_R[k] * m.k + 5
-        ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(Color(rgb: 0xf2, 0xc9, 0x4c)), lineWidth: 2.5)
+        let P = model.sim.POCKETS[k]
+        pen.circle(m.pt(P[0], P[1]), model.sim.POCKET_R[k] * m.k + 5, Color(rgb: 0xf2, 0xc9, 0x4c), 2.5, dash: [])
       }
       return
     }
     guard let gm = model.g, gm.mode == "trick", let id = gm.trick, let c = trickById(id), c.zoneR != nil || c.pocket != nil else { return }
     if let r0 = c.zoneR, let z = model.engine.trickPoints(c)[-1] {
-      let p = m.pt(z[0], z[1]), r = r0 * m.k, box = CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)
-      ctx.fill(Path(ellipseIn: box), with: .color(.white.opacity(0.08)))
-      ctx.stroke(Path(ellipseIn: box), with: .color(.white.opacity(0.85)), style: StrokeStyle(lineWidth: 2, dash: [6, 5]))
+      let p = m.pt(z[0], z[1]), r = r0 * m.k
+      pen.fillCircle(p, r, .white.opacity(0.08))
+      pen.circle(p, r, .white.opacity(0.85), 2, dash: [6, 5])
     }
     if let k = c.pocket, k < model.sim.POCKETS.count {
-      let P = model.sim.POCKETS[k], p = m.pt(P[0], P[1]), r = model.sim.POCKET_R[k] * m.k + 5
-      ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(Color(rgb: 0xf2, 0xc9, 0x4c)), lineWidth: 2.5)
+      let P = model.sim.POCKETS[k]
+      pen.circle(m.pt(P[0], P[1]), model.sim.POCKET_R[k] * m.k + 5, Color(rgb: 0xf2, 0xc9, 0x4c), 2.5, dash: [])
     }
   }
-  private func drawGuide(_ ctx: inout GraphicsContext, _ m: Mapper) { drawGuide(Sink2D(ctx: ctx, m: m), m) }
   /* drawHeld: a held pointer aim (5 input): a small padlock up and to the side of the ghost ball (or, with the guide off,
      a little way along the line from the cue ball), white over a near-black edge so it keeps 3:1 on any cloth; beside
      the line, on its upper side on screen, never over the ghost itself */
@@ -310,46 +309,62 @@ struct TableCanvas: View {
     ctx.fill(Path(roundedRect: CGRect(x: x - 5.5, y: y - 1, width: 11, height: 8), cornerRadius: 1.75, style: .circular), with: .color(.white))
     ctx.fill(Path(ellipseIn: CGRect(x: x - 1.3, y: y + 2.6 - 1.3, width: 2.6, height: 2.6)), with: .color(.black.opacity(0.75)))
   }
+  /* gameBall: the game ball (the 8 in 8-ball, the 9 in 9-ball), none at 14.1 and rotation */
+  private var gameBall: Int? {
+    guard let gm = model.g, gm.kind != "straight" && gm.kind != "rotation" else { return nil }
+    return model.engine.gameBallOf(gm) ?? 8
+  }
+  /* drawHalo: the game ball's thin soft halo on the cloth, under its edge: a pale gold core in a faint glow (a ring round
+     the ball, so it rolls with nothing); c and rp in CSS pt */
+  func drawHalo(_ pen: OverlayPen, _ c: CGPoint, _ rp: Double) {
+    let w = max(1.25, rp * 0.075), R = rp + w * 0.75
+    pen.circle(c, R + w * 0.6, Color(red: 1, green: 222 / 255, blue: 140 / 255).opacity(0.22), w * 3, dash: [])
+    pen.circle(c, R, Color(red: 1, green: 236 / 255, blue: 190 / 255).opacity(0.95), w, dash: [])
+  }
+  /* v3Overlays: the overlays of a 3D frame in draw()'s order, through the recorder (each path a ribbon at one height,
+     v3PathZ): the kitchen or the D, the game ball's halo, the hint, the solo marks, the call, the guide, ball in hand's marks */
+  func drawOverlays(_ sink: Sink3D, _ m: Mapper, balls: [Ball]) {
+    drawHandZone(sink, m)
+    if let gb = gameBall { for b in balls where b.on && b.n == gb { drawHalo(sink, m.pt(b.x, b.y), model.sim.BALL_R * m.k) } }
+    drawHint(sink, m); drawSolo(sink, m); drawCall(sink, m)
+    if model.rolling == nil { drawGuide(sink, m) }
+    drawPlaceMarks(sink, m)
+  }
   /* drawHint: auto aim's suggestion, a ring breathing round its ball (HINT_PULSE 2.4 s, faded in over HINT_FADE 300 ms)
      and a chevron on the cloth a few cm inside the pocket's mouth, its point toward the drop; a call on the table stands
      in for it */
-  private func drawHint(_ ctx: inout GraphicsContext, _ m: Mapper) {
+  func drawHint(_ pen: OverlayPen, _ m: Mapper) {
     guard let h = model.hint, model.rolling == nil, model.stroke == nil, !model.cpuTurn, model.rp == nil, model.humanCall()?.ball == nil,
           let b = model.balls.first(where: { $0.n == h.n && $0.on }) else { return }
     let s = model.sim, t = (model.now - model.hintT) * 1000, still = model.reduceMotion
     let fade = min(1, max(0, t / 300)), breath = still ? 0 : 0.5 - 0.5 * cos(t / 2400 * 2 * Double.pi)
     let p = m.pt(b.x, b.y), rp = s.BALL_R * m.k, w = max(1.5, rp * 0.08), R = rp + 3.5 + 1.5 * breath
-    var g = ctx
-    g.opacity = fade
-    let ring = Path(ellipseIn: CGRect(x: p.x - R, y: p.y - R, width: 2 * R, height: 2 * R))
-    g.stroke(ring, with: .color(.white.opacity(0.08 + 0.06 * breath)), lineWidth: w * 3)
-    g.stroke(ring, with: .color(.white.opacity(max(0.62 + 0.18 * breath, look.ovMin))), lineWidth: w)
+    pen.alpha = fade
+    defer { pen.alpha = 1 }
+    pen.circle(p, R, .white.opacity(0.08 + 0.06 * breath), w * 3, dash: [])
+    pen.circle(p, R, .white.opacity(max(0.62 + 0.18 * breath, look.ovMin)), w, dash: [])
     if h.k >= 0 && h.k < s.POCKET_AIM.count {
       let A = s.POCKET_AIM[h.k], N = s.CPU_MOUTH_N[h.k], d = 0.045, c = m.pt(A[0] + N[0] * d, A[1] + N[1] * d), tp = m.pt(A[0], A[1])
       let ux = Double(tp.x - c.x), uy = Double(tp.y - c.y), ul = max(1e-9, (ux * ux + uy * uy).squareRoot()), fx = ux / ul, fy = uy / ul
       let hh = max(5, 0.012 * m.k), sx = Double(c.x) + fx * hh * 0.5, sy = Double(c.y) + fy * hh * 0.5
-      var q = Path(); q.move(to: CGPoint(x: sx - fx * hh - fy * hh, y: sy - fy * hh + fx * hh)); q.addLine(to: CGPoint(x: sx, y: sy)); q.addLine(to: CGPoint(x: sx - fx * hh + fy * hh, y: sy - fy * hh - fx * hh))
-      g.stroke(q, with: .color(.white.opacity(0.1)), style: StrokeStyle(lineWidth: w * 3.2, lineCap: .round, lineJoin: .round))
-      g.stroke(q, with: .color(.white.opacity(max(0.7, look.ovMin))), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round))
+      let q = [CGPoint(x: sx - fx * hh - fy * hh, y: sy - fy * hh + fx * hh), CGPoint(x: sx, y: sy), CGPoint(x: sx - fx * hh + fy * hh, y: sy - fy * hh - fx * hh)]
+      pen.stroke(q, closed: false, .white.opacity(0.1), w * 3.2, dash: [], round: true)
+      pen.stroke(q, closed: false, .white.opacity(max(0.7, look.ovMin)), w, dash: [], round: true)
     }
   }
   /* the player's ball in hand: the turn is human, the shot not yet played, no replay */
   private var handOn: Bool { model.inHand && model.rolling == nil && model.stroke == nil && !model.cpuTurn && model.rp == nil }
   /* draw()'s kitchen (ball in hand behind the head string: a faint tint on the bed and the string) and drawD (the D) */
-  private func drawHandZone(_ ctx: inout GraphicsContext, _ m: Mapper) {
+  func drawHandZone(_ pen: OverlayPen, _ m: Mapper) {
     guard handOn, let gm = model.g else { return }
     let s = model.sim, w = Color.white.opacity(max(0.3, look.ovMin))
     if gm.inHand == "kitchen" {
-      var bed = Path(); bed.move(to: m.pt(0, 0)); bed.addLine(to: m.pt(s.HEAD_X, 0)); bed.addLine(to: m.pt(s.HEAD_X, s.TW)); bed.addLine(to: m.pt(0, s.TW)); bed.closeSubpath()
-      ctx.fill(bed, with: .color(Color(red: 1, green: 1, blue: 240 / 255).opacity(0.045)))
-      var p = Path(); p.move(to: m.pt(s.HEAD_X, 0)); p.addLine(to: m.pt(s.HEAD_X, s.TW))
-      ctx.stroke(p, with: .color(w), lineWidth: 1.5)
+      pen.fill([m.pt(0, 0), m.pt(s.HEAD_X, 0), m.pt(s.HEAD_X, s.TW), m.pt(0, s.TW)], Color(red: 1, green: 1, blue: 240 / 255).opacity(0.045))
+      pen.stroke([m.pt(s.HEAD_X, 0), m.pt(s.HEAD_X, s.TW)], closed: false, w, 1.5, dash: [], round: false)
     } else if gm.inHand == "D" {
-      var p = Path()
-      for i in 0...32 { let a = Double.pi / 2 + Double(i) / 32 * Double.pi, q = m.pt(s.HEAD_X + s.D_R * cos(a), s.TW / 2 + s.D_R * sin(a)); i == 0 ? p.move(to: q) : p.addLine(to: q) }
-      p.closeSubpath()
-      ctx.fill(p, with: .color(Color(red: 1, green: 1, blue: 240 / 255).opacity(0.06)))
-      ctx.stroke(p, with: .color(w), lineWidth: 1.5)
+      let pts = (0...32).map { i -> CGPoint in let a = Double.pi / 2 + Double(i) / 32 * Double.pi; return m.pt(s.HEAD_X + s.D_R * cos(a), s.TW / 2 + s.D_R * sin(a)) }
+      pen.fill(pts, Color(red: 1, green: 1, blue: 240 / 255).opacity(0.06))
+      pen.stroke(pts, closed: true, w, 1.5, dash: [], round: false)
     }
   }
   /* drawPlace: ball in hand, the whole turn: four chevrons that say the ball can be moved; while it is carried, the ghost
@@ -370,15 +385,20 @@ struct TableCanvas: View {
       let (img, x, y) = bp.ballImage(model.cueN, Double(p.x) * sc, Double(p.y) * sc, rp * sc * (1 + TableModel.LIFT_GROW * h), bp.axesOf(model.orient[model.cueN] ?? IDENT))
       g.draw(Image(decorative: img, scale: 1), in: CGRect(x: x, y: y, width: Double(img.width), height: Double(img.height)))
     }
-    if placing {
-      let r = rp * 1.4
-      ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(ok ? Color.white.opacity(0.75) : look.illegal), lineWidth: 1.5)
-    }
+    drawPlaceMarks(Sink2D(ctx: ctx, m: m), m)
+  }
+  /* drawPlace's marks (all the 3D view draws of it, noBall): while carried the ring that says whether the ball may stay
+     (white) or not (the illegal colour), and the four chevrons */
+  func drawPlaceMarks(_ pen: OverlayPen, _ m: Mapper) {
+    guard handOn, let c = model.cue else { return }
+    let placing = model.placeAt != nil, at = model.placeAt ?? (c.x, c.y)
+    let ok = !placing || model.g.map { model.engine.canPlace($0, at.0, at.1) } ?? true, p = m.pt(at.0, at.1), rp = model.sim.BALL_R * m.k
+    if placing { pen.circle(p, rp * 1.4, ok ? Color.white.opacity(0.75) : look.illegal, 1.5, dash: []) }
     let a = (placing ? 0.8 : 0.5) * (0.75 + 0.25 * sin(model.now * 1000 / 280)), d = rp * 2.1 + 3, w = 4.0
     for (ux, uy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
       let x = Double(p.x) + ux * d, y = Double(p.y) + uy * d
-      var q = Path(); q.move(to: CGPoint(x: x - ux * w + uy * w, y: y - uy * w - ux * w)); q.addLine(to: CGPoint(x: x, y: y)); q.addLine(to: CGPoint(x: x - ux * w - uy * w, y: y - uy * w + ux * w))
-      ctx.stroke(q, with: .color(Color.white.opacity(max(a, look.ovMin))), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+      pen.stroke([CGPoint(x: x - ux * w + uy * w, y: y - uy * w - ux * w), CGPoint(x: x, y: y), CGPoint(x: x - ux * w - uy * w, y: y - uy * w + ux * w)], closed: false,
+                 Color.white.opacity(max(a, look.ovMin)), 1.5, dash: [], round: true)
     }
   }
   func drawGuide(_ sink: GuideSink, _ m: Mapper) {
@@ -544,13 +564,14 @@ struct TableCanvas: View {
       t.draw(Image(decorative: img.image, scale: img.scale), in: CGRect(origin: .zero, size: img.size))
     }
     /* the balls near the contact */
-    let reach = L.r / M + 2 * rp
+    let reach = L.r / M + 2 * rp, gb = gameBall
     for b in model.balls where b.on {
       let p = m.pt(b.x, b.y)
       if JSMath.hypot(Double(p.x - C.x), Double(p.y - C.y)) > reach { continue }
       let q = at(b.x, b.y), X = Double(q.x) * sc, Y = Double(q.y) * sc, Rr = rp * M * sc
       var d = g; d.scaleBy(x: 1 / sc, y: 1 / sc)
       for (img, rect, a) in bp.castParts(b.x, b.y, X, Y, Rr, tl: s.TL, tw: s.TW, ballR: R, z: 0) { var cc = d; cc.opacity = a * st.a; cc.draw(Image(decorative: img, scale: 1), in: rect) }
+      if b.n == gb { drawHalo(Sink2D(ctx: g, m: m), q, rp * M) }
       let (img, ix, iy) = bp.ballImage(b.n, X, Y, Rr, bp.axesOf(model.orient[b.n] ?? IDENT))
       d.draw(Image(decorative: img, scale: 1), in: CGRect(x: ix, y: iy, width: Double(img.width), height: Double(img.height)))
     }
@@ -973,24 +994,33 @@ struct TableCanvas: View {
 
   /* 5c drawCall: the called ball (a ring) and pocket (a pulsing glow and a ring) until the shot: the player's call while
      aiming, the CPU's in its plan; an obvious (auto) call a little fainter */
-  private func drawCall(_ ctx: inout GraphicsContext, _ m: Mapper) {
+  func drawCall(_ pen: OverlayPen, _ m: Mapper) {
     guard let c = model.cpuTurn ? model.g?.call : model.humanCall(), let n = c.ball, model.rolling == nil else { return }
     let s = model.sim, rp0 = s.BALL_R * m.k, w = max(2, rp0 * 0.12), col = look.call
-    var g = ctx
-    g.opacity = c.auto ? 0.8 : 1
-    if let b = model.balls.first(where: { $0.n == n && $0.on }) {
-      let p = m.pt(b.x, b.y), r = rp0 + 2 + w / 2
-      g.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)), with: .color(col), lineWidth: w)
-    }
+    defer { pen.alpha = 1 }
+    pen.alpha = c.auto ? 0.8 : 1
+    if let b = model.balls.first(where: { $0.n == n && $0.on }) { pen.circle(m.pt(b.x, b.y), rp0 + 2 + w / 2, col, w, dash: []) }
     if let k = c.pocket, k < s.POCKETS.count {
       let P = s.POCKETS[k], p = m.pt(P[0], P[1]), r = s.POCKET_R[k] * m.k, pulse = 0.5 + 0.5 * sin(model.now * 1000 / 320)
-      var gl = ctx
-      gl.opacity = (c.auto ? 0.35 : 0.5) + 0.15 * pulse
-      gl.fill(Path(ellipseIn: CGRect(x: p.x - r * 1.9, y: p.y - r * 1.9, width: r * 3.8, height: r * 3.8)),
-              with: .radialGradient(Gradient(colors: [col, .clear]), center: p, startRadius: r * 0.4, endRadius: r * 1.9))
-      g.stroke(Path(ellipseIn: CGRect(x: p.x - r * 1.15, y: p.y - r * 1.15, width: r * 2.3, height: r * 2.3)), with: .color(col), lineWidth: w)
+      pen.alpha = (c.auto ? 0.35 : 0.5) + 0.15 * pulse
+      pen.glow(p, r * 0.4, r * 1.9, col)
+      pen.alpha = c.auto ? 0.8 : 1
+      pen.circle(p, r * 1.15, col, w, dash: [])
     }
   }
+}
+
+/* the overlays' pen: draw()'s calls in the view's CSS pt (the Mapper's), so one drawing serves the 2D canvas and the 3D
+   view's recorder (4o's V3R: each point back to table metres through the flat mapping, a stroke a ribbon of the same
+   width, a fill triangles, a gradient evaluated per vertex). alpha: the context's globalAlpha */
+protocol OverlayPen: AnyObject {
+  var alpha: Double { get set }
+  func stroke(_ pts: [CGPoint], closed: Bool, _ col: Color, _ w: Double, dash: [CGFloat], round: Bool)
+  func circle(_ c: CGPoint, _ r: Double, _ col: Color, _ w: Double, dash: [CGFloat])
+  func fill(_ pts: [CGPoint], _ col: Color)
+  func fillCircle(_ c: CGPoint, _ r: Double, _ col: Color)
+  /* a disc of radius r1 filled with a radial gradient, col at r0 to clear at r1 */
+  func glow(_ c: CGPoint, _ r0: Double, _ r1: Double, _ col: Color)
 }
 
 /* where the guide is drawn: the 2D canvas, or the 3D view's recorder (4o's V3R: the strokes laid on the bed as ribbons,
@@ -1000,11 +1030,30 @@ protocol GuideSink: AnyObject {
   func line(_ pts: [[Double]], _ col: Color, _ w: Double, _ dash: [CGFloat])
   func ring(_ x: Double, _ y: Double, _ r: Double, _ col: Color, _ w: Double, fill: Color?, ghost: Bool)
 }
-final class Sink2D: GuideSink {
+final class Sink2D: GuideSink, OverlayPen {
   var g: GraphicsContext
   let m: Mapper
   init(ctx: GraphicsContext, m: Mapper) { g = ctx; self.m = m }
   var ctx: GraphicsContext? { g }
+  var alpha = 1.0
+  private var pg: GraphicsContext { var c = g; if alpha != 1 { c.opacity = g.opacity * alpha }; return c }
+  private func path(_ pts: [CGPoint], _ closed: Bool) -> Path {
+    var p = Path(); for (i, q) in pts.enumerated() { i == 0 ? p.move(to: q) : p.addLine(to: q) }
+    if closed { p.closeSubpath() }
+    return p
+  }
+  private func disc(_ c: CGPoint, _ r: Double) -> Path { Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)) }
+  func stroke(_ pts: [CGPoint], closed: Bool, _ col: Color, _ w: Double, dash: [CGFloat], round: Bool) {
+    pg.stroke(path(pts, closed), with: .color(col), style: StrokeStyle(lineWidth: w, lineCap: round ? .round : .butt, lineJoin: round ? .round : .miter, dash: dash))
+  }
+  func circle(_ c: CGPoint, _ r: Double, _ col: Color, _ w: Double, dash: [CGFloat]) {
+    pg.stroke(disc(c, r), with: .color(col), style: StrokeStyle(lineWidth: w, dash: dash))
+  }
+  func fill(_ pts: [CGPoint], _ col: Color) { pg.fill(path(pts, true), with: .color(col)) }
+  func fillCircle(_ c: CGPoint, _ r: Double, _ col: Color) { pg.fill(disc(c, r), with: .color(col)) }
+  func glow(_ c: CGPoint, _ r0: Double, _ r1: Double, _ col: Color) {
+    pg.fill(disc(c, r1), with: .radialGradient(Gradient(colors: [col, .clear]), center: c, startRadius: r0, endRadius: r1))
+  }
   /* settings.hcAim (guideHC): every guide stroke at least 2.5 pt (1.8 times its width) over a near-black edge, its white
      opaque */
   let hc = Prefs.bool("hcAim", false)
@@ -1025,7 +1074,31 @@ final class Sink2D: GuideSink {
 /* hcStyle: a white overlay drawn opaque under high contrast */
 func hcStyle(_ c: Color, _ hc: Bool) -> Color { guard hc else { return c }; let v = rgbaOf(c); return v[0] > 0.99 && v[1] > 0.99 && v[2] > 0.99 ? .white : c }
 func rgbaOf(_ c: Color) -> [Double] { var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0; UIColor(c).getRed(&r, green: &g, blue: &b, alpha: &a); return [r, g, b, a].map { Double($0) } }
-final class Sink3D: GuideSink {
+final class Sink3D: GuideSink, OverlayPen {
+  var alpha = 1.0
+  /* V3R.tab: a CSS pt of the flat mapping back to table metres */
+  private func tab(_ p: CGPoint) -> [Double] { let q = m.table(p); return [q.0, q.1] }
+  private func rgba(_ col: Color) -> [Double] { var c = rgbaOf(col); c[3] *= alpha; return c }
+  private func ringPts(_ c: CGPoint, _ r: Double) -> [[Double]] { let q = tab(c); return rib.arc(q[0], q[1], r / m.k, scale: scale) }
+  /* V3R.stroke: a path of the same CSS width, dashed in metres as on screen, at its one height (v3PathZ) */
+  private func put(_ pts: [[Double]], _ closed: Bool, _ col: Color, _ w: Double, _ dash: [CGFloat]) {
+    let c = rgba(col)
+    if !(w > 0) || c[3] <= 0.002 { return }
+    rib.line(pts, w * scale, c, dash: dash.isEmpty ? nil : dash.map { Double($0) / m.k }, closed: closed, z: V3Ribbons.pathZ(s, pts, closed, topH: topH))
+  }
+  func stroke(_ pts: [CGPoint], closed: Bool, _ col: Color, _ w: Double, dash: [CGFloat], round: Bool) { put(pts.map(tab), closed, col, w, dash) }
+  func circle(_ c: CGPoint, _ r: Double, _ col: Color, _ w: Double, dash: [CGFloat]) { put(ringPts(c, r), true, col, w, dash) }
+  /* V3R.fill: triangles at the shape's height, a gradient evaluated at each vertex */
+  private func fillPts(_ pts: [[Double]], rings: Int, _ col: ([Double]) -> [Double]) { rib.fill(pts, z: V3Ribbons.pathZ(s, pts, true, topH: topH), rings: rings, col) }
+  func fill(_ pts: [CGPoint], _ col: Color) { let c = rgba(col); fillPts(pts.map(tab), rings: 1) { _ in c } }
+  func fillCircle(_ c: CGPoint, _ r: Double, _ col: Color) { let k = rgba(col); fillPts(ringPts(c, r), rings: 1) { _ in k } }
+  func glow(_ c: CGPoint, _ r0: Double, _ r1: Double, _ col: Color) {
+    let k = rgba(col), q = tab(c), a = r0 / m.k, b = r1 / m.k
+    fillPts(ringPts(c, r1), rings: 4) { p in
+      let t = Swift.min(1, Swift.max(0, (JSMath.hypot(p[0] - q[0], p[1] - q[1]) - a) / Swift.max(1e-9, b - a)))
+      return [k[0] * (1 - t), k[1] * (1 - t), k[2] * (1 - t), k[3] * (1 - t)]
+    }
+  }
   var rib: V3Ribbons
   let s: Sim, m: Mapper, C: V3.Cam, scale: Double, topH: Double
   var ghost: (x: Double, y: Double, col: [Double])? = nil
