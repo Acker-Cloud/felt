@@ -136,6 +136,7 @@ struct TableCanvas: View {
     Canvas { ctx, size in
       let dt0 = CACurrentMediaTime()
       defer { if TableModel.fpsOn { let d = CACurrentMediaTime() - dt0; if d > 0.1 { print(String(format: "felt-fps slow draw %.0f ms", d * 1000)) } } }
+      defer { if TableModel.aimBench || TableModel.touchBench { Bench.draw(CACurrentMediaTime() - dt0) } }
       _ = model.frame
       let s = model.sim, m = Mapper(size: size, TL: s.TL, TW: s.TW)
       /* the last baked table, even for another size while this one bakes (never a blank frame) */

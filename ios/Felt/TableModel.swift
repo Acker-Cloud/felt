@@ -1023,13 +1023,18 @@ final class TableModel {
   static let aimBench = ProcessInfo.processInfo.arguments.contains("-felt-aimbench")
   static let touchBench = ProcessInfo.processInfo.arguments.contains("-felt-touchbench") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-hand") || ProcessInfo.processInfo.arguments.contains("-felt-touchbench-slow")
   @ObservationIgnored private var bench: (t0: Double, prev: Double, n: Int, worst: Double)?
+  /* the display's frame interval, as the ticks measure it (1/60 until known) */
+  @ObservationIgnored private(set) var frameGap = 1.0 / 60
+  @ObservationIgnored private var tickPrev: TimeInterval?
   func tick(_ now: TimeInterval) {
+    if let p = tickPrev, now - p > 0.002, now - p < 0.05 { frameGap += (now - p - frameGap) * 0.1 }
+    tickPrev = now
     if (TableModel.aimBench || TableModel.touchBench) && rolling == nil && !cpuTurn && g?.winner == nil {
       if TableModel.aimBench { aim = AimFeel.wrap(aim + 0.004) }
       var b = bench ?? (now, now, 0, 0)
       b.n += 1; b.worst = max(b.worst, now - b.prev); b.prev = now
       if now - b.t0 >= 2 {
-        print(String(format: "felt-aimbench %.1f frames/s, worst gap %.1f ms, bodies %@", Double(b.n) / (now - b.t0), b.worst * 1000, Bench.bodies.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")))
+        print(String(format: "felt-aimbench %.1f frames/s, worst gap %.1f ms, %@, bodies %@", Double(b.n) / (now - b.t0), b.worst * 1000, Bench.drawWords(), Bench.bodies.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")))
         Bench.bodies = [:]; b = (now, now, 0, 0)
       }
       bench = b
@@ -1723,7 +1728,8 @@ final class TableModel {
         let P = sim.previewStart(balls, cueN: cueN, aim, pw, spin, h, lens, caromNeed: game == .carom ? (g?.need ?? 3) : 0)
         pvWork = PvWork(P: P, key: key, lay: lay, ang: aim, gx: c.x + dx * h.t, gy: c.y + dy * h.t, hk: h.kind, hb: h.ball?.n ?? -1)
       }
-      let W = pvWork!, ms = have ? TableModel.PV_BUDGET : TableModel.PV_SYNC
+      /* the budget is a share of the frame: 3 ms of a 60 Hz frame, so 1.5 ms of a 120 Hz one (ProMotion) */
+      let W = pvWork!, ms = have ? TableModel.PV_BUDGET * min(1, max(0.4, frameGap / (1.0 / 60))) : TableModel.PV_SYNC
       W.frames += 1
       sim.previewRun(W.P) { (CACurrentMediaTime() - t0) * 1000 > ms }
       if W.P.done { pvDone = W; pvWork = nil }
@@ -1739,4 +1745,16 @@ final class TableModel {
 }
 
 /* the aim bench: how many times each counted view's body ran (`-felt-aimbench`) */
-@MainActor enum Bench { static var bodies: [String: Int] = [:]; static func hit(_ k: String) { if TableModel.aimBench || TableModel.touchBench { bodies[k, default: 0] += 1 } } }
+@MainActor enum Bench {
+  static var bodies: [String: Int] = [:]
+  static func hit(_ k: String) { if TableModel.aimBench || TableModel.touchBench { bodies[k, default: 0] += 1 } }
+  /* the table canvas's draw times since the last print (seconds) */
+  static var draws: [Double] = []
+  static func draw(_ d: Double) { draws.append(d) }
+  static func drawWords() -> String {
+    guard !draws.isEmpty else { return "no draws" }
+    let s = draws.sorted(), mean = s.reduce(0, +) / Double(s.count)
+    defer { draws = [] }
+    return String(format: "draw mean %.2f ms, p95 %.2f ms, max %.2f ms", mean * 1000, s[Int(Double(s.count - 1) * 0.95)] * 1000, s.last! * 1000)
+  }
+}
