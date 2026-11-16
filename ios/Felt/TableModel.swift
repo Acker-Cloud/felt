@@ -728,6 +728,11 @@ final class TableModel {
   @ObservationIgnored var onReport: ((Int, Int, Int, Bool) -> Void)?
   /* the handoff: the player the device is passed to (the breaker at a rack's start), until they are ready */
   var handoff: (p: Int, first: Bool)? = nil
+  /* hoGo: Ready puts the device in the player's hands, and the status line says whose turn it is (aimHint) */
+  func handoffGo() {
+    handoff = nil
+    if let gm = g { msg = "\(Words.turnOf(gm.turn))." + (gm.inHand != nil ? " Drag the cue ball to move it." : "") }
+  }
   @ObservationIgnored private var cpuBusy = false
   private(set) var cpuThinking = false
   /* the CPU's shot found and its think time up (the page's cpuPlan): the 3D view cuts to it, the line and the cue show */

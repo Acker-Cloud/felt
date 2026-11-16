@@ -2003,7 +2003,7 @@ struct Handoff: View {
           }
         }
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(white: 0.11)))
-        Button { model.handoff = nil } label: { Text("\(Words.nameOf(p)): ready").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
+        Button { model.handoffGo() } label: { Text("\(Words.nameOf(p)): ready").font(.headline).frame(maxWidth: .infinity, minHeight: 50) }
           .background(Capsule().fill(.white)).foregroundStyle(.black).accessibilityIdentifier("handoff-ready")
       }
       .padding(24).frame(maxWidth: 400)
