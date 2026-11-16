@@ -120,4 +120,27 @@ public enum RailRow {
     }
     return nil
   }
+  /* placeRail's free and fitIn: the spans of gap g left after what is placed (used, [x0, x1]), and a pill w wide in it as
+     near its middle as they allow */
+  public static func free(_ g: [Double], _ used: [[Double]], gap: Double = GAP) -> [[Double]] {
+    used.reduce([g]) { f, u in f.flatMap { [[$0[0], Swift.min($0[1], u[0] - gap)], [Swift.max($0[0], u[1] + gap), $0[1]]] }.filter { $0[1] - $0[0] > 1 } }
+  }
+  public static func fitIn(_ g: [Double], _ w: Double, _ used: [[Double]]) -> Double? {
+    let c = (g[0] + g[1]) / 2
+    var best: Double? = nil
+    for f in free(g, used) where f[1] - f[0] >= w { let x = Swift.min(Swift.max(c, f[0] + w / 2), f[1] - w / 2); if best == nil || abs(x - c) < abs(best! - c) { best = x } }
+    return best
+  }
+  /* placeRail's row for a party (.many): the seats by group() (party), then the 3D switch (side(viewBtn, pw, false): pw
+     its glyph's width, nil when not shown) in the first gap from the left with room for its whole 44 px target, else for
+     its glyph, clear of the bottom rail's seats; no room: the switch gives way (STEPS' sw 0). The seats packed nowhere:
+     the score keeper keeps off the pockets alone (pockets: the bottom rail's gaps between them) and the switch gives way */
+  public static func many(_ ws: [Double], near: [[Double]], far: [[Double]]?, pockets: [[Double]], mid: Double, pw: Double?) -> (seats: [(x: Double, far: Bool)]?, sw: Double?) {
+    guard let pos = party(ws, near: near, far: far, mid: mid) else { return (party(ws, near: pockets, far: far, mid: mid), nil) }
+    var used: [[Double]] = []
+    for (i, q) in pos.enumerated() where !q.far { used.append([q.x - ws[i] / 2, q.x + ws[i] / 2]) }
+    guard let pw else { return (pos, nil) }
+    for g in near { for w in pw < 44 ? [44, pw] : [pw] { if let x = fitIn(g, w, used) { return (pos, x) } } }
+    return (pos, nil)
+  }
 }

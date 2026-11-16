@@ -77,6 +77,37 @@ import Testing
     #expect(RailRow.party([100, 100, 100], near: near, far: nil, mid: 196.5) == nil)
   }
 
+  /* the row of a party of three or four drawn (T7.158): each seat's centre and the 3D switch's, against placeRail's own
+     free, fitIn, pack, group and side run in node over its STEPS (the switch kept, then given way) and the score keeper's
+     fallback, on the same gaps and widths (px: a seat its glyphs, the .pb gaps, its padding and wOf's 1; the switch its
+     glyph and padding, wOf's 1) */
+  @Test func partyRow() {
+    let near = [[12, 70.5], [84.25, 180], [194, 300.75], [314.5, 381]], far = [[12, 70.5], [84.25, 186], [207, 300.75], [314.5, 381]], pk = [[12.0, 180], [194, 381]]
+    func row(_ ws: [Double], _ n: [[Double]], _ f: [[Double]]?, _ p: [[Double]], _ mid: Double, _ pw: Double?) -> ([Double], [Bool], Double?)? {
+      let r = RailRow.many(ws, near: n, far: f, pockets: p, mid: mid, pw: pw)
+      return r.seats.map { ($0.map(\.x), $0.map(\.far), r.sw) }
+    }
+    /* 9-ball ring at 393 wide: the shooter's ball to play (27), the others' pips (13); the switch's glyph 21 */
+    var r = row([27, 13, 13], near, far, pk, 196.5, 21)!
+    #expect(r.0 == [132.125, 237.875, 256.875] && r.1 == [false, false, false] && r.2 == 41.25)
+    r = row([27, 13, 13, 13], near, far, pk, 196.5, 21)!
+    #expect(r.0 == [122.625, 148.625, 237.875, 256.875] && r.1 == [false, false, false, false] && r.2 == 41.25)
+    /* too many for the bottom rail: the last on the far rail, the switch beside the near ones */
+    r = row([60, 60, 60, 60], near, far, pk, 196.5, 21)!
+    #expect(r.0 == [132.125, 247.375, 347.75, 253.875] && r.1 == [false, false, false, true] && r.2 == 41.25)
+    r = row([50, 50, 50], [[10, 60], [70, 180], [190, 300]], nil, [[10, 180], [190, 300]], 155, 21)!
+    #expect(r.0 == [97, 153, 245] && r.2 == 35)
+    /* not shown (the lesson), or no room for it: the switch gives way, the seats stay */
+    r = row([27, 13, 13], near, nil, pk, 196.5, nil)!
+    #expect(r.0 == [132.125, 237.875, 256.875] && r.2 == nil)
+    r = row([55, 55, 55], [[0, 15], [25, 205]], nil, [[0, 205]], 110, 21)!
+    #expect(r.0 == [54, 115, 176] && r.2 == nil)
+    /* no room even so: the pockets' gaps alone, no switch */
+    r = row([60, 60, 60], [[0, 100], [110, 200]], nil, [[0, 200]], 100, 21)!
+    #expect(r.0 == [34, 100, 166] && r.2 == nil)
+    #expect(row([100, 100, 100, 100], near, far, pk, 196.5, 21) == nil)
+  }
+
   @Test func potted() {
     #expect(SeatWords.potted([]) == "")
     #expect(SeatWords.potted([1, 3, 9]) == "Potted: 1, 3, 9")

@@ -1019,7 +1019,8 @@ struct PopLayer: View {
      (never under 22 from the stage's foot), in 3D the row pinned 26 up; none when the row is not drawn */
   func railTop() -> CGFloat {
     let st = model.stageUI, s = model.sim
-    guard let g = model.g, g.winner == nil, (model.party?.names.count ?? 2) <= 2, st.height > 0 else { return .infinity }
+    /* drawRail's row: two seats, or a party's every seat (chipCount) */
+    guard let g = model.g, g.winner == nil, SeatWords.seats(party: model.party?.names.count, mode: g.mode) > 2 || (model.party?.names.count ?? 2) <= 2, st.height > 0 else { return .infinity }
     if model.view3d && !model.v3Top2d { return st.minY + st.height - 26 - 22 }
     let m = Mapper(size: st.size, TL: s.TL, TW: s.TW), band = model.potGeometry(m).railBand, mid = -(band.co + band.rail) / 2
     let p = m.upright ? m.pt(mid, s.TW / 2) : m.pt(s.TL / 2, s.TW - mid)

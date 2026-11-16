@@ -664,8 +664,8 @@ struct TableCanvas: View {
   /* row: the 3D view's (placeRail when V3.live): the stage's bottom row (V3_PIN_B up from its foot), its gaps the stage's
      width less every pocket (hole, jaws) and sight as the camera projects them */
   func drawRail(_ ctx: inout GraphicsContext, _ m: Mapper, _ bp: BallPainter, row: (y: Double, width: Double, C: V3.Cam, box: V3.Box)? = nil) {
-    /* a party of three or four (chipCount, .many): a seat per player in turn order, for VoiceOver only; the cards in the
-       pause menu and the handoff carry the scores (the rail's .many inlays are not drawn yet) */
+    /* a party of three or four (chipCount, .many): a seat per player in turn order, each inlaid like the two-player
+       seats (the shooter lit, the others dimmed), the race left to the pause menu */
     let nSeats = model.g.map { SeatWords.seats(party: model.party?.names.count, mode: $0.mode) } ?? 2, many = nSeats > 2
     guard let g = model.g, g.winner == nil, many || (model.party?.names.count ?? 2) <= 2 else { if !model.railAX.isEmpty { model.railAX = [] }; return }
     let s = model.sim, T = model.potGeometry(m), band = T.railBand
@@ -791,30 +791,35 @@ struct TableCanvas: View {
       seatItems[p] = items
       seatW[p] = items.map { it -> Double in it.kind == "num" || it.kind == "of" ? Double(ctx.resolve(Text(it.text).font(font)).measure(in: CGSize(width: 200, height: 100)).width) : it.kind == "ball" ? ph : it.kind == "dot" ? Swift.min(10, ph - 3) : Swift.min(10, ph - 3) - 2 }
     }
-    let ig = many ? 3.0 : 4.0
-    func total(_ p: Int) -> Double { let w = seatW[p] ?? []; return w.reduce(0, +) + ig * Double(Swift.max(0, w.count - 1)) + 4 }
+    /* .many: the .pb's 2 px between glyphs, a number's 1 px margin and wOf's 1 (placeRail measures offsetWidth + 1) */
+    let ig = many ? 2.0 : 4.0
+    func total(_ p: Int) -> Double {
+      let w = seatW[p] ?? [], extra = many ? 1 + (seatItems[p]?.contains { $0.kind == "num" } == true ? 1 : 0) : 0.0
+      return w.reduce(0, +) + ig * Double(Swift.max(0, w.count - 1)) + 4 + extra
+    }
+    /* #viewBtn's glyph (--gl), shown in a game, never in the lesson */
+    let gl = Swift.min(16, ph + 1), swOn = model.lesson == nil
+    var seatPt: [Int: CGPoint] = [:], swX: Double? = nil, swSet = false
     if many {
       /* placeRail's group() (.many): the seats packed in turn order along the bottom rail's gaps, too many for it the
-         last ones along the far rail's (top-down); no room even so: the gaps between the pockets alone (the score keeper
-         never gives way). Each a group read from its words (seatWords), the ball to play on the shooter's */
+         last ones along the far rail's (top-down); then the 3D switch clear of them, or it gives way; no room even so:
+         the gaps between the pockets alone (the score keeper never gives way), no switch (RailRow.many) */
       let k = 1 / unit, ws = seatList.map { total($0) }, px = { (sp: [[Double]]) in sp.map { $0.map { $0 * k } } }
       let far = row != nil ? nil : px(cut(farHoles))
-      let place = RailRow.party(ws, near: px(spans), far: far, mid: rmid * k) ?? RailRow.party(ws, near: px(cut(pocketHoles)), far: far, mid: rmid * k)
-      var ax: [TableModel.SeatAX] = []
+      /* the switch's pill: its glyph, 2 px padding either side and wOf's 1 */
+      let place = RailRow.many(ws, near: px(spans), far: far, pockets: px(cut(pocketHoles)), mid: rmid * k, pw: swOn ? gl + 5 : nil)
       for (i, p) in seatList.enumerated() {
-        guard let q = place?[i] else { continue }
-        let u = q.x / k, c0 = q.far ? (m.upright ? m.pt(s.TL - mid, u) : m.pt(u, mid)) : at(u), w = Swift.max(44, ws[i])
-        let words = SeatWords.seat(g, p, name: Words.nameOf(p), next: p == g.turn ? next : nil, tally: model.rackTally(p))
-        ax.append(.init(id: "seat\(p)", rect: CGRect(x: c0.x - w / 2, y: c0.y - 22, width: w, height: 44), words: words))
+        guard let q = place.seats?[i] else { continue }
+        let u = q.x / k
+        seatPt[p] = q.far ? (m.upright ? m.pt(s.TL - mid, u) : m.pt(u, mid)) : at(u)
       }
-      if model.railAX != ax { model.railAX = ax }
-      return
+      swX = place.sw.map { $0 / k }; swSet = true
     }
     var seatX: [Int: Double] = [:]
-    for p in seatList {
+    if !many { for p in seatList {
       let w = total(p) * unit
-      if let x = seatAt(w, left: p == 0) { seatX[p] = x; used.append([x - w / 2, x + w / 2]) }
-    }
+      if let x = seatAt(w, left: p == 0) { seatX[p] = x; used.append([x - w / 2, x + w / 2]); seatPt[p] = at(x) }
+    } }
     /* snooker's scoreboard: the ball on (two with a free ball), the break while one runs; beside the shooter's seat */
     var snkDots: [Int] = [], snkX: Double? = nil
     let sdot = Swift.min(10, ph - 3)
@@ -848,10 +853,9 @@ struct TableCanvas: View {
     /* #viewBtn (v3Btn, placeRail's side(viewBtn, left)): the 3D switch, a cube inlaid in the rail, bright while 3D is on;
        shown in a game, never in the lesson */
     model.railSwitch = nil
-    if model.lesson == nil {
-      let gl = Swift.min(16, ph + 1)
-      var sx: Double? = nil
-      outer: for gp in spans { for w in [44.0, gl + 4] { if let x = fitIn(gp, w * unit) { sx = x; used.append([x - w * unit / 2, x + w * unit / 2]); break outer } } }
+    if swOn {
+      var sx: Double? = swX
+      if !swSet { outer: for gp in spans { for w in [44.0, gl + 4] { if let x = fitIn(gp, w * unit) { sx = x; used.append([x - w * unit / 2, x + w * unit / 2]); break outer } } } }
       if let x = sx {
         let c = at(x), on = model.view3d
         model.railSwitch = c
@@ -870,23 +874,23 @@ struct TableCanvas: View {
        a trick shot's "Try 3", a drill's "Shot 2 of 4") */
     var ax: [TableModel.SeatAX] = []
     for p in seatList {
-      guard let sx = seatX[p] else { continue }
-      let c0 = at(sx), w = Swift.max(44, total(p))
+      guard let c0 = seatPt[p] else { continue }
+      let w = Swift.max(44, total(p))
       let words = soloNum.map { g.mode == "trick" ? "Try \($0)" : "Shot \($0.replacingOccurrences(of: "/", with: " of "))" }
         ?? SeatWords.seat(g, p, name: Words.nameOf(p), next: p == g.turn ? next : nil, tally: model.rackTally(p))
       ax.append(.init(id: "seat\(p)", rect: CGRect(x: c0.x - w / 2, y: c0.y - 22, width: w, height: 44), words: words))
     }
     if model.railAX != ax { model.railAX = ax }
     for p in seatList {
-      guard let sx = seatX[p], let items = seatItems[p], let widths = seatW[p] else { continue }
+      guard let c0 = seatPt[p], let items = seatItems[p], let widths = seatW[p] else { continue }
       let lit = p == g.turn || soloNum != nil
-      let tot = total(p) - 4
-      let c0 = at(sx)
+      let tot = total(p) - 4 - (many ? 1 : 0)
       var g2 = ctx
       g2.opacity = lit ? 1 : 0.78
       if lit { g2.addFilter(.shadow(color: Color(.sRGB, red: 1, green: 236 / 255, blue: 190 / 255, opacity: 0.75), radius: 3)) }
       var x = Double(c0.x) - tot / 2
       for (i, it) in items.enumerated() {
+        if many && it.kind == "num" { x += 1 }   /* .num's margin-left */
         let w = widths[i], cx = x + w / 2, cy = Double(c0.y)
         switch it.kind {
         case "ball": drawNB(&g2, bp, it.n, CGPoint(x: cx, y: cy), ph, inset: 0.19)
