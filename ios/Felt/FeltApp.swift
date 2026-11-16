@@ -497,20 +497,6 @@ struct TableScreen: View {
       if ProcessInfo.processInfo.arguments.contains("-felt-edges") { Task { try? await Task.sleep(for: .seconds(1)); Chrome.printEdges() } }
     }
     .overlay { if let h = model.handoff, !model.paused { Handoff(model: model, p: h.p, first: h.first) } }
-    /* the exhibition's bar (#exBar, hudModes): the player to shoot by name (#exLab) and the speed (felt.speed), over the
-       table's top; gone once the game is over */
-    .overlay(alignment: .top) {
-      if model.exhib != nil && !model.paused, let gm = model.g, gm.winner == nil {
-        HStack(spacing: 6) {
-          Text(Words.nameOf(gm.turn)).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).lineLimit(1)
-            .padding(.leading, 10).padding(.trailing, 2).accessibilityIdentifier("exhibit-name")
-          Picker("Speed", selection: Binding(get: { model.speed }, set: { model.speed = $0 })) { Text("1x").tag(1.0); Text("2x").tag(2.0); Text("4x").tag(4.0) }
-            .pickerStyle(.segmented).frame(width: 180).accessibilityIdentifier("exhibit-speed")
-        }
-        .padding(4).background(.regularMaterial, in: Capsule()).padding(.top, 54)
-        .accessibilityElement(children: .contain).accessibilityLabel("Exhibition")
-      }
-    }
     /* the call's menu (#callBar, a .seg.pop.open: z-index 60) over every other table overlay: the strip and the rail row,
        the tools, the coach card, the callout, the replay pill, the elevation sheet; placed in the window by the bar's frame */
     .overlay { popLayer(call: true) }
@@ -679,6 +665,8 @@ struct TableScreen: View {
         .accessibilityIdentifier("table")
         /* the seats and the potted windows for VoiceOver, over the table element (never a touch's: no hit testing) */
         .overlay { RailAX(model: model) }
+        /* #exBar: over the table's foot, risen clear of the rail row (--rail-lift); it takes its own taps */
+        .overlay(alignment: .bottom) { ExBar(model: model).padding(.bottom, railLift(tg.size) + 6) }
       }
       .padding(.top, -ext.t).padding(.leading, -ext.l)
       Controls(model: model, upright: strip, big: F.big, col: F.col)
@@ -692,6 +680,17 @@ struct TableScreen: View {
     .coordinateSpace(.named(TableScreen.UI))
   }
   static let UI = "feltUI"
+  /* --rail-lift (placeRail): from the rail row's top (22 over its middle: top-down the bottom rail's wood band, never
+     under 22 from the stage's foot; in 3D the row pinned V3_PIN_B 26 up) to the stage's foot, and 2 */
+  private func railLift(_ size: CGSize) -> CGFloat {
+    let s = model.sim, H = size.height
+    var ty = H - 26
+    if !model.v3Live {
+      let m = Mapper(size: size, TL: s.TL, TW: s.TW), band = model.potGeometry(m).railBand, mid = -(band.co + band.rail) / 2
+      ty = min(m.upright ? m.pt(mid, s.TW / 2).y : m.pt(s.TL / 2, s.TW - mid).y, H - 22)
+    }
+    return max(0, (H - (ty - 22) + 2).rounded())
+  }
 
   private func lift(_ at: CGPoint, _ time: TimeInterval, _ size: CGSize) {
     let tt0 = CACurrentMediaTime()
@@ -1924,6 +1923,37 @@ struct RollText: View {
   var body: some View {
     let _ = NumRoll.text(key, text)
     TimelineView(.animation(minimumInterval: nil, paused: !NumRoll.live(key))) { _ in Text(NumRoll.text(key, text)) }
+  }
+}
+
+/* the exhibition's bar (#exBar, hudModes): the player to shoot by name (#exLab), Pause (#exPause: the pause menu) and
+   the speed (felt.speed: 1x, 2x, 4x, the one in use pressed); shown while the game is on and not paused */
+struct ExBar: View {
+  let model: TableModel
+  var body: some View {
+    if model.exhib != nil && !model.paused, let gm = model.g, gm.winner == nil {
+      HStack(spacing: 6) {
+        Text(Words.nameOf(gm.turn)).font(.system(size: 13)).foregroundStyle(Color(rgb: 0xa3, 0xa3, 0xaa)).lineLimit(1).monospacedDigit()
+          .padding(.leading, 10).padding(.trailing, 6).accessibilityIdentifier("exhibit-name")
+        button("Pause", on: false) { model.paused = true }.accessibilityLabel("Pause the exhibition").accessibilityIdentifier("exhibit-pause")
+        ForEach([1.0, 2.0, 4.0], id: \.self) { v in
+          button("\(Int(v))x", on: model.speed == v) { model.speed = v }.accessibilityIdentifier("exhibit-\(Int(v))x")
+        }
+      }
+      .padding(4)
+      .background(Capsule().fill(Color(.sRGB, red: 22 / 255, green: 22 / 255, blue: 24 / 255, opacity: 0.94)))
+      .overlay(Capsule().strokeBorder(Color(rgb: 0x3a, 0x3a, 0x41), lineWidth: 1))
+      .shadow(color: .black.opacity(0.45), radius: 12, y: 8)
+      .accessibilityElement(children: .contain).accessibilityLabel("Exhibition")
+    }
+  }
+  private func button(_ t: String, on: Bool, _ act: @escaping () -> Void) -> some View {
+    Button(action: act) {
+      Text(t).font(.system(size: 14, weight: .semibold)).padding(.horizontal, 12).frame(minWidth: 48, minHeight: 44)
+        .foregroundStyle(on ? Color(rgb: 0x14, 0x14, 0x14) : .white)
+        .background(Capsule().fill(on ? Color(rgb: 0xec, 0xe4, 0xd2) : .clear))
+    }
+    .buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
   }
 }
 
