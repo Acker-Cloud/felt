@@ -2409,8 +2409,13 @@ struct GameSetup: View {
   var kind: String { game.table.2 }
   var pool: Bool { ["8", "9", "10", "straight", "rotation"].contains(kind) }
   var body: some View {
+    /* the safe area read outside the sheet's own reader, which runs under the status bar and to the sides (ignoresSafeArea)
+       and so has none there: the page's --sat, --sal and --sar (the back button and the ball the status bar's room and
+       10 or 12 pt down, #setupSheet .hero .back) */
+    GeometryReader { o in
     GeometryReader { g in
-      let ins = g.safeAreaInsets, W = g.size.width, S = g.size.height, H = S + ins.bottom
+      let ins = EdgeInsets(top: o.safeAreaInsets.top, leading: o.safeAreaInsets.leading, bottom: g.safeAreaInsets.bottom, trailing: o.safeAreaInsets.trailing)
+      let W = g.size.width, S = g.size.height, H = S + ins.bottom
       /* a phone (max-width 600 or max-height 500) has the whole screen, on its side (max-height 500) the hero a 32% panel
          down the leading side and the form in two columns over Break; anything bigger a card of at most 480, 860 with
          two columns on a short wide window (min-width 700, max-height 620) */
@@ -2455,12 +2460,13 @@ struct GameSetup: View {
         try? await Task.sleep(for: .milliseconds(30))
         if Task.isCancelled { return }
         if !fits && fit < Self.FIT_STEPS { fit += 1 }
-        if Self.fitLog { print(String(format: "felt-setupfit %@ %.0fx%.0f fit %d content %.1f foot %.1f spare %.1f floor %.1f fits %d", side ? "side" : phone ? "phone" : "card", W, H, fit, content, footH, spare, floor, fits ? 1 : 0)); fflush(stdout) }
+        if Self.fitLog { print(String(format: "felt-setupfit %@ %.0fx%.0f fit %d content %.1f foot %.1f spare %.1f floor %.1f fits %d top %.0f lead %.0f", side ? "side" : phone ? "phone" : "card", W, H, fit, content, footH, spare, floor, fits ? 1 : 0, ins.top, ins.leading)); fflush(stdout) }
       }
       .onChange(of: fitKey(W, H)) { fit = 0 }
     }
     .background(Color.black)
     .ignoresSafeArea(edges: [.top, .horizontal])
+    }
     /* #tutOffer: the first Break of a game whose tutorial is neither done nor turned down */
     .sheet(isPresented: $offer) {
       let k = tutKind ?? "8"
