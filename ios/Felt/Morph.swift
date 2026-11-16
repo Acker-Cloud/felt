@@ -238,18 +238,23 @@ struct MorphFrame: View {
   }
 }
 
-/* the page's Back (morphClose): the bar's chevron, and a swipe in from the left edge (EDGE_PX) */
+/* the page's Back (morphClose): the bar's chevron, and a swipe in from the left edge (EDGE_PX); bar false: the page
+   draws its own (the game setup's, in its hero) and the bar is hidden */
 struct MorphBack: ViewModifier {
+  var bar = true
   let back: () -> Void
   func body(content: Content) -> some View {
     content
       .navigationBarBackButtonHidden(true)
       .toolbar {
-        ToolbarItem(placement: .topBarLeading) {
-          Button(action: back) { Image(systemName: "chevron.backward").font(.system(size: 17, weight: .semibold)) }
-            .accessibilityLabel("Back").accessibilityIdentifier("back")
+        if bar {
+          ToolbarItem(placement: .topBarLeading) {
+            Button(action: back) { Image(systemName: "chevron.backward").font(.system(size: 17, weight: .semibold)) }
+              .accessibilityLabel("Back").accessibilityIdentifier("back")
+          }
         }
       }
+      .toolbar(bar ? .automatic : .hidden, for: .navigationBar)
       .simultaneousGesture(DragGesture(minimumDistance: 16, coordinateSpace: .global).onEnded { v in
         if v.startLocation.x < MorphK.EDGE_PX, v.translation.width > 72, abs(v.translation.width) > abs(v.translation.height) * 1.5 { back() }
       })

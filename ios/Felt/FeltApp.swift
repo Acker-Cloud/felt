@@ -297,8 +297,9 @@ struct Home: View {
       }
       .navigationDestination(item: $statsPath) { k in if k == "all" { StatsView() } else { StatsKindPage(kind: k, rec: Rec.load()) } }
       .navigationDestination(item: $setupGame) { g in
-        GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) })
-          .modifier(MorphBack { mo.close("game-\(g.rawValue)", face(g)) { setupGame = nil } })
+        let back = { mo.close("game-\(g.rawValue)", face(g)) { setupGame = nil } }
+        GameSetup(game: g, go: { playing = g }, learn: { tutoring = PracticeGo(layout: $0) }, back: back)
+          .modifier(MorphBack(bar: false, back: back))
       }
       .navigationDestination(isPresented: $showTourney) { TourneyView(store: store) { store.markLive(); playingTourney = true } }
       .tint(.primary)
@@ -2335,6 +2336,8 @@ struct GameSetup: View {
   let go: () -> Void
   /* a tutorial for the game: the setup's link, and the offer on the first Break (maybeOfferTut) */
   var learn: ((String) -> Void)? = nil
+  /* #setupBack: the hero's own back button (in the card on a tablet, on the panel on its side, over the hero upright) */
+  var back: (() -> Void)? = nil
   @State private var offer = false
   var tutKind: String? { tutById(game.table.2) != nil ? game.table.2 : nil }
   @AppStorage("felt.opponent") private var opponent = "medium"
@@ -2487,6 +2490,18 @@ struct GameSetup: View {
         }
         .onGeometryChange(for: Double.self) { $0.size.height } action: { txtH = $0 }
         .padding(.leading, lead).padding(.trailing, 16).padding(.bottom, 8)
+      }
+      .overlay(alignment: .topLeading) {
+        /* #setupBack (.back): a 44 pt circle, #2c2c2e with a .5 pt light edge, chevron.left; the status bar's room and
+           10 pt down, at the words' leading inset */
+        if let back {
+          Button(action: back) {
+            Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white).frame(width: 44, height: 44)
+              .background(Circle().fill(Color(rgb: 0x2c, 0x2c, 0x2e))).overlay(Circle().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
+          }
+          .buttonStyle(.plain).padding(.top, top + 10).padding(.leading, lead)
+          .accessibilityLabel("Back to home").accessibilityIdentifier("back")
+        }
       }
       .overlay(alignment: .topTrailing) {
         /* #setupBall: the game's ball, 40 pt, top right of the hero */
