@@ -588,8 +588,8 @@ https://zacker3310.github.io/felt/. Check the live page with
 
 ## Method
 
-Builds follow `~/.claude/BUILD-METHODOLOGY.md` and the loop in
-`~/.claude/skills/build-loop/SKILL.md`. This file adds only project-specific deltas.
+Builds follow the method in `~/.claude/CLAUDE.md` (How I Build). This file adds only
+project-specific deltas.
 Where a rule here conflicts with the method, the stricter one wins.
 
 ---
